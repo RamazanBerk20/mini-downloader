@@ -78,7 +78,7 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: "Mini Downloader ${{ github.ref_name }}"
-          releaseDraft: true
+          releaseDraft: false
           releaseBody: |
             ## Mini Downloader ${{ github.ref_name }}
 
