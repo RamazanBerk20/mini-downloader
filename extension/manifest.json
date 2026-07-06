@@ -7,11 +7,18 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "minidownloader@ramazan.dev",
-      "strict_min_version": "128.0"
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   },
   "background": {
-    "scripts": ["background.js"]
+    "scripts": [
+      "background.js"
+    ]
   },
   "permissions": [
     "downloads",
@@ -25,16 +32,25 @@
     "storage",
     "tabs"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "__MSG_actionTitle__",
-    "default_icon": { "48": "icons/48.png", "96": "icons/96.png" }
+    "default_icon": {
+      "48": "icons/48.png",
+      "96": "icons/96.png"
+    }
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
@@ -43,5 +59,8 @@
     "page": "options.html",
     "open_in_tab": true
   },
-  "icons": { "48": "icons/48.png", "96": "icons/96.png" }
+  "icons": {
+    "48": "icons/48.png",
+    "96": "icons/96.png"
+  }
 }
