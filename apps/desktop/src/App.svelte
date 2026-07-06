@@ -80,6 +80,10 @@
           const i = idx.get(u.id);
           if (i === undefined) continue;
           const d = all[i];
+          // Ignore stale ticks for rows the client no longer considers running
+          // (e.g. a tick emitted just before a pause that lands after it) — don't
+          // resurrect a paused/finished row to "active".
+          if (d.status === "paused" || d.status === "complete" || d.status === "error" || d.status === "removed") continue;
           d.completed_bytes = u.completed;
           d.total_bytes = u.total;
           d.download_speed = u.dl_speed;
@@ -87,7 +91,7 @@
           d.connections = u.connections;
           d.num_seeders = u.num_seeders;
           if (!d.filename && u.name) d.filename = u.name;
-          if (d.status !== "active") d.status = "active";
+          d.status = "active";
           changed = true;
         }
         if (changed) all = [...all];
@@ -130,6 +134,10 @@
     return !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
   }
   function onGlobalKey(e: KeyboardEvent) {
+    // A dialog is open → let it own the keyboard (its own focus trap handles
+    // Escape). Otherwise single-key shortcuts (/, ?, 1–5) leak to the background
+    // and pull focus out of the trapped modal.
+    if (showSettings || showMedia || showGrabber || showHelp) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); addEl?.focus(); return; }
     if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); searchEl?.focus(); return; }

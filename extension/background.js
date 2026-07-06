@@ -25,7 +25,11 @@ async function loadSettings() {
     settings = { ...DEFAULTS, ...(s.settings || {}) };
   } catch {}
 }
-loadSettings();
+// A shared promise the capture handlers await before reading `settings`. On an
+// MV3 cold start the event that wakes the worker can fire before the un-awaited
+// load resolves, so without this the first download after each wake is judged
+// against DEFAULTS (ignoring enabled/disabledHosts/minSize).
+let settingsReady = loadSettings();
 b.storage.onChanged.addListener((c) => {
   if (c.settings) settings = { ...DEFAULTS, ...(c.settings.newValue || {}) };
 });
@@ -176,7 +180,10 @@ function jobFromRequest(url, filename, mime, size, headersArr, cookieStoreId) {
 }
 
 b.webRequest.onHeadersReceived.addListener(
-  (d) => {
+  async (d) => {
+    // Firefox honors a Promise return from a blocking listener; await the initial
+    // settings load so a cold-start request isn't judged against DEFAULTS.
+    await settingsReady;
     if (!enabledForUrl(d.url)) return {};
     const h = {};
     for (const x of d.responseHeaders || []) h[x.name.toLowerCase()] = x.value;
@@ -209,12 +216,10 @@ b.downloads.onCreated.addListener(async (item) => {
   try {
     if (item.byExtensionId === b.runtime.id) return;
     if (/^blob:|^data:/i.test(item.url)) return;
+    await settingsReady;
     if (!enabledForUrl(item.url)) return;
     if (item.totalBytes > -1 && item.totalBytes < settings.minSize) return;
     if (seen(item.url)) return;
-
-    await b.downloads.cancel(item.id).catch(() => {});
-    await b.downloads.erase({ id: item.id }).catch(() => {});
 
     let cookie = "";
     try {
@@ -222,7 +227,7 @@ b.downloads.onCreated.addListener(async (item) => {
       cookie = cs.map((c) => `${c.name}=${c.value}`).join("; ");
     } catch {}
 
-    sendJob({
+    const reply = await sendJob({
       url: item.url,
       filename: item.filename ? item.filename.split("/").pop() : undefined,
       mime: item.mime,
@@ -233,6 +238,13 @@ b.downloads.onCreated.addListener(async (item) => {
       kind: item.url.startsWith("magnet:") ? "magnet" : "http",
       cookie_store_id: item.cookieStoreId,
     });
+    // Only pull the download out of the browser once the app has accepted it.
+    // If the app is down/unreachable or rejects the job, leave the browser's own
+    // download intact instead of erasing it with no fallback.
+    if (reply && reply.ok) {
+      await b.downloads.cancel(item.id).catch(() => {});
+      await b.downloads.erase({ id: item.id }).catch(() => {});
+    }
   } catch {}
 });
 
@@ -272,39 +284,70 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
 
 // ---------- Media sniffer (HLS/DASH) + content-script media ----------
 
-const mediaByTab = new Map();
+// Per-tab sniffed media is persisted in `storage.session` (falling back to
+// `storage.local`) so it survives the MV3 worker/event-page being suspended —
+// an in-memory Map is lost after ~30s idle, leaving the popup empty. Cleared on
+// tab close / navigation.
+const mediaStore = (b.storage && b.storage.session) || b.storage.local;
+const MEDIA_KEY = (tabId) => `media:${tabId}`;
+
+async function getMedia(tabId) {
+  try {
+    const key = MEDIA_KEY(tabId);
+    const r = await mediaStore.get(key);
+    return r[key] || [];
+  } catch {
+    return [];
+  }
+}
+async function addMedia(tabId, entry) {
+  if (tabId === undefined || tabId < 0) return;
+  const list = await getMedia(tabId);
+  if (list.some((m) => m.url === entry.url)) return;
+  list.push(entry);
+  try {
+    await mediaStore.set({ [MEDIA_KEY(tabId)]: list });
+  } catch {}
+}
+function clearMedia(tabId) {
+  try {
+    mediaStore.remove(MEDIA_KEY(tabId));
+  } catch {}
+}
+
 b.webRequest.onResponseStarted.addListener(
   (d) => {
     const isHls = /\.m3u8(\?|$)|mpegurl/i.test(d.url);
     const isDash = /\.mpd(\?|$)|dash\+xml/i.test(d.url);
     if (!isHls && !isDash) return;
-    const list = mediaByTab.get(d.tabId) || [];
-    if (!list.some((m) => m.url === d.url)) {
-      list.push({ url: d.url, type: isDash ? "dash" : "hls" });
-      mediaByTab.set(d.tabId, list);
-    }
+    addMedia(d.tabId, { url: d.url, type: isDash ? "dash" : "hls" });
   },
   { urls: ["<all_urls>"], types: ["xmlhttprequest", "media", "other"] },
 );
-b.tabs.onRemoved.addListener((id) => mediaByTab.delete(id));
+b.tabs.onRemoved.addListener((id) => clearMedia(id));
 b.tabs.onUpdated.addListener((id, ch) => {
-  if (ch.url) mediaByTab.delete(id);
+  if (ch.url) clearMedia(id);
 });
 
-b.runtime.onMessage.addListener((msg, sender) => {
+b.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
   if (msg.type === "ldm-media" && sender.tab) {
-    const list = mediaByTab.get(sender.tab.id) || [];
-    for (const u of msg.urls || []) {
-      if (!list.some((m) => m.url === u)) list.push({ url: u, type: "file" });
-    }
-    mediaByTab.set(sender.tab.id, list);
+    const tabId = sender.tab.id;
+    for (const u of msg.urls || []) addMedia(tabId, { url: u, type: "file" });
     return;
   }
   if (msg.type === "ldm-get-media") {
-    return Promise.resolve(mediaByTab.get(msg.tabId) || []);
+    // Firefox honors a returned Promise; Chromium needs sendResponse + `return
+    // true` to keep the message channel open for the async storage read.
+    const p = getMedia(msg.tabId);
+    if (IS_FIREFOX) return p;
+    p.then((media) => sendResponse(media));
+    return true;
   }
   if (msg.type === "ldm-grab") {
-    return sendJob(msg.job);
+    const p = sendJob(msg.job);
+    if (IS_FIREFOX) return p;
+    p.then((reply) => sendResponse(reply));
+    return true;
   }
 });

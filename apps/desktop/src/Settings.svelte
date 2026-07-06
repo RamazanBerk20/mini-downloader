@@ -34,6 +34,7 @@
   let nTime = $state("22:00");
   let nDays = $state<Set<number>>(new Set([0, 1, 2, 3, 4, 5, 6]));
   let nSpeed = $state("512000");
+  let schedError = $state("");
 
   onMount(async () => {
     autoOrganize = (await api.getSetting("auto_organize")) !== "false";
@@ -119,18 +120,30 @@
     nDays = s;
   }
   async function addSchedule() {
-    const [h, m] = nTime.split(":").map((x) => parseInt(x, 10));
+    const parts = nTime.split(":").map((x) => parseInt(x, 10));
+    // A cleared time field yields NaN → at_minute NaN → JSON null → the Rust
+    // command (non-optional i64) rejects. Validate before invoking.
+    if (parts.length !== 2 || parts.some((n) => Number.isNaN(n))) {
+      schedError = t("scheduleTimeInvalid");
+      return;
+    }
+    const [h, m] = parts;
     let mask = 0;
     for (const i of nDays) mask |= 1 << i;
-    await api.saveSchedule({
-      name: null,
-      action: nAction,
-      days_mask: mask,
-      at_minute: h * 60 + m,
-      speed_limit: nAction === "set_speed" ? parseInt(nSpeed, 10) : null,
-      enabled: true,
-    });
-    schedules = await api.listSchedules();
+    try {
+      await api.saveSchedule({
+        name: null,
+        action: nAction,
+        days_mask: mask,
+        at_minute: h * 60 + m,
+        speed_limit: nAction === "set_speed" ? parseInt(nSpeed, 10) : null,
+        enabled: true,
+      });
+      schedError = "";
+      schedules = await api.listSchedules();
+    } catch (e) {
+      schedError = String(e);
+    }
   }
   async function removeSchedule(id: number) {
     await api.deleteSchedule(id);
@@ -240,6 +253,7 @@
       </div>
       <button class="btn" onclick={addSchedule}><Icon name="add" size={16} /> {t("schedAddRule")}</button>
     </div>
+    {#if schedError}<p class="sched-error" role="alert">{schedError}</p>{/if}
   </section>
 
   <section class="section">

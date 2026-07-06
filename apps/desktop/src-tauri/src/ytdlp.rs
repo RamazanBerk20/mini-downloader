@@ -19,6 +19,33 @@ use minidl_core::ytdlp::MediaInfo;
 
 use crate::events::{EV_COMPLETE, EV_ERROR, EV_STATE, EV_TICK};
 
+/// RAII guard that kills the yt-dlp process group on drop. Aborting the driver
+/// task unwinds its stack, dropping this guard, so a cancelled download takes its
+/// aria2c grandchild down with it instead of orphaning it to keep downloading.
+#[cfg(unix)]
+struct ProcessGroupKiller {
+    pgid: Option<i32>,
+}
+
+#[cfg(unix)]
+impl ProcessGroupKiller {
+    fn disarm(&mut self) {
+        self.pgid = None;
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessGroupKiller {
+    fn drop(&mut self) {
+        if let Some(pgid) = self.pgid {
+            // SAFETY: killpg with a valid pgid; ESRCH (already gone) is harmless.
+            unsafe {
+                libc::killpg(pgid, libc::SIGKILL);
+            }
+        }
+    }
+}
+
 fn which(name: &str) -> Option<PathBuf> {
     let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     std::env::var_os("PATH")
@@ -84,10 +111,19 @@ impl YtDlp {
         let dir = self.download_dir.clone();
         let ffmpeg = self.ffmpeg.clone();
         let running = self.running.clone();
+        // Hold the lock across abort-old + spawn + insert. This (a) aborts any
+        // task already running for this id — double-clicking Resume must not
+        // launch two yt-dlp/aria2c processes on the same output file — and (b)
+        // inserts the handle before the task can remove itself (the task takes
+        // the same lock), closing the insert-after-spawn leak race.
+        let mut guard = self.running.lock().unwrap();
+        if let Some(old) = guard.remove(&id) {
+            old.abort();
+        }
         let jh = tauri::async_runtime::spawn(async move {
             run(app, db, running.clone(), bin, ffmpeg, dir, id, url, format_id).await;
         });
-        self.running.lock().unwrap().insert(id, jh);
+        guard.insert(id, jh);
     }
 
     /// Abort a running yt-dlp download (kills the process via kill_on_drop).
@@ -136,10 +172,16 @@ async fn run(
         .arg("aria2c")
         .arg("--downloader-args")
         .arg("aria2c:-x16 -s16 -k1M")
+        // `--` so a URL beginning with `-` can't be parsed as a yt-dlp option.
+        .arg("--")
         .arg(&url)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // Own process group so cancel kills the whole tree (yt-dlp + its aria2c
+    // grandchild), not just the yt-dlp parent.
+    #[cfg(unix)]
+    cmd.process_group(0);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -152,50 +194,76 @@ async fn run(
         }
     };
 
+    // With `process_group(0)` the child's pgid equals its pid. If this task is
+    // aborted (cancel/pause), the guard's Drop kills the whole group.
+    #[cfg(unix)]
+    let mut group_killer = ProcessGroupKiller { pgid: child.id().map(|p| p as i32) };
+
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
 
-    // Drain stderr concurrently (avoid pipe backpressure); keep last few KB.
+    // Drain stderr concurrently (avoid pipe backpressure); keep the LAST ~8 KB so
+    // the trailing `ERROR:` line (the real cause) is not lost once the head fills.
     let errbuf = Arc::new(Mutex::new(String::new()));
-    {
+    let stderr_task = {
         let errbuf = errbuf.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(l)) = lines.next_line().await {
                 let mut b = errbuf.lock().unwrap();
-                if b.len() < 4000 {
-                    b.push_str(&l);
-                    b.push('\n');
+                b.push_str(&l);
+                b.push('\n');
+                if b.len() > 8192 {
+                    let mut cut = b.len() - 8192;
+                    while cut < b.len() && !b.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    b.drain(..cut);
                 }
             }
-        });
-    }
+        })
+    };
 
     let mut lines = BufReader::new(stdout).lines();
-    let mut last_completed = 0i64;
-    let mut last_total = 0i64;
+    // `bv*+ba` downloads streams sequentially, each reporting its own progress
+    // from ~0. Bank each finished stream's bytes into a base so the reported
+    // progress accumulates instead of jumping backward when the next stream
+    // starts. Totals are summed as they become known.
+    let mut base_completed = 0i64;
+    let mut base_total = 0i64;
+    let mut seg_completed = 0i64;
+    let mut seg_total = 0i64;
     while let Ok(Some(line)) = lines.next_line().await {
         let Some(rest) = line.strip_prefix("dl:") else {
             continue;
         };
         let p: Vec<&str> = rest.split('|').collect();
         let num = |s: &str| s.trim().parse::<f64>().ok().map(|v| v as i64);
-        let completed = p.first().copied().and_then(num).unwrap_or(last_completed);
+        let completed = p.first().copied().and_then(num).unwrap_or(seg_completed);
         let total = p
             .get(1)
             .copied()
             .and_then(num)
             .or_else(|| p.get(2).copied().and_then(num))
-            .unwrap_or(last_total);
+            .unwrap_or(seg_total);
         let speed = p.get(3).copied().and_then(num).unwrap_or(0);
-        last_completed = completed;
-        last_total = last_total.max(total);
-        let _ = db.checkpoint_progress_by_id(id, last_completed, last_total, speed);
+        // A large backward jump means the previous stream finished and a new one
+        // began reporting from ~0 — bank the finished stream.
+        if completed + 1 < seg_completed {
+            base_completed += seg_completed;
+            base_total += seg_total.max(seg_completed);
+            seg_total = 0;
+        }
+        seg_completed = completed;
+        seg_total = seg_total.max(total);
+        let cum_completed = base_completed + seg_completed;
+        let cum_total = (base_total + seg_total).max(cum_completed);
+        let _ = db.checkpoint_progress_by_id(id, cum_completed, cum_total, speed);
         let _ = app.emit(
             EV_TICK,
             json!({ "updates": [{
                 "id": id, "gid": "", "name": "",
-                "completed": last_completed, "total": last_total,
+                "completed": cum_completed, "total": cum_total,
                 "dl_speed": speed, "ul_speed": 0, "connections": 0, "num_seeders": 0,
                 "status": "active"
             }] }),
@@ -203,6 +271,11 @@ async fn run(
     }
 
     let status = child.wait().await;
+    // Join the stderr drain so the final ERROR line is present before we read it.
+    let _ = stderr_task.await;
+    // Child has exited — don't let the guard kill a possibly-reused pgid.
+    #[cfg(unix)]
+    group_killer.disarm();
     running.lock().unwrap().remove(&id);
 
     if status.map(|s| s.success()).unwrap_or(false) {

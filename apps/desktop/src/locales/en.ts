@@ -87,6 +87,7 @@ export const en = {
   schedResumeAll: "Resume all",
   schedSetSpeed: "Set speed limit",
   schedAddRule: "Add rule",
+  scheduleTimeInvalid: "Enter a valid time (HH:MM).",
   sectCategories: "Categories",
   browseFolder: "Browse folder",
   sponsor: "Sponsor Mini Downloader",

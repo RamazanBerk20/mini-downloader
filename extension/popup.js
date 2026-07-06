@@ -33,7 +33,10 @@ async function init() {
     });
   });
 
-  const media = await b.runtime.sendMessage({ type: "ldm-get-media", tabId: tab.id });
+  // `tab` can be undefined if no active tab is queryable — guard the deref.
+  const media = tab
+    ? await b.runtime.sendMessage({ type: "ldm-get-media", tabId: tab.id })
+    : [];
   render(media || [], tab);
 }
 
