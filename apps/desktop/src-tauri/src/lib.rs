@@ -29,6 +29,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = paths::data_dir();
             let download_dir = paths::default_download_dir();
@@ -83,6 +84,13 @@ pub fn run() {
             commands::set_download_speed,
             commands::open_containing_folder,
             commands::install_browser_integration,
+            commands::add_torrent_file,
+            commands::add_metalink_file,
+            commands::list_categories,
+            commands::save_category,
+            commands::delete_category,
+            commands::get_setting,
+            commands::set_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -31,6 +31,14 @@ export interface Download {
   finished_at: number | null;
 }
 
+export interface Category {
+  id: number;
+  name: string;
+  dir: string;
+  rules: string;
+  priority: number;
+}
+
 export interface Tick {
   gid: string;
   name: string;

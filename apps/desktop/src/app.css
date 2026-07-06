@@ -74,3 +74,21 @@ li.status-complete progress::-webkit-progress-value { background: var(--ok); }
 .ered { color: var(--danger); }
 .actions { display: flex; gap: 0.35rem; flex: none; }
 .actions .danger:hover { border-color: var(--danger); color: var(--danger); }
+
+/* Settings drawer */
+.overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 20; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 90vw);
+  background: var(--bg); border-left: 1px solid var(--border);
+  z-index: 21; padding: 1rem 1.1rem; overflow-y: auto;
+}
+.drawer .dhead { display: flex; justify-content: space-between; align-items: center; }
+.drawer h2 { font-size: 1.1rem; margin: 0; }
+.drawer section { margin: 1.2rem 0; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+.drawer h3 { font-size: 0.95rem; margin: 0 0 0.5rem; }
+.srow { display: flex; justify-content: space-between; align-items: center; }
+.hint { color: var(--muted); font-size: 0.8rem; margin: 0.35rem 0 0; }
+.cat { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; }
+.cat strong { flex: 0 0 90px; }
+.cat input { flex: 1; padding: 0.35rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--fg); }
+code { background: color-mix(in srgb, var(--muted) 18%, transparent); padding: 0 0.25rem; border-radius: 4px; }

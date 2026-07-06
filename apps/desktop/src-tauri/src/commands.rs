@@ -1,15 +1,25 @@
 //! Tauri command surface. Thin wrappers delegating to the engine + DB.
 
+use base64::Engine;
 use serde_json::json;
 use tauri::State;
 
-use ldm_core::model::{Download, DownloadStatus};
+use ldm_core::ipc::{CaptureJob, DownloadKind};
+use ldm_core::model::{Category, Download, DownloadStatus};
 
 use crate::ingest::{ingest, job_from_url};
 use crate::state::AppState;
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
+}
+
+fn base_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download")
+        .to_string()
 }
 
 #[tauri::command]
@@ -136,4 +146,71 @@ pub async fn open_containing_folder(
 #[tauri::command]
 pub async fn install_browser_integration() -> Result<String, String> {
     crate::nativehost::install_firefox_manifest().map(|p| p.to_string_lossy().to_string())
+}
+
+async fn add_file_job(
+    path: String,
+    kind: DownloadKind,
+    state: &State<'_, AppState>,
+) -> Result<Download, String> {
+    let bytes = std::fs::read(&path).map_err(err)?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let name = base_name(&path);
+    let job = CaptureJob {
+        url: format!("file:{name}"),
+        filename: None,
+        referrer: None,
+        user_agent: None,
+        cookie: None,
+        extra_headers: vec![],
+        kind,
+        mime: None,
+        size: None,
+        page_url: None,
+        cookie_store_id: None,
+        torrent_b64: Some(b64),
+    };
+    let id = ingest(&state.engine, &state.db, &state.download_dir, &state.defaults, job, None).await?;
+    state.db.get(id).map_err(err)?.ok_or_else(|| "download vanished".to_string())
+}
+
+#[tauri::command]
+pub async fn add_torrent_file(path: String, state: State<'_, AppState>) -> Result<Download, String> {
+    add_file_job(path, DownloadKind::Torrent, &state).await
+}
+
+#[tauri::command]
+pub async fn add_metalink_file(path: String, state: State<'_, AppState>) -> Result<Download, String> {
+    add_file_job(path, DownloadKind::Metalink, &state).await
+}
+
+#[tauri::command]
+pub async fn list_categories(state: State<'_, AppState>) -> Result<Vec<Category>, String> {
+    state.db.list_categories().map_err(err)
+}
+
+#[tauri::command]
+pub async fn save_category(
+    name: String,
+    dir: String,
+    rules: String,
+    priority: i64,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.db.upsert_category(&name, &dir, &rules, priority).map_err(err).map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_category(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.delete_category(id).map_err(err)
+}
+
+#[tauri::command]
+pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    state.db.get_setting(&key).map_err(err)
+}
+
+#[tauri::command]
+pub async fn set_setting(key: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.set_setting(&key, &value).map_err(err)
 }

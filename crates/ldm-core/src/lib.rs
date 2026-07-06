@@ -6,6 +6,7 @@
 //! - [`paths`]: XDG paths.
 
 pub mod aria2;
+pub mod categories;
 pub mod db;
 pub mod model;
 pub mod paths;

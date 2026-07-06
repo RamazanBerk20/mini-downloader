@@ -130,7 +130,9 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
                 name
             };
             let _ = db.set_status(row.id, DownloadStatus::Complete);
-            let path = format!("{}/{}", row.dir, final_name);
+            // Category auto-organize (single-file HTTP): may move the file.
+            let final_dir = organize(db, &row, &final_name);
+            let path = format!("{final_dir}/{final_name}");
             let _ = app.emit(EV_COMPLETE, json!({ "gid": gid, "id": row.id, "name": final_name, "path": path }));
         }
         other => {
@@ -202,6 +204,43 @@ pub async fn reconcile(engine: &Engine, db: &Db) {
                 let _ = db.set_status(row.id, DownloadStatus::Paused);
             }
         }
+    }
+}
+
+/// Move a finished single-file HTTP download into its category folder. Returns
+/// the (possibly new) directory.
+fn organize(db: &Db, row: &ldm_core::model::Download, filename: &str) -> String {
+    let auto = db
+        .get_setting("auto_organize")
+        .ok()
+        .flatten()
+        .map(|v| v != "false")
+        .unwrap_or(true);
+    if !auto || filename.is_empty() || row.kind != "http" {
+        return row.dir.clone();
+    }
+    let cats = db.list_categories().unwrap_or_default();
+    let Some(cat) = ldm_core::categories::classify(filename, &cats) else {
+        return row.dir.clone();
+    };
+    let target = ldm_core::categories::expand(&cat.dir);
+    let target_str = target.to_string_lossy().to_string();
+    if target_str == row.dir {
+        return row.dir.clone();
+    }
+    let src = std::path::Path::new(&row.dir).join(filename);
+    if !src.exists() {
+        return row.dir.clone();
+    }
+    let _ = std::fs::create_dir_all(&target);
+    let dst = target.join(filename);
+    let moved = std::fs::rename(&src, &dst).is_ok()
+        || (std::fs::copy(&src, &dst).is_ok() && std::fs::remove_file(&src).is_ok());
+    if moved {
+        let _ = db.set_dir_and_category(row.id, &target_str, cat.id);
+        target_str
+    } else {
+        row.dir.clone()
     }
 }
 

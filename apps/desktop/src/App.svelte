@@ -1,13 +1,32 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { api, on } from "./api";
   import type { Download, Tick } from "./types";
+  import Settings from "./Settings.svelte";
 
   let url = $state("");
   let error = $state("");
   let filter = $state<string>("all");
   let items = $state<Download[]>([]);
   let globalSpeed = $state("0");
+  let showSettings = $state(false);
+
+  async function pickFile() {
+    error = "";
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "Torrent / Metalink", extensions: ["torrent", "meta4", "metalink"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      if (path.endsWith(".torrent")) await api.addTorrentFile(path);
+      else await api.addMetalinkFile(path);
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
 
   const FILTERS = ["all", "active", "paused", "complete", "error"];
   const SPEEDS: [string, string][] = [
@@ -128,6 +147,7 @@
   <form onsubmit={add}>
     <input placeholder="Paste a URL or magnet link…" bind:value={url} />
     <button type="submit">Add</button>
+    <button type="button" class="ghost" onclick={pickFile} title="Add a .torrent or .metalink file">＋ File</button>
   </form>
   <div class="toolbar">
     <div class="filters">
@@ -144,9 +164,14 @@
           {#each SPEEDS as [v, label]}<option value={v}>{label}</option>{/each}
         </select>
       </label>
+      <button class="ghost" onclick={() => (showSettings = true)} title="Settings">⚙</button>
     </div>
   </div>
 </header>
+
+{#if showSettings}
+  <Settings onclose={() => { showSettings = false; refresh(); }} />
+{/if}
 
 {#if error}<p class="err">{error} <button class="x" onclick={() => (error = "")}>✕</button></p>{/if}
 

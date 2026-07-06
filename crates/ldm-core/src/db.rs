@@ -266,6 +266,16 @@ impl Db {
         Ok(())
     }
 
+    /// Record where a finished file was moved to (category auto-organize).
+    pub fn set_dir_and_category(&self, id: i64, dir: &str, category_id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE downloads SET dir=?1, category_id=?2 WHERE id=?3",
+            params![dir, category_id, id],
+        )?;
+        Ok(())
+    }
+
     /// Persist a progress snapshot (used on transitions + checkpoints, not every tick).
     #[allow(clippy::too_many_arguments)]
     pub fn checkpoint_progress(
