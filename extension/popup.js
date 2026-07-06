@@ -39,16 +39,26 @@ async function init() {
 
 function render(list, tab) {
   const root = document.getElementById("media");
+  root.textContent = "";
   if (!list.length) {
-    root.innerHTML = `<p class="empty">${t("popupNoMedia")}</p>`;
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = t("popupNoMedia");
+    root.appendChild(p);
     return;
   }
-  root.innerHTML = "";
   for (const m of list) {
     const div = document.createElement("div");
     div.className = "item";
     const short = m.url.length > 70 ? m.url.slice(0, 70) + "…" : m.url;
-    div.innerHTML = `<div class="tag">${m.type}</div><div class="u">${short}</div>`;
+    // URLs are page-controlled: build with textContent, never innerHTML.
+    const tag = document.createElement("div");
+    tag.className = "tag";
+    tag.textContent = m.type;
+    const u = document.createElement("div");
+    u.className = "u";
+    u.textContent = short;
+    div.append(tag, u);
     const btn = document.createElement("button");
     btn.textContent = t("popupGrab");
     btn.addEventListener("click", () => {
