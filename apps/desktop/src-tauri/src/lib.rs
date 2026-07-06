@@ -1,11 +1,14 @@
+mod clipboard;
 mod commands;
 mod events;
 mod ingest;
 mod nativehost;
+mod scheduler;
 mod state;
 mod sync;
 mod ytdlp;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
@@ -31,6 +34,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             let data_dir = paths::data_dir();
             let download_dir = paths::default_download_dir();
@@ -52,10 +56,19 @@ pub fn run() {
                 download_dir.clone(),
             ));
 
+            let clip_enabled = db
+                .get_setting("clipboard_watch")
+                .ok()
+                .flatten()
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let clipboard_on = Arc::new(AtomicBool::new(clip_enabled));
+
             app.manage(AppState {
                 engine: engine.clone(),
                 db: db.clone(),
                 ytdlp: ytdlp.clone(),
+                clipboard_on: clipboard_on.clone(),
                 defaults: defaults.clone(),
                 download_dir: download_dir.clone(),
                 data_dir,
@@ -70,6 +83,8 @@ pub fn run() {
                 let _ = handle.emit(events::EV_RECONCILED, ());
             });
             sync::spawn(app.handle().clone(), engine.clone(), db.clone());
+            scheduler::spawn(app.handle().clone(), engine.clone(), db.clone());
+            clipboard::spawn(app.handle().clone(), clipboard_on);
 
             // Browser bridge: listen on the UDS + best-effort manifest install.
             nativehost::spawn_listener(
@@ -107,6 +122,12 @@ pub fn run() {
             commands::set_setting,
             commands::probe_media,
             commands::add_media_download,
+            commands::grab_links,
+            commands::add_links_batch,
+            commands::list_schedules,
+            commands::save_schedule,
+            commands::delete_schedule,
+            commands::set_clipboard_watch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

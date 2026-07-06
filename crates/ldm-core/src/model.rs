@@ -122,3 +122,19 @@ pub struct Category {
     pub rules: String,
     pub priority: i64,
 }
+
+/// A time-based scheduler rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Schedule {
+    pub id: i64,
+    pub name: Option<String>,
+    /// `pause_all` | `resume_all` | `set_speed`.
+    pub action: String,
+    /// Weekday bitmask, bit 0 = Monday … bit 6 = Sunday.
+    pub days_mask: i64,
+    /// Minutes since midnight (local time).
+    pub at_minute: i64,
+    /// Bytes/sec for `set_speed`.
+    pub speed_limit: Option<i64>,
+    pub enabled: bool,
+}

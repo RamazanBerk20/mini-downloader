@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Category, Download, MediaInfo } from "./types";
+import type { Category, Download, MediaInfo, ParsedLink, Schedule } from "./types";
 
 export const api = {
   add: (url: string) => invoke<Download>("add_download", { url }),
@@ -28,6 +28,21 @@ export const api = {
   deleteCategory: (id: number) => invoke<void>("delete_category", { id }),
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
   setSetting: (key: string, value: string) => invoke<void>("set_setting", { key, value }),
+  grabLinks: (text: string) => invoke<ParsedLink[]>("grab_links", { text }),
+  addLinksBatch: (urls: string[]) => invoke<number>("add_links_batch", { urls }),
+  listSchedules: () => invoke<Schedule[]>("list_schedules"),
+  saveSchedule: (s: Omit<Schedule, "id"> & { id?: number }) =>
+    invoke<void>("save_schedule", {
+      id: s.id ?? null,
+      name: s.name ?? null,
+      action: s.action,
+      daysMask: s.days_mask,
+      atMinute: s.at_minute,
+      speedLimit: s.speed_limit ?? null,
+      enabled: s.enabled,
+    }),
+  deleteSchedule: (id: number) => invoke<void>("delete_schedule", { id }),
+  setClipboardWatch: (enabled: boolean) => invoke<void>("set_clipboard_watch", { enabled }),
 };
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

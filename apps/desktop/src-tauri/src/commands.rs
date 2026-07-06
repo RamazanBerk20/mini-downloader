@@ -1,13 +1,17 @@
 //! Tauri command surface. Thin wrappers delegating to the engine + DB.
 
+use std::sync::atomic::Ordering;
+
 use base64::Engine;
 use serde_json::json;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
+use ldm_core::grabber::ParsedLink;
 use ldm_core::ipc::{CaptureJob, DownloadKind};
-use ldm_core::model::{Category, Download, DownloadStatus, NewDownload};
+use ldm_core::model::{Category, Download, DownloadStatus, NewDownload, Schedule};
 use ldm_core::ytdlp::MediaInfo;
 
+use crate::events::EV_STATE;
 use crate::ingest::{ingest, job_from_url};
 use crate::state::AppState;
 
@@ -258,4 +262,84 @@ pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Opti
 #[tauri::command]
 pub async fn set_setting(key: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
     state.db.set_setting(&key, &value).map_err(err)
+}
+
+// ---- link grabber ----
+
+#[tauri::command]
+pub async fn grab_links(text: String) -> Result<Vec<ParsedLink>, String> {
+    Ok(ldm_core::grabber::parse_links(&text))
+}
+
+#[tauri::command]
+pub async fn add_links_batch(
+    urls: Vec<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, String> {
+    let mut added = 0;
+    for u in urls {
+        let u = u.trim().to_string();
+        if u.is_empty() {
+            continue;
+        }
+        if ingest(
+            &state.engine,
+            &state.db,
+            &state.ytdlp,
+            &state.download_dir,
+            &state.defaults,
+            job_from_url(u),
+            None,
+        )
+        .await
+        .is_ok()
+        {
+            added += 1;
+        }
+    }
+    let _ = app.emit(EV_STATE, json!({ "batch": added }));
+    Ok(added)
+}
+
+// ---- scheduler ----
+
+#[tauri::command]
+pub async fn list_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, String> {
+    state.db.list_schedules().map_err(err)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn save_schedule(
+    id: Option<i64>,
+    name: Option<String>,
+    action: String,
+    days_mask: i64,
+    at_minute: i64,
+    speed_limit: Option<i64>,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db
+        .save_schedule(id, name.as_deref(), &action, days_mask, at_minute, speed_limit, enabled)
+        .map_err(err)
+        .map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_schedule(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+    state.db.delete_schedule(id).map_err(err)
+}
+
+// ---- clipboard ----
+
+#[tauri::command]
+pub async fn set_clipboard_watch(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.clipboard_on.store(enabled, Ordering::Relaxed);
+    state
+        .db
+        .set_setting("clipboard_watch", if enabled { "true" } else { "false" })
+        .map_err(err)
 }

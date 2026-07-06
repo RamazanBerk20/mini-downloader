@@ -5,6 +5,7 @@
   import type { Download, Tick } from "./types";
   import Settings from "./Settings.svelte";
   import MediaGrab from "./MediaGrab.svelte";
+  import LinkGrabber from "./LinkGrabber.svelte";
 
   let url = $state("");
   let error = $state("");
@@ -13,6 +14,8 @@
   let globalSpeed = $state("0");
   let showSettings = $state(false);
   let showMedia = $state(false);
+  let showGrabber = $state(false);
+  let clipboardUrl = $state<string | null>(null);
 
   async function pickFile() {
     error = "";
@@ -78,6 +81,7 @@
     subs.push(on("downloads:complete", refetch));
     subs.push(on("downloads:error", refetch));
     subs.push(on("downloads:reconciled", refetch));
+    subs.push(on<{ url: string }>("clipboard:detected", (p) => (clipboardUrl = p.url)));
 
     return () => subs.forEach((u) => u.then((f) => f()));
   });
@@ -99,6 +103,18 @@
       await refresh();
     } catch (err) {
       error = String(err);
+    }
+  }
+
+  async function addClipboard() {
+    if (!clipboardUrl) return;
+    const u = clipboardUrl;
+    clipboardUrl = null;
+    try {
+      await api.add(u);
+      await refresh();
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -161,6 +177,7 @@
     <div class="tools">
       <button class="ghost" onclick={() => act(api.pauseAll)}>Pause all</button>
       <button class="ghost" onclick={() => act(api.resumeAll)}>Resume all</button>
+      <button class="ghost" onclick={() => (showGrabber = true)} title="Grab many links">⛓ Links</button>
       <label class="speed">
         ⤓
         <select bind:value={globalSpeed} onchange={applyGlobalSpeed}>
@@ -177,6 +194,19 @@
 {/if}
 {#if showMedia}
   <MediaGrab onclose={() => { showMedia = false; refresh(); }} />
+{/if}
+{#if showGrabber}
+  <LinkGrabber onclose={() => { showGrabber = false; refresh(); }} />
+{/if}
+
+{#if clipboardUrl}
+  <div class="clip-toast">
+    <span title={clipboardUrl}>Link copied: {clipboardUrl.length > 50 ? clipboardUrl.slice(0, 50) + "…" : clipboardUrl}</span>
+    <span>
+      <button onclick={addClipboard}>Download</button>
+      <button class="ghost" onclick={() => (clipboardUrl = null)}>Dismiss</button>
+    </span>
+  </div>
 {/if}
 
 {#if error}<p class="err">{error} <button class="x" onclick={() => (error = "")}>✕</button></p>{/if}

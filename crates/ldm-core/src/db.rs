@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use crate::model::{now, Category, Download, DownloadStatus, NewDownload};
+use crate::model::{now, Category, Download, DownloadStatus, NewDownload, Schedule};
 
 #[derive(Clone)]
 pub struct Db {
@@ -352,6 +352,65 @@ impl Db {
     pub fn delete_category(&self, id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM categories WHERE id=?1", params![id])?;
+        Ok(())
+    }
+
+    // ---- schedules ----
+
+    pub fn list_schedules(&self) -> Result<Vec<Schedule>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, action, days_mask, at_minute, speed_limit, enabled FROM schedules ORDER BY at_minute",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Schedule {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    action: r.get(2)?,
+                    days_mask: r.get(3)?,
+                    at_minute: r.get(4)?,
+                    speed_limit: r.get(5)?,
+                    enabled: r.get::<_, i64>(6)? != 0,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_schedule(
+        &self,
+        id: Option<i64>,
+        name: Option<&str>,
+        action: &str,
+        days_mask: i64,
+        at_minute: i64,
+        speed_limit: Option<i64>,
+        enabled: bool,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().unwrap();
+        match id {
+            Some(id) => {
+                conn.execute(
+                    "UPDATE schedules SET name=?1, action=?2, days_mask=?3, at_minute=?4, speed_limit=?5, enabled=?6 WHERE id=?7",
+                    params![name, action, days_mask, at_minute, speed_limit, enabled as i64, id],
+                )?;
+                Ok(id)
+            }
+            None => {
+                conn.execute(
+                    "INSERT INTO schedules (name, action, days_mask, at_minute, speed_limit, enabled) VALUES (?1,?2,?3,?4,?5,?6)",
+                    params![name, action, days_mask, at_minute, speed_limit, enabled as i64],
+                )?;
+                Ok(conn.last_insert_rowid())
+            }
+        }
+    }
+
+    pub fn delete_schedule(&self, id: i64) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM schedules WHERE id=?1", params![id])?;
         Ok(())
     }
 

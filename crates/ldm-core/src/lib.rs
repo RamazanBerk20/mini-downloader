@@ -8,6 +8,7 @@
 pub mod aria2;
 pub mod categories;
 pub mod db;
+pub mod grabber;
 pub mod model;
 pub mod paths;
 pub mod ytdlp;

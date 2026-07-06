@@ -39,6 +39,22 @@ export interface Category {
   priority: number;
 }
 
+export interface ParsedLink {
+  url: string;
+  kind: string;
+  host: string;
+}
+
+export interface Schedule {
+  id: number;
+  name: string | null;
+  action: string;
+  days_mask: number;
+  at_minute: number;
+  speed_limit: number | null;
+  enabled: boolean;
+}
+
 export interface Format {
   format_id: string;
   ext: string;

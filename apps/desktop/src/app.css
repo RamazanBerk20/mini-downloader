@@ -92,3 +92,22 @@ li.status-complete progress::-webkit-progress-value { background: var(--ok); }
 .cat strong { flex: 0 0 90px; }
 .cat input { flex: 1; padding: 0.35rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--fg); }
 code { background: color-mix(in srgb, var(--muted) 18%, transparent); padding: 0 0.25rem; border-radius: 4px; }
+
+textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); color: var(--fg); padding: 0.5rem; font-family: inherit; margin-bottom: 0.5rem; resize: vertical; }
+.linklist { max-height: 40vh; overflow-y: auto; margin-top: 0.5rem; }
+.schedform { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.6rem; }
+.schedform input[type="time"], .schedform input[type="number"] {
+  padding: 0.35rem; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--fg); }
+.days { display: flex; gap: 0.2rem; flex-wrap: wrap; }
+.days .chip { padding: 0.25rem 0.4rem; font-size: 0.75rem; }
+
+/* Clipboard toast */
+.clip-toast {
+  position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.6rem 0.9rem; display: flex; align-items: center; gap: 1rem; z-index: 30;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.25); max-width: 90vw;
+}
+.clip-toast > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clip-toast button { margin-left: 0.3rem; }
