@@ -158,8 +158,9 @@ pub fn run() {
                 download_dir,
                 defaults,
             );
-            if let Err(e) = nativehost::install_firefox_manifest() {
-                eprintln!("browser integration not installed: {e}");
+            match nativehost::install_browser_integration() {
+                Ok(paths) => eprintln!("browser integration: {} manifest(s) installed", paths.len()),
+                Err(e) => eprintln!("browser integration not installed: {e}"),
             }
 
             // System tray.

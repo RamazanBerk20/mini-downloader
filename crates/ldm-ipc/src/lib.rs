@@ -23,6 +23,10 @@ pub const NATIVE_HOST_NAME: &str = "com.ldm.host";
 /// host manifest `allowed_extensions`.
 pub const EXTENSION_ID: &str = "ldm@ramazan.dev";
 
+/// Chromium extension id — derived from the `key` in `manifest.chrome.json`,
+/// used in the host manifest `allowed_origins` (`chrome-extension://<id>/`).
+pub const CHROME_EXTENSION_ID: &str = "lkllgjnnglfjifnioojkcbefjlfmfahi";
+
 /// What kind of source a captured job points at. The app routes each kind to
 /// the right aria2 method or to yt-dlp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

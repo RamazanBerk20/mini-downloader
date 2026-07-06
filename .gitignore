@@ -29,3 +29,10 @@ extension/web-ext-artifacts
 .env
 .env.local
 *.log
+
+# Per-browser extension build output
+dist-ext
+
+# Chrome extension signing key (secret)
+packaging/chrome-extension-key.pem
+packaging/chrome-key.b64

@@ -170,11 +170,12 @@ pub async fn open_containing_folder(
     Ok(())
 }
 
-/// Install the Firefox native-messaging manifest so the extension can reach the
-/// app. Returns the manifest path.
+/// Install the native-messaging host manifest for every detected browser
+/// (Firefox family + Chromium family). Returns a summary.
 #[tauri::command]
 pub async fn install_browser_integration() -> Result<String, String> {
-    crate::nativehost::install_firefox_manifest().map(|p| p.to_string_lossy().to_string())
+    crate::nativehost::install_browser_integration()
+        .map(|paths| format!("Installed {} manifest(s):\n{}", paths.len(), paths.join("\n")))
 }
 
 async fn add_file_job(

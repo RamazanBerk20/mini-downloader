@@ -154,24 +154,67 @@ fn host_binary() -> Option<PathBuf> {
     }
 }
 
-/// Write the Firefox native-messaging manifest pointing at the host binary.
-/// Per-user location; idempotent.
-pub fn install_firefox_manifest() -> Result<PathBuf, String> {
-    let host = host_binary().ok_or("ldm-native-host binary not found next to the app")?;
-    let home = std::env::var_os("HOME").ok_or("HOME not set")?;
-    let dir = Path::new(&home).join(".mozilla/native-messaging-hosts");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+fn write_manifest(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
+    std::fs::create_dir_all(dir).ok()?;
+    let file = dir.join(format!("{}.json", ipc::NATIVE_HOST_NAME));
+    std::fs::write(&file, serde_json::to_vec_pretty(manifest).ok()?).ok()?;
+    Some(file.to_string_lossy().to_string())
+}
 
-    let manifest = json!({
+/// Install the native-messaging host manifest for every detected browser:
+/// Firefox family uses `allowed_extensions`, Chromium family uses
+/// `allowed_origins`. Returns the list of manifest paths written.
+pub fn install_browser_integration() -> Result<Vec<String>, String> {
+    let host = host_binary().ok_or("ldm-native-host binary not found next to the app")?;
+    let host_path = host.to_string_lossy().to_string();
+    let home = std::env::var_os("HOME").ok_or("HOME not set")?;
+    let home = Path::new(&home);
+    let mut installed = Vec::new();
+
+    // ---- Firefox family (allowed_extensions) ----
+    let ff = json!({
         "name": ipc::NATIVE_HOST_NAME,
         "description": "Linux Download Manager native bridge",
-        "path": host.to_string_lossy(),
+        "path": host_path,
         "type": "stdio",
         "allowed_extensions": [ipc::EXTENSION_ID],
     });
+    // ~/.mozilla always (Firefox + most forks read it); fork dirs if present.
+    for sub in [".mozilla", ".zen", ".librewolf", ".waterfox"] {
+        let base = home.join(sub);
+        if sub == ".mozilla" || base.exists() {
+            if let Some(p) = write_manifest(&base.join("native-messaging-hosts"), &ff) {
+                installed.push(p);
+            }
+        }
+    }
 
-    let file = dir.join(format!("{}.json", ipc::NATIVE_HOST_NAME));
-    std::fs::write(&file, serde_json::to_vec_pretty(&manifest).unwrap())
-        .map_err(|e| e.to_string())?;
-    Ok(file)
+    // ---- Chromium family (allowed_origins) ----
+    let cr = json!({
+        "name": ipc::NATIVE_HOST_NAME,
+        "description": "Linux Download Manager native bridge",
+        "path": host_path,
+        "type": "stdio",
+        "allowed_origins": [format!("chrome-extension://{}/", ipc::CHROME_EXTENSION_ID)],
+    });
+    for sub in [
+        "google-chrome",
+        "chromium",
+        "BraveSoftware/Brave-Browser",
+        "microsoft-edge",
+        "vivaldi",
+    ] {
+        let base = home.join(".config").join(sub);
+        if base.exists() {
+            if let Some(p) = write_manifest(&base.join("NativeMessagingHosts"), &cr) {
+                installed.push(p);
+            }
+        }
+    }
+
+    if installed.is_empty() {
+        Err("no browser profile directories found".into())
+    } else {
+        Ok(installed)
+    }
 }

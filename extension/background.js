@@ -6,6 +6,11 @@
 const b = globalThis.browser || globalThis.chrome;
 const HOST = "com.ldm.host";
 
+// Firefox exposes `browser`; Chromium exposes only `chrome`. Firefox MV3 keeps
+// blocking webRequest (Path A: sniff headers + cancel → full cookie fidelity);
+// Chromium MV3 removed it, so there we rely on Path B (downloads.onCreated).
+const IS_FIREFOX = typeof globalThis.browser !== "undefined";
+
 const DEFAULTS = {
   enabled: true,
   minSize: 1048576, // 1 MiB floor: ignore tiny/inline files
@@ -68,8 +73,9 @@ function seen(url) {
   return false;
 }
 
-// ---------- Path A: webRequest ----------
+// ---------- Path A: webRequest (Firefox only) ----------
 
+if (IS_FIREFOX) {
 const reqHeaders = new Map(); // requestId -> headers[]
 b.webRequest.onBeforeSendHeaders.addListener(
   (d) => {
@@ -194,8 +200,9 @@ b.webRequest.onHeadersReceived.addListener(
   { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
   ["blocking", "responseHeaders"],
 );
+} // end Path A (Firefox only)
 
-// ---------- Path B: downloads.onCreated fallback ----------
+// ---------- Path B: downloads.onCreated fallback (Firefox + Chromium) ----------
 
 b.downloads.onCreated.addListener(async (item) => {
   try {

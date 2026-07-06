@@ -10,3 +10,13 @@
   tarball (or `WRITTEN-OFFER.txt`) + `LICENSE` here so the bundler includes it.
 
 The whole app is distributed as `GPL-3.0-or-later` because it bundles GPL'd aria2.
+
+## Browser extension
+
+- Firefox add-on id: `ldm@ramazan.dev` → host manifest `allowed_extensions`.
+- Chromium extension id: `lkllgjnnglfjifnioojkcbefjlfmfahi` (from `manifest.chrome.json`'s
+  `key`; private key in `chrome-extension-key.pem`, keep it secret / out of releases)
+  → host manifest `allowed_origins: ["chrome-extension://<id>/"]`.
+- Build both packages: `./scripts/build-extension.sh` → `dist-ext/{firefox,chrome}`.
+- The app installs the host manifest for all detected browsers on first run and via
+  Settings → "Install native-messaging host".
