@@ -238,6 +238,9 @@
             {#if d.status === "complete"}
               <button onclick={() => act(() => api.openFolder(d.id))}>Open folder</button>
             {/if}
+            {#if d.status === "error"}
+              <button onclick={() => act(async () => { await api.remove(d.id, false); await api.add(d.url); })}>Retry</button>
+            {/if}
             <button class="danger" onclick={() => act(() => api.remove(d.id, false))}>Remove</button>
           </span>
         </div>
