@@ -2,7 +2,10 @@
   import { onMount } from "svelte";
   import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { api } from "./api";
+
+  const SPONSOR_URL = "https://github.com/sponsors/RamazanBerk20";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
   import type { Category, Schedule } from "./types";
@@ -144,6 +147,11 @@
     <h2 id="set-h">Settings</h2>
     <button class="icon-btn" aria-label="Close settings" onclick={onclose}><Icon name="close" size={18} /></button>
   </div>
+
+  <button class="sponsor" onclick={() => openUrl(SPONSOR_URL)}>
+    <Icon name="heart" size={18} />
+    <span>Sponsor Mini Downloader</span>
+  </button>
 
   <section class="section">
     <h3>General</h3>

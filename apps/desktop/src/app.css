@@ -346,6 +346,18 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 .switch input:checked + .track::after { transform: translateX(18px); background: var(--ink-fg); }
 .switch input:focus-visible + .track { outline: 2px solid var(--ring); outline-offset: 2px; }
 
+.sponsor {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%;
+  padding: 0.65rem 0.9rem; margin: 0.9rem 0 0.2rem;
+  border: 1px solid color-mix(in srgb, #e0245e 32%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, #e0245e 10%, var(--surface));
+  color: #e0245e; font-weight: 500; font-size: 0.9rem; cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.sponsor:hover { background: color-mix(in srgb, #e0245e 18%, var(--surface)); }
+.sponsor:active { transform: scale(0.98); }
+
 .cat { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; }
 .cat strong { flex: 0 0 90px; font-weight: 500; }
 .cat input { flex: 1; }
