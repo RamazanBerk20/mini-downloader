@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { api } from "./api";
+  import { trapFocus } from "./lib/a11y";
+  import Icon from "./lib/Icon.svelte";
   import type { Category, Schedule } from "./types";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -21,7 +23,6 @@
     ["set_speed", "Set speed limit"],
   ];
 
-  // New-schedule form
   let nAction = $state("pause_all");
   let nTime = $state("22:00");
   let nDays = $state<Set<number>>(new Set([0, 1, 2, 3, 4, 5, 6]));
@@ -38,9 +39,11 @@
     } catch {}
   });
 
+  const setBool = (key: string, v: boolean) => api.setSetting(key, v ? "true" : "false");
+
   async function toggleOrganize(e: Event) {
     autoOrganize = (e.target as HTMLInputElement).checked;
-    await api.setSetting("auto_organize", autoOrganize ? "true" : "false");
+    await setBool("auto_organize", autoOrganize);
   }
   async function toggleClipboard(e: Event) {
     clipboardWatch = (e.target as HTMLInputElement).checked;
@@ -48,7 +51,7 @@
   }
   async function toggleCloseToTray(e: Event) {
     closeToTray = (e.target as HTMLInputElement).checked;
-    await api.setSetting("close_to_tray", closeToTray ? "true" : "false");
+    await setBool("close_to_tray", closeToTray);
   }
   async function toggleAutostart(e: Event) {
     autostart = (e.target as HTMLInputElement).checked;
@@ -71,16 +74,14 @@
     }
   }
 
-  function fmtTime(min: number): string {
-    return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
-  }
-  function daysLabel(mask: number): string {
-    return DAYS.filter((_, i) => mask & (1 << i)).join(",");
-  }
+  const fmtTime = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+  const daysLabel = (mask: number) => DAYS.filter((_, i) => mask & (1 << i)).join(" ");
+  const actionLabel = (a: string) => ACTIONS.find(([v]) => v === a)?.[1] ?? a;
+
   function toggleDay(i: number) {
     const s = new Set(nDays);
-    if (s.has(i)) s.delete(i);
-    else s.add(i);
+    s.has(i) ? s.delete(i) : s.add(i);
     nDays = s;
   }
   async function addSchedule() {
@@ -101,76 +102,78 @@
     await api.deleteSchedule(id);
     schedules = await api.listSchedules();
   }
-  function actionLabel(a: string): string {
-    return ACTIONS.find(([v]) => v === a)?.[1] ?? a;
-  }
 </script>
 
 <div class="overlay" onclick={onclose} role="presentation"></div>
-<aside class="drawer">
-  <div class="dhead"><h2>Settings</h2><button onclick={onclose}>✕</button></div>
+<div class="drawer" role="dialog" aria-modal="true" aria-labelledby="set-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
+  <div class="dhead">
+    <h2 id="set-h">Settings</h2>
+    <button class="icon-btn" aria-label="Close settings" onclick={onclose}><Icon name="close" size={18} /></button>
+  </div>
 
-  <section>
-    <label class="srow">
+  <section class="section">
+    <h3>General</h3>
+    <div class="srow">
       <span>Auto-organize finished files</span>
-      <input type="checkbox" checked={autoOrganize} onchange={toggleOrganize} />
-    </label>
-    <label class="srow">
+      <label class="switch"><input type="checkbox" checked={autoOrganize} onchange={toggleOrganize} aria-label="Auto-organize finished files" /><span class="track"></span></label>
+    </div>
+    <div class="srow">
       <span>Watch clipboard for links</span>
-      <input type="checkbox" checked={clipboardWatch} onchange={toggleClipboard} />
-    </label>
-    <label class="srow">
+      <label class="switch"><input type="checkbox" checked={clipboardWatch} onchange={toggleClipboard} aria-label="Watch clipboard for links" /><span class="track"></span></label>
+    </div>
+    <div class="srow">
       <span>Close to tray (keep running)</span>
-      <input type="checkbox" checked={closeToTray} onchange={toggleCloseToTray} />
-    </label>
-    <label class="srow">
+      <label class="switch"><input type="checkbox" checked={closeToTray} onchange={toggleCloseToTray} aria-label="Close to tray" /><span class="track"></span></label>
+    </div>
+    <div class="srow">
       <span>Start on login (minimized)</span>
-      <input type="checkbox" checked={autostart} onchange={toggleAutostart} />
-    </label>
+      <label class="switch"><input type="checkbox" checked={autostart} onchange={toggleAutostart} aria-label="Start on login" /><span class="track"></span></label>
+    </div>
   </section>
 
-  <section>
+  <section class="section">
     <h3>Firefox integration</h3>
-    <button onclick={installBrowser}>Install native-messaging host</button>
+    <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> Install native-messaging host</button>
     {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
     <p class="hint">Load the extension from <code>extension/</code> via <code>about:debugging</code>.</p>
   </section>
 
-  <section>
+  <section class="section">
     <h3>Scheduler</h3>
     {#each schedules as s (s.id)}
       <div class="cat">
+        <Icon name="clock" size={16} />
         <span class="hint" style="flex:1">
-          {actionLabel(s.action)}{#if s.action === "set_speed" && s.speed_limit} ({Math.round(s.speed_limit / 1024)} KB/s){/if}
+          {actionLabel(s.action)}{#if s.action === "set_speed" && s.speed_limit} · {Math.round(s.speed_limit / 1024)} KB/s{/if}
           · {fmtTime(s.at_minute)} · {daysLabel(s.days_mask)}
         </span>
-        <button class="danger" onclick={() => removeSchedule(s.id)}>✕</button>
+        <button class="icon-btn danger" aria-label="Delete schedule" onclick={() => removeSchedule(s.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
     <div class="schedform">
-      <select bind:value={nAction}>
+      <select bind:value={nAction} aria-label="Schedule action">
         {#each ACTIONS as [v, l]}<option value={v}>{l}</option>{/each}
       </select>
-      <input type="time" bind:value={nTime} />
+      <input type="time" bind:value={nTime} aria-label="Schedule time" />
       {#if nAction === "set_speed"}
-        <input type="number" bind:value={nSpeed} title="bytes/sec" style="width:110px" />
+        <input type="number" bind:value={nSpeed} aria-label="Speed limit in bytes per second" style="width:110px" />
       {/if}
-      <div class="days">
+      <div class="days" role="group" aria-label="Days">
         {#each DAYS as d, i}
-          <button class="chip" class:on={nDays.has(i)} onclick={() => toggleDay(i)}>{d}</button>
+          <button type="button" class="tag day" class:on={nDays.has(i)} aria-pressed={nDays.has(i)} onclick={() => toggleDay(i)}>{d}</button>
         {/each}
       </div>
-      <button onclick={addSchedule}>Add rule</button>
+      <button class="btn" onclick={addSchedule}><Icon name="add" size={16} /> Add rule</button>
     </div>
   </section>
 
-  <section>
+  <section class="section">
     <h3>Categories</h3>
     {#each categories as c (c.id)}
       <div class="cat">
         <strong>{c.name}</strong>
-        <input value={c.dir} onchange={(e) => saveDir(c, e)} />
+        <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
       </div>
     {/each}
   </section>
-</aside>
+</div>

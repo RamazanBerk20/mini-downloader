@@ -1,5 +1,7 @@
 <script lang="ts">
   import { api } from "./api";
+  import { trapFocus } from "./lib/a11y";
+  import Icon from "./lib/Icon.svelte";
   import type { ParsedLink } from "./types";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -18,14 +20,11 @@
       error = String(e);
     }
   }
-
-  function toggle(url: string) {
+  function toggle(u: string) {
     const s = new Set(checked);
-    if (s.has(url)) s.delete(url);
-    else s.add(url);
+    s.has(u) ? s.delete(u) : s.add(u);
     checked = s;
   }
-
   async function addSelected() {
     const urls = links.filter((l) => checked.has(l.url)).map((l) => l.url);
     if (!urls.length) return;
@@ -39,24 +38,30 @@
 </script>
 
 <div class="overlay" onclick={onclose} role="presentation"></div>
-<aside class="drawer">
-  <div class="dhead"><h2>Grab links</h2><button onclick={onclose}>✕</button></div>
+<div class="modal" role="dialog" aria-modal="true" aria-labelledby="grab-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
+  <div class="dhead">
+    <h2 id="grab-h">Grab links</h2>
+    <button class="icon-btn" aria-label="Close" onclick={onclose}><Icon name="close" size={18} /></button>
+  </div>
 
-  <textarea rows="6" placeholder="Paste text, a link list, or HTML…" bind:value={text}></textarea>
-  <button onclick={parse}>Extract links</button>
+  <textarea rows="6" placeholder="Paste text, a link list, or HTML" bind:value={text} aria-label="Text to extract links from"></textarea>
+  <button class="btn" onclick={parse}><Icon name="search" size={16} /> Extract links</button>
 
-  {#if error}<p class="err">{error}</p>{/if}
+  {#if error}<p class="hint" style="color:var(--error-fg)">{error}</p>{/if}
 
   {#if links.length}
     <p class="hint">{checked.size} of {links.length} selected</p>
     <div class="linklist">
       {#each links as l (l.url)}
-        <label class="cat">
-          <input type="checkbox" checked={checked.has(l.url)} onchange={() => toggle(l.url)} />
-          <span class="hint" style="flex:1; word-break:break-all">[{l.kind}] {l.url}</span>
+        <label class="linkrow">
+          <input type="checkbox" checked={checked.has(l.url)} onchange={() => toggle(l.url)} aria-label={l.url} />
+          <span class="tag">{l.kind}</span>
+          <span class="u">{l.url}</span>
         </label>
       {/each}
     </div>
-    <button onclick={addSelected} style="margin-top:0.8rem">Add {checked.size} selected</button>
+    <button class="btn btn-primary" style="margin-top:0.8rem" onclick={addSelected}>
+      <Icon name="download" size={16} /> Add {checked.size} selected
+    </button>
   {/if}
-</aside>
+</div>
