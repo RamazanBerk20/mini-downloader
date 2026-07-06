@@ -91,6 +91,15 @@ pub fn build_add_options(job: &CaptureJob, dir: &str, defaults: &EngineDefaults)
     );
     opts.insert("min-split-size".into(), Value::String(defaults.min_split_size.clone()));
     opts.insert("continue".into(), Value::String("true".into()));
+
+    // Survive transient network flaps (Wi-Fi/DNS blips) instead of hard-erroring
+    // a multi-hour download: aria2's defaults (retry-wait=0, max-tries=5) exhaust
+    // in milliseconds. Unlimited retries, but give up after repeated 404s so a
+    // genuinely dead URL still fails.
+    opts.insert("max-tries".into(), Value::String("0".into()));
+    opts.insert("retry-wait".into(), Value::String("10".into()));
+    opts.insert("connect-timeout".into(), Value::String("30".into()));
+    opts.insert("max-file-not-found".into(), Value::String("5".into()));
     opts
 }
 

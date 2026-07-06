@@ -9,7 +9,7 @@ use serde_json::Value;
 use minidl_core::aria2::{build_add_options, Engine, EngineDefaults};
 use minidl_core::db::Db;
 use minidl_core::ipc::{CaptureJob, DownloadKind};
-use minidl_core::model::{DownloadStatus, NewDownload};
+use minidl_core::model::{Download, DownloadStatus, NewDownload};
 
 fn kind_str(k: DownloadKind) -> &'static str {
     match k {
@@ -19,6 +19,79 @@ fn kind_str(k: DownloadKind) -> &'static str {
         DownloadKind::Metalink => "metalink",
         DownloadKind::Hls => "hls",
         DownloadKind::Dash => "dash",
+    }
+}
+
+/// Only fetch from schemes we intend to support. Blocks `file:`, `data:`,
+/// `javascript:` etc. from being handed to aria2/yt-dlp as a source URL.
+fn allowed_source_scheme(url: &str) -> bool {
+    let u = url.trim_start().to_ascii_lowercase();
+    ["http://", "https://", "ftp://", "ftps://", "sftp://"]
+        .iter()
+        .any(|p| u.starts_with(p))
+        || u.starts_with("magnet:")
+}
+
+/// Free bytes on the filesystem backing `dir`, if determinable.
+#[cfg(unix)]
+fn free_space(dir: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let c = CString::new(dir.as_os_str().as_bytes()).ok()?;
+    // SAFETY: statvfs into a zeroed struct; pointer valid for the call.
+    unsafe {
+        let mut s: libc::statvfs = std::mem::zeroed();
+        if libc::statvfs(c.as_ptr(), &mut s) == 0 {
+            Some((s.f_bavail as u64).saturating_mul(s.f_frsize as u64))
+        } else {
+            None
+        }
+    }
+}
+#[cfg(not(unix))]
+fn free_space(_dir: &Path) -> Option<u64> {
+    None
+}
+
+fn extra_headers_json(job: &CaptureJob) -> Option<String> {
+    if job.extra_headers.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&job.extra_headers).ok()
+    }
+}
+
+/// Rebuild a `CaptureJob` from a stored row so retry/resume replay the original
+/// request faithfully (cookies/UA/referer/headers/kind) instead of degrading to
+/// a bare URL. Torrent/metalink payloads aren't persisted, so those retry as the
+/// tracked URL only.
+pub fn job_from_row(d: &Download) -> CaptureJob {
+    let kind = match d.kind.as_str() {
+        "magnet" => DownloadKind::Magnet,
+        "torrent" => DownloadKind::Torrent,
+        "metalink" => DownloadKind::Metalink,
+        "hls" => DownloadKind::Hls,
+        "dash" | "video" => DownloadKind::Dash,
+        _ => DownloadKind::Http,
+    };
+    let extra_headers = d
+        .extra_headers
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<(String, String)>>(s).ok())
+        .unwrap_or_default();
+    CaptureJob {
+        url: d.url.clone(),
+        filename: d.filename.clone(),
+        referrer: d.referrer.clone(),
+        user_agent: d.user_agent.clone(),
+        cookie: d.cookie.clone(),
+        extra_headers,
+        kind,
+        mime: None,
+        size: None,
+        page_url: d.page_url.clone(),
+        cookie_store_id: None,
+        torrent_b64: None,
     }
 }
 
@@ -42,6 +115,32 @@ pub async fn ingest(
         job.url.clone()
     };
 
+    // Fetch-target kinds must use an allowed scheme (torrent/metalink carry the
+    // payload in `torrent_b64`, so their synthetic `file:` url is exempt).
+    let fetches_url = matches!(
+        job.kind,
+        DownloadKind::Http | DownloadKind::Magnet | DownloadKind::Hls | DownloadKind::Dash
+    );
+    if fetches_url && !allowed_source_scheme(&target) {
+        return Err("unsupported or unsafe URL scheme".to_string());
+    }
+
+    // Fail fast when the known content size won't fit (plus a 64 MiB margin),
+    // instead of erroring deep into the transfer with a half-written file.
+    if let Some(size) = job.size {
+        if size > 0 {
+            if let Some(free) = free_space(download_dir) {
+                if (size as u64).saturating_add(64 * 1024 * 1024) > free {
+                    return Err(format!(
+                        "insufficient disk space (need {} MB, have {} MB free)",
+                        size / 1_000_000,
+                        free / 1_000_000
+                    ));
+                }
+            }
+        }
+    }
+
     let id = db
         .insert_download(&NewDownload {
             url: target.clone(),
@@ -50,12 +149,17 @@ pub async fn ingest(
             kind: kind_str(job.kind).into(),
             referrer: job.referrer.clone(),
             category_id,
+            user_agent: job.user_agent.clone(),
+            cookie: job.cookie.clone(),
+            extra_headers: extra_headers_json(&job),
+            page_url: job.page_url.clone(),
+            format_id: None,
         })
         .map_err(|e| e.to_string())?;
 
     if is_stream {
         db.set_status(id, DownloadStatus::Active).map_err(|e| e.to_string())?;
-        ytdlp.start(id, target, None);
+        ytdlp.start(id, target, None, job.header_lines());
         return Ok(id);
     }
 
@@ -92,11 +196,11 @@ pub async fn ingest(
             for g in rest {
                 if let Ok(child_id) = db.insert_download(&NewDownload {
                     url: target.clone(),
-                    filename: None,
                     dir: dir.clone(),
                     kind: kind_str(job.kind).into(),
                     referrer: job.referrer.clone(),
                     category_id,
+                    ..Default::default()
                 }) {
                     let _ = db.set_gid(child_id, g);
                     let _ = db.set_status(child_id, DownloadStatus::Active);
@@ -109,6 +213,30 @@ pub async fn ingest(
             Err(e.to_string())
         }
     }
+}
+
+/// Re-add an existing row to aria2 (same DB id) with its original auth, binding
+/// the new GID back to the row. Used by resume/retry when aria2 has forgotten
+/// the GID. Only http/magnet can be reissued — torrent/metalink payloads aren't
+/// persisted.
+pub async fn reissue(
+    engine: &Engine,
+    db: &Db,
+    defaults: EngineDefaults,
+    row: &Download,
+) -> Result<(), String> {
+    let job = job_from_row(row);
+    if !matches!(job.kind, DownloadKind::Http | DownloadKind::Magnet) {
+        return Err("cannot reissue this download type".to_string());
+    }
+    let opts = Value::Object(build_add_options(&job, &row.dir, &defaults));
+    let gid = engine
+        .rpc
+        .add_uri(&[job.url.clone()], opts)
+        .await
+        .map_err(|e| e.to_string())?;
+    db.set_gid(row.id, &gid).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Build an HTTP/magnet job from a bare URL (UI + clipboard path).

@@ -80,10 +80,18 @@ fn connect_or_launch() -> Option<Stream> {
     None
 }
 
-/// Forward one captured job to the app and return its reply bytes.
+/// Forward one captured job (or a `{"ping":true}` health check) to the app and
+/// return its reply bytes.
 fn forward(job_bytes: &[u8]) -> Option<Vec<u8>> {
-    let job: CaptureJob = serde_json::from_slice(job_bytes).ok()?;
-    let req = BridgeRequest::new(job);
+    let is_ping = serde_json::from_slice::<serde_json::Value>(job_bytes)
+        .ok()
+        .and_then(|v| v.get("ping").and_then(|p| p.as_bool()))
+        .unwrap_or(false);
+    let req = if is_ping {
+        BridgeRequest::ping()
+    } else {
+        BridgeRequest::new(serde_json::from_slice::<CaptureJob>(job_bytes).ok()?)
+    };
     let req_bytes = serde_json::to_vec(&req).ok()?;
 
     let mut sock = connect_or_launch()?;

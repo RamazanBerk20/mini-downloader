@@ -1,6 +1,7 @@
 //! App-level scheduler: applies time-window policy (pause/resume all, global
 //! speed cap) on top of aria2, which has no wall-clock scheduling of its own.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,22 +15,50 @@ use minidl_core::model::Schedule;
 
 pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
     tauri::async_runtime::spawn(async move {
-        let mut last_minute: i64 = -1;
+        // Fire any rule whose minute falls in the window since the last check,
+        // not only an exact `== minute` sample. A suspended laptop can skip the
+        // exact minute entirely; on wake the gap is large and we still fire the
+        // rules that were due. `fired` (per rule id → ordinal date) prevents a
+        // double-fire within the same day.
+        let mut last_min: i64 = -1;
+        let mut last_day: i32 = 0;
+        let mut fired: HashMap<i64, i32> = HashMap::new();
         loop {
             tokio::time::sleep(Duration::from_secs(20)).await;
             let now = chrono::Local::now();
-            let minute = now.hour() as i64 * 60 + now.minute() as i64;
-            if minute == last_minute {
-                continue; // fire each rule at most once per minute
-            }
-            last_minute = minute;
+            let now_min = now.hour() as i64 * 60 + now.minute() as i64;
+            let epoch_day = now.num_days_from_ce();
             let day_bit = 1i64 << now.weekday().num_days_from_monday();
 
+            if last_min < 0 {
+                // First tick: establish a baseline, don't retroactively fire.
+                last_min = now_min;
+                last_day = epoch_day;
+                continue;
+            }
+
+            let same_day = epoch_day == last_day && now_min >= last_min;
             for s in db.list_schedules().unwrap_or_default() {
-                if s.enabled && (s.days_mask & day_bit) != 0 && s.at_minute == minute {
+                if !s.enabled || (s.days_mask & day_bit) == 0 {
+                    continue;
+                }
+                let am = s.at_minute;
+                // Minute fell inside (last_min, now_min], handling a midnight/day
+                // wrap (or a long suspend across midnight) as a split window.
+                let passed = if same_day {
+                    am > last_min && am <= now_min
+                } else {
+                    am > last_min || am <= now_min
+                };
+                if passed && fired.get(&s.id) != Some(&epoch_day) {
                     apply(&app, &engine, &s).await;
+                    fired.insert(s.id, epoch_day);
                 }
             }
+            // Keep the guard map from growing: only today's fires matter.
+            fired.retain(|_, d| *d == epoch_day);
+            last_min = now_min;
+            last_day = epoch_day;
         }
     });
 }

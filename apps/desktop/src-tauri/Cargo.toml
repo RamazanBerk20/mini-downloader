@@ -37,3 +37,4 @@ winreg = "0.55"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+xattr = "1"

@@ -25,12 +25,20 @@ pub struct MediaInfo {
     pub formats: Vec<Format>,
 }
 
-/// Run `yt-dlp -J` and extract the title + selectable formats.
-pub async fn probe(ytdlp: &Path, url: &str) -> Result<MediaInfo> {
-    let out = tokio::process::Command::new(ytdlp)
-        // `--` terminates option parsing so a URL beginning with `-` (e.g. a
-        // pasted `--config-location=...`) is never treated as a yt-dlp flag.
-        .args(["-J", "--no-warnings", "--no-playlist", "--", url])
+/// Run `yt-dlp -J` and extract the title + selectable formats. `headers` are
+/// `"Name: value"` lines replayed via `--add-header` so members-only/authed
+/// pages probe correctly (empty for a plain user-entered URL).
+pub async fn probe(ytdlp: &Path, url: &str, headers: &[String]) -> Result<MediaInfo> {
+    let mut cmd = tokio::process::Command::new(ytdlp);
+    cmd.args(["-J", "--no-warnings", "--no-playlist"]);
+    for h in headers {
+        cmd.arg("--add-header").arg(h);
+    }
+    // `--` terminates option parsing so a URL beginning with `-` (e.g. a pasted
+    // `--config-location=...`) is never treated as a yt-dlp flag.
+    let out = cmd
+        .arg("--")
+        .arg(url)
         .output()
         .await
         .context("running yt-dlp -J")?;

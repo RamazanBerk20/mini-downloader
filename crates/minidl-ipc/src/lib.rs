@@ -116,6 +116,10 @@ impl CaptureJob {
 pub struct BridgeRequest {
     pub protocol_version: u32,
     pub job: CaptureJob,
+    /// A connectivity check from the extension — the app replies ok without
+    /// ingesting anything. Lets the options page confirm the bridge is wired.
+    #[serde(default)]
+    pub ping: bool,
 }
 
 impl BridgeRequest {
@@ -123,6 +127,29 @@ impl BridgeRequest {
         Self {
             protocol_version: PROTOCOL_VERSION,
             job,
+            ping: false,
+        }
+    }
+
+    /// A health-check request carrying a placeholder job.
+    pub fn ping() -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            ping: true,
+            job: CaptureJob {
+                url: "ping://".into(),
+                filename: None,
+                referrer: None,
+                user_agent: None,
+                cookie: None,
+                extra_headers: Vec::new(),
+                kind: DownloadKind::Http,
+                mime: None,
+                size: None,
+                page_url: None,
+                cookie_store_id: None,
+                torrent_b64: None,
+            },
         }
     }
 }

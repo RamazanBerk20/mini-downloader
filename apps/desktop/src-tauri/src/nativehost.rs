@@ -120,6 +120,14 @@ async fn handle_conn(mut conn: Stream, ctx: Ctx) {
     }
 
     let reply = match serde_json::from_slice::<BridgeRequest>(&buf) {
+        Ok(req) if req.protocol_version == ipc::PROTOCOL_VERSION && req.ping => {
+            // Health check: confirm the bridge is alive without ingesting.
+            BridgeReply {
+                ok: true,
+                job_id: None,
+                error: Some(format!("Mini Downloader (protocol {})", ipc::PROTOCOL_VERSION)),
+            }
+        }
         Ok(req) if req.protocol_version == ipc::PROTOCOL_VERSION => {
             let defaults = ctx.defaults.lock().unwrap().clone();
             match ingest(
@@ -214,29 +222,66 @@ pub fn install_browser_integration() -> Result<Vec<String>, String> {
     let home = Path::new(&home);
     let mut installed = Vec::new();
 
-    // ~/.mozilla always (Firefox + most forks read it); fork dirs if present.
+    // ~/.mozilla always (Firefox + most forks read it); fork + Flatpak/Snap dirs
+    // if present (a growing share of Linux users run sandboxed browsers).
     let ff = firefox_manifest(&host_path);
-    for sub in [".mozilla", ".zen", ".librewolf", ".waterfox"] {
+    let ff_native = "native-messaging-hosts";
+    let mut ff_dirs: Vec<PathBuf> = vec![home.join(".mozilla").join(ff_native)];
+    for sub in [".zen", ".librewolf", ".waterfox"] {
         let base = home.join(sub);
-        if sub == ".mozilla" || base.exists() {
-            if let Some(p) = write_manifest(&base.join("native-messaging-hosts"), &ff) {
-                installed.push(p);
-            }
+        if base.exists() {
+            ff_dirs.push(base.join(ff_native));
+        }
+    }
+    // Flatpak / Snap Firefox keep their profile inside the sandbox home.
+    for rel in [
+        ".var/app/org.mozilla.firefox/.mozilla",
+        ".var/app/io.gitlab.librewolf-community/.librewolf",
+        "snap/firefox/common/.mozilla",
+    ] {
+        let base = home.join(rel);
+        if base.exists() {
+            ff_dirs.push(base.join(ff_native));
+        }
+    }
+    for dir in ff_dirs {
+        if let Some(p) = write_manifest(&dir, &ff) {
+            installed.push(p);
         }
     }
 
     let cr = chromium_manifest(&host_path);
+    let cr_native = "NativeMessagingHosts";
     for sub in [
         "google-chrome",
+        "google-chrome-beta",
+        "google-chrome-unstable",
         "chromium",
+        "ungoogled-chromium",
         "BraveSoftware/Brave-Browser",
         "microsoft-edge",
         "vivaldi",
+        "opera",
     ] {
         let base = home.join(".config").join(sub);
         if base.exists() {
-            if let Some(p) = write_manifest(&base.join("NativeMessagingHosts"), &cr) {
+            if let Some(p) = write_manifest(&base.join(cr_native), &cr) {
                 installed.push(p);
+            }
+        }
+    }
+    // Flatpak Chromium-family browsers.
+    for id in ["com.google.Chrome", "org.chromium.Chromium", "com.brave.Browser"] {
+        let base = home.join(format!(".var/app/{id}/config"));
+        if base.exists() {
+            // The per-browser subdir name matches the ~/.config layout.
+            for sub in ["google-chrome", "chromium", "BraveSoftware/Brave-Browser"] {
+                let d = base.join(sub);
+                if d.exists() {
+                    if let Some(p) = write_manifest(&d.join(cr_native), &cr) {
+                        installed.push(p);
+                    }
+                }
             }
         }
     }

@@ -85,6 +85,18 @@ CREATE TABLE settings (
 );
 "#;
 
+/// v2: durable replay context (auth survives retry/resume/restart) + yt-dlp
+/// format + per-download speed cap. `ALTER TABLE ADD COLUMN` is safe/idempotent
+/// under the version gate.
+const MIGRATION_2: &str = r#"
+ALTER TABLE downloads ADD COLUMN user_agent    TEXT;
+ALTER TABLE downloads ADD COLUMN cookie        TEXT;
+ALTER TABLE downloads ADD COLUMN extra_headers TEXT;
+ALTER TABLE downloads ADD COLUMN page_url      TEXT;
+ALTER TABLE downloads ADD COLUMN format_id     TEXT;
+ALTER TABLE downloads ADD COLUMN speed_limit   INTEGER;
+"#;
+
 /// Default categories seeded on first run. Dirs are `~`-relative markers the app
 /// resolves at runtime.
 const DEFAULT_CATEGORIES: &[(&str, &str, &str)] = &[
@@ -98,7 +110,8 @@ const DEFAULT_CATEGORIES: &[(&str, &str, &str)] = &[
 
 const COLS: &str = "id, gid, url, filename, dir, status, kind, total_bytes, completed_bytes, \
     download_speed, upload_speed, connections, num_seeders, referrer, info_hash, \
-    error_code, error_message, category_id, created_at, finished_at";
+    error_code, error_message, category_id, created_at, finished_at, \
+    user_agent, cookie, extra_headers, page_url, format_id, speed_limit";
 
 fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
     let status: String = row.get(5)?;
@@ -123,14 +136,42 @@ fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
         category_id: row.get(17)?,
         created_at: row.get(18)?,
         finished_at: row.get(19)?,
+        user_agent: row.get(20)?,
+        cookie: row.get(21)?,
+        extra_headers: row.get(22)?,
+        page_url: row.get(23)?,
+        format_id: row.get(24)?,
+        speed_limit: row.get(25)?,
     })
 }
 
 impl Db {
+    /// Lock the connection, recovering from a poisoned mutex instead of
+    /// panicking. A panic while another thread held the lock would otherwise
+    /// poison it and turn every subsequent DB call into a cascading crash; the
+    /// connection itself is still usable.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(data_dir).ok();
-        let conn = Connection::open(data_dir.join("minidl.db"))?;
-        Self::init(conn)
+        let path = data_dir.join("minidl.db");
+        let conn = Connection::open(&path)?;
+        let db = Self::init(conn)?;
+        // The DB holds every URL/referrer and (post-v2) replayed cookies/headers;
+        // keep it unreadable by other local users on a traversable home. The dir
+        // gets 0700, the DB + its WAL/SHM sidecars 0600.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700));
+            for suffix in ["", "-wal", "-shm"] {
+                let p = data_dir.join(format!("minidl.db{suffix}"));
+                let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+        Ok(db)
     }
 
     pub fn open_in_memory() -> Result<Self> {
@@ -150,14 +191,11 @@ impl Db {
     }
 
     fn migrate(&self) -> Result<()> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        // Each step runs in its own transaction (atomic — a crash mid-step rolls
+        // back including the `user_version` bump, so re-running is safe).
         if version < 1 {
-            // Wrap DDL + seed + version bump in one transaction. Otherwise a crash
-            // after `CREATE TABLE downloads` commits but before `user_version=1`
-            // leaves the DB half-migrated: the next launch re-runs MIGRATION_1,
-            // `CREATE TABLE` fails "already exists", and the app can never open it.
-            // (`user_version` is part of the DB header and rolls back with the tx.)
             let tx = conn.transaction()?;
             tx.execute_batch(MIGRATION_1)?;
             for (name, dir, rules) in DEFAULT_CATEGORIES {
@@ -169,42 +207,60 @@ impl Db {
             tx.execute_batch("PRAGMA user_version=1;")?;
             tx.commit()?;
         }
+        if version < 2 {
+            let tx = conn.transaction()?;
+            tx.execute_batch(MIGRATION_2)?;
+            tx.execute_batch("PRAGMA user_version=2;")?;
+            tx.commit()?;
+        }
         Ok(())
     }
 
     // ---- downloads ----
 
     pub fn insert_download(&self, d: &NewDownload) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
-            "INSERT INTO downloads (url, filename, dir, kind, referrer, category_id, status, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7)",
-            params![d.url, d.filename, d.dir, d.kind, d.referrer, d.category_id, now()],
+            "INSERT INTO downloads
+                (url, filename, dir, kind, referrer, category_id, status, created_at,
+                 user_agent, cookie, extra_headers, page_url, format_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![
+                d.url, d.filename, d.dir, d.kind, d.referrer, d.category_id, now(),
+                d.user_agent, d.cookie, d.extra_headers, d.page_url, d.format_id
+            ],
         )?;
         Ok(conn.last_insert_rowid())
     }
 
+    /// Persist a per-download speed cap (bytes/sec; `None` clears it).
+    pub fn set_speed_limit(&self, id: i64, limit: Option<i64>) -> Result<()> {
+        let conn = self.lock();
+        conn.execute("UPDATE downloads SET speed_limit=?1 WHERE id=?2", params![limit, id])?;
+        Ok(())
+    }
+
     pub fn set_gid(&self, id: i64, gid: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute("UPDATE downloads SET gid=?1 WHERE id=?2", params![gid, id])?;
         Ok(())
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Download>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let sql = format!("SELECT {COLS} FROM downloads WHERE id=?1");
         Ok(conn.query_row(&sql, params![id], row_to_download).optional()?)
     }
 
     pub fn find_by_gid(&self, gid: &str) -> Result<Option<Download>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let sql = format!("SELECT {COLS} FROM downloads WHERE gid=?1");
         Ok(conn.query_row(&sql, params![gid], row_to_download).optional()?)
     }
 
     /// Match by info_hash (BitTorrent) or URL — used to rebind a moved GID.
     pub fn find_by_infohash_or_url(&self, info_hash: Option<&str>, url: &str) -> Result<Option<Download>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let sql = format!(
             "SELECT {COLS} FROM downloads WHERE (?1 IS NOT NULL AND info_hash=?1) OR url=?2 ORDER BY id DESC LIMIT 1"
         );
@@ -212,7 +268,7 @@ impl Db {
     }
 
     pub fn list(&self, status: Option<&str>) -> Result<Vec<Download>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let (sql, has_filter) = match status {
             Some(_) => (format!("SELECT {COLS} FROM downloads WHERE status=?1 ORDER BY id DESC"), true),
             None => (format!("SELECT {COLS} FROM downloads ORDER BY id DESC"), false),
@@ -231,7 +287,7 @@ impl Db {
     /// Rows the app thinks are still running (active/waiting/paused/queued) — the
     /// reconciliation candidates on startup.
     pub fn running_rows(&self) -> Result<Vec<Download>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let sql = format!(
             "SELECT {COLS} FROM downloads WHERE status IN ('active','waiting','paused','queued')"
         );
@@ -243,7 +299,7 @@ impl Db {
     }
 
     pub fn set_status(&self, id: i64, status: DownloadStatus) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let finished = if status.is_terminal() { Some(now()) } else { None };
         conn.execute(
             "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3",
@@ -257,7 +313,7 @@ impl Db {
     /// WebSocket consumer and the 1 Hz poller fires side effects (notify /
     /// organize) exactly once — the loser's `UPDATE` matches no row.
     pub fn set_status_if_changed(&self, id: i64, status: DownloadStatus) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let finished = if status.is_terminal() { Some(now()) } else { None };
         let n = conn.execute(
             "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3 AND status<>?1",
@@ -267,7 +323,7 @@ impl Db {
     }
 
     pub fn set_error(&self, id: i64, code: Option<&str>, message: Option<&str>) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
             "UPDATE downloads SET status='error', error_code=?1, error_message=?2, finished_at=?3 WHERE id=?4",
             params![code, message, now(), id],
@@ -276,20 +332,20 @@ impl Db {
     }
 
     pub fn set_filename(&self, id: i64, filename: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute("UPDATE downloads SET filename=?1 WHERE id=?2", params![filename, id])?;
         Ok(())
     }
 
     pub fn set_info_hash(&self, id: i64, info_hash: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute("UPDATE downloads SET info_hash=?1 WHERE id=?2", params![info_hash, id])?;
         Ok(())
     }
 
     /// Record where a finished file was moved to (category auto-organize).
     pub fn set_dir_and_category(&self, id: i64, dir: &str, category_id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
             "UPDATE downloads SET dir=?1, category_id=?2 WHERE id=?3",
             params![dir, category_id, id],
@@ -309,7 +365,7 @@ impl Db {
         connections: i64,
         num_seeders: i64,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
             "UPDATE downloads SET completed_bytes=?1, total_bytes=?2, download_speed=?3,
                 upload_speed=?4, connections=?5, num_seeders=?6 WHERE gid=?7",
@@ -326,7 +382,7 @@ impl Db {
         total: i64,
         dl_speed: i64,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
             "UPDATE downloads SET completed_bytes=?1, total_bytes=?2, download_speed=?3 WHERE id=?4",
             params![completed, total, dl_speed, id],
@@ -335,7 +391,7 @@ impl Db {
     }
 
     pub fn delete(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute("DELETE FROM downloads WHERE id=?1", params![id])?;
         Ok(())
     }
@@ -343,7 +399,7 @@ impl Db {
     // ---- categories ----
 
     pub fn list_categories(&self) -> Result<Vec<Category>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let mut stmt =
             conn.prepare("SELECT id, name, dir, rules, priority FROM categories ORDER BY priority, name")?;
         let rows = stmt
@@ -361,7 +417,7 @@ impl Db {
     }
 
     pub fn upsert_category(&self, name: &str, dir: &str, rules: &str, priority: i64) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         // `RETURNING id` gives the row's id on both the INSERT and the DO UPDATE
         // path. `last_insert_rowid()` would return a stale/unrelated rowid when
         // the ON CONFLICT branch runs (no insert happens).
@@ -376,7 +432,7 @@ impl Db {
     }
 
     pub fn delete_category(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute("DELETE FROM categories WHERE id=?1", params![id])?;
         Ok(())
     }
@@ -384,7 +440,7 @@ impl Db {
     // ---- schedules ----
 
     pub fn list_schedules(&self) -> Result<Vec<Schedule>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         let mut stmt = conn.prepare(
             "SELECT id, name, action, days_mask, at_minute, speed_limit, enabled FROM schedules ORDER BY at_minute",
         )?;
@@ -415,7 +471,7 @@ impl Db {
         speed_limit: Option<i64>,
         enabled: bool,
     ) -> Result<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         match id {
             Some(id) => {
                 conn.execute(
@@ -435,7 +491,7 @@ impl Db {
     }
 
     pub fn delete_schedule(&self, id: i64) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute("DELETE FROM schedules WHERE id=?1", params![id])?;
         Ok(())
     }
@@ -443,14 +499,14 @@ impl Db {
     // ---- settings ----
 
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         Ok(conn
             .query_row("SELECT value FROM settings WHERE key=?1", params![key], |r| r.get(0))
             .optional()?)
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock();
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value=?2",

@@ -93,13 +93,15 @@ impl YtDlp {
         self.ytdlp.is_some()
     }
 
-    pub async fn probe(&self, url: &str) -> Result<MediaInfo, String> {
+    pub async fn probe(&self, url: &str, headers: &[String]) -> Result<MediaInfo, String> {
         let bin = self.ytdlp.clone().ok_or("yt-dlp not found")?;
-        minidl_core::ytdlp::probe(&bin, url).await.map_err(|e| e.to_string())
+        minidl_core::ytdlp::probe(&bin, url, headers).await.map_err(|e| e.to_string())
     }
 
-    /// Start a download for an existing DB row.
-    pub fn start(&self, id: i64, url: String, format_id: Option<String>) {
+    /// Start a download for an existing DB row. `headers` are `"Name: value"`
+    /// replay lines (cookies/UA/referer) so authed streams keep working across
+    /// resume/restart; `format_id` pins the chosen quality.
+    pub fn start(&self, id: i64, url: String, format_id: Option<String>, headers: Vec<String>) {
         let Some(bin) = self.ytdlp.clone() else {
             let _ = self.db.set_error(id, None, Some("yt-dlp not available"));
             let _ = self.app.emit(EV_ERROR, json!({ "id": id, "message": "yt-dlp not available" }));
@@ -121,7 +123,7 @@ impl YtDlp {
             old.abort();
         }
         let jh = tauri::async_runtime::spawn(async move {
-            run(app, db, running.clone(), bin, ffmpeg, dir, id, url, format_id).await;
+            run(app, db, running.clone(), bin, ffmpeg, dir, id, url, format_id, headers).await;
         });
         guard.insert(id, jh);
     }
@@ -133,6 +135,15 @@ impl YtDlp {
             true
         } else {
             false
+        }
+    }
+
+    /// Abort every running yt-dlp download — called on app shutdown so no
+    /// yt-dlp/aria2c child is left orphaned.
+    pub fn cancel_all(&self) {
+        let mut map = self.running.lock().unwrap();
+        for (_, jh) in map.drain() {
+            jh.abort();
         }
     }
 }
@@ -148,6 +159,7 @@ async fn run(
     id: i64,
     url: String,
     format_id: Option<String>,
+    headers: Vec<String>,
 ) {
     let name_file = std::env::temp_dir().join(format!("minidl-ytdlp-{id}.name"));
     let _ = std::fs::remove_file(&name_file);
@@ -168,6 +180,11 @@ async fn run(
     if let Some(ff) = &ffmpeg {
         cmd.arg("--ffmpeg-location").arg(ff);
     }
+    // Replay captured cookies/UA/referer so authed or members-only streams keep
+    // working across resume/restart.
+    for h in &headers {
+        cmd.arg("--add-header").arg(h);
+    }
     cmd.arg("--downloader")
         .arg("aria2c")
         .arg("--downloader-args")
@@ -182,6 +199,15 @@ async fn run(
     // grandchild), not just the yt-dlp parent.
     #[cfg(unix)]
     cmd.process_group(0);
+    // Also die if the app dies abruptly (e.g. std::process::exit, where Drop
+    // guards never run): the kernel sends SIGKILL when our parent exits.
+    #[cfg(unix)]
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong);
+            Ok(())
+        });
+    }
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -290,6 +316,11 @@ async fn run(
             .map(String::from);
         if let Some(b) = &base {
             let _ = db.set_filename(id, b);
+        }
+        // Mark-of-the-web: record where the media came from.
+        #[cfg(unix)]
+        if let Some(p) = &fpath {
+            let _ = xattr::set(p, "user.xdg.origin.url", url.as_bytes());
         }
         let _ = db.set_status(id, DownloadStatus::Complete);
         let _ = app.emit(EV_COMPLETE, json!({ "id": id, "name": base, "path": fpath }));

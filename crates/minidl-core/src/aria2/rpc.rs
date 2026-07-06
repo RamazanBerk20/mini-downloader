@@ -5,6 +5,20 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Lean key set for the 1 Hz progress poll — numbers only. Deliberately omits
+/// `files`/`bittorrent`, which for a multi-thousand-file torrent would serialize
+/// the entire file array + announce list every second only to be discarded.
+pub const POLL_KEYS: &[&str] = &[
+    "gid",
+    "totalLength",
+    "completedLength",
+    "uploadLength",
+    "downloadSpeed",
+    "uploadSpeed",
+    "connections",
+    "numSeeders",
+];
+
 /// The status fields the UI/DB need. Keep this tight — aria2 serializes the
 /// full struct otherwise, which is wasteful for large torrents.
 pub const STATUS_KEYS: &[&str] = &[
@@ -146,6 +160,10 @@ impl RpcClient {
     }
     pub async fn unpause_all(&self) -> Result<Value> {
         self.call("aria2.unpauseAll", vec![]).await
+    }
+    /// Reorder a queued download. `how` is `POS_SET`/`POS_CUR`/`POS_END`.
+    pub async fn change_position(&self, gid: &str, pos: i64, how: &str) -> Result<Value> {
+        self.call("aria2.changePosition", vec![json!(gid), json!(pos), json!(how)]).await
     }
 
     // ---- query ----

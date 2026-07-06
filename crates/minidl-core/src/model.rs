@@ -66,6 +66,13 @@ impl DownloadStatus {
         }
     }
 
+    /// Map an aria2 status string to an app status, or `None` for an
+    /// unrecognized value. The one place this mapping lives (previously
+    /// open-coded in several call sites that could drift).
+    pub fn from_aria2_str(s: &str) -> Option<Self> {
+        Aria2Status::parse(s).map(Self::from_aria2)
+    }
+
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Complete | Self::Error | Self::Removed)
     }
@@ -99,6 +106,27 @@ pub struct Download {
     pub category_id: Option<i64>,
     pub created_at: i64,
     pub finished_at: Option<i64>,
+    /// Replay context captured from the browser, persisted so retry/resume/
+    /// reconcile don't drop authentication (v2 columns).
+    pub user_agent: Option<String>,
+    pub cookie: Option<String>,
+    /// JSON-encoded `Vec<(String, String)>` of extra headers.
+    pub extra_headers: Option<String>,
+    /// Originating page URL — handed to yt-dlp for stream downloads.
+    pub page_url: Option<String>,
+    /// yt-dlp chosen format id, replayed on resume so quality is stable.
+    pub format_id: Option<String>,
+    /// Per-download speed cap in bytes/sec (aria2 `max-download-limit`).
+    pub speed_limit: Option<i64>,
+}
+
+impl Download {
+    /// True when this row is driven by yt-dlp (no aria2 GID). yt-dlp rows never
+    /// receive a GID, so both the kind and the absent GID agree — use this one
+    /// predicate everywhere instead of branching on GID/kind independently.
+    pub fn is_ytdlp(&self) -> bool {
+        matches!(self.kind.as_str(), "video" | "hls" | "dash")
+    }
 }
 
 /// Parameters to create a new download row.
@@ -110,6 +138,11 @@ pub struct NewDownload {
     pub kind: String,
     pub referrer: Option<String>,
     pub category_id: Option<i64>,
+    pub user_agent: Option<String>,
+    pub cookie: Option<String>,
+    pub extra_headers: Option<String>,
+    pub page_url: Option<String>,
+    pub format_id: Option<String>,
 }
 
 /// A category: a destination folder + match rules for auto-organize.

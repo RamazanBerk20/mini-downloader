@@ -59,10 +59,22 @@ impl Aria2Process {
 
         std::fs::create_dir_all(&opts.download_dir).ok();
         std::fs::create_dir_all(&opts.data_dir).ok();
+        // Keep the data dir private: the session file below holds replayed
+        // `Cookie:`/`Authorization:` header lines and signed query tokens.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&opts.data_dir, std::fs::Permissions::from_mode(0o700));
+        }
         let session_path = opts.data_dir.join("aria2.session");
         // aria2 warns if --input-file is missing; ensure it exists (may be empty).
         if !session_path.exists() {
             std::fs::write(&session_path, b"").ok();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&session_path, std::fs::Permissions::from_mode(0o600));
         }
         let dht_path = opts.data_dir.join("dht.dat");
 

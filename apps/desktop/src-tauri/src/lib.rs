@@ -88,11 +88,17 @@ pub fn run() {
                 })
                 .filter(|p| p.is_file());
 
+            let max_concurrent = db
+                .get_setting("max_concurrent")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(5);
             let engine = tauri::async_runtime::block_on(Engine::launch(LaunchOptions {
                 aria2c_path,
                 download_dir: download_dir.clone(),
                 data_dir: data_dir.clone(),
-                max_concurrent: 5,
+                max_concurrent,
             }))
             .map_err(|e| e.to_string())?;
             let engine = Arc::new(engine);
@@ -221,7 +227,11 @@ pub fn run() {
             commands::list_downloads,
             commands::pause_download,
             commands::resume_download,
+            commands::retry_download,
             commands::remove_download,
+            commands::move_in_queue,
+            commands::set_max_concurrent,
+            commands::get_max_concurrent,
             commands::pause_all,
             commands::resume_all,
             commands::remove_completed,
@@ -247,6 +257,17 @@ pub fn run() {
             commands::get_engine_defaults,
             commands::set_engine_defaults,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            // On a real quit (tray → Quit; close-to-tray intercepts the window
+            // close), flush aria2's session and kill yt-dlp/aria2c children so
+            // nothing is orphaned still writing to disk.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                let state = app_handle.state::<AppState>();
+                state.ytdlp.cancel_all();
+                let engine = state.engine.clone();
+                tauri::async_runtime::block_on(async move { engine.shutdown().await });
+            }
+        });
 }
