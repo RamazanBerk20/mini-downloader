@@ -1,13 +1,13 @@
 //! End-to-end engine test against a real aria2c. Ignored by default (needs
 //! network + `aria2c` on PATH). Run with:
-//!   cargo test -p ldm-core --test engine_e2e -- --ignored --nocapture
+//!   cargo test -p minidl-core --test engine_e2e -- --ignored --nocapture
 
 use std::time::Duration;
 
-use ldm_core::aria2::{
+use minidl_core::aria2::{
     build_add_options, Aria2Event, Engine, EngineDefaults, LaunchOptions, STATUS_KEYS,
 };
-use ldm_core::ipc::{CaptureJob, DownloadKind};
+use minidl_core::ipc::{CaptureJob, DownloadKind};
 
 fn job(url: &str) -> CaptureJob {
     CaptureJob {

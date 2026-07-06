@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use ldm_core::aria2::{Engine, EngineDefaults};
-use ldm_core::db::Db;
+use minidl_core::aria2::{Engine, EngineDefaults};
+use minidl_core::db::Db;
 
 /// Shared application state, managed by Tauri and reachable from every command.
 pub struct AppState {

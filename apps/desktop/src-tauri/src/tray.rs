@@ -17,7 +17,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().unwrap().clone())
-        .tooltip("Linux Download Manager")
+        .tooltip("Mini Downloader")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => toggle_window(app),

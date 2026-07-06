@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use ldm_ipc::{app_path_file, bridge_socket_path, BridgeReply, BridgeRequest, CaptureJob};
+use minidl_ipc::{app_path_file, bridge_socket_path, BridgeReply, BridgeRequest, CaptureJob};
 
 const MAX_MSG: usize = 64 * 1024 * 1024;
 
@@ -85,7 +85,7 @@ fn main() {
     // For `sendNativeMessage` this loop runs once; for `connectNative`, per message.
     while let Some(job_bytes) = read_frame(&mut input, true) {
         let reply = forward(&job_bytes).unwrap_or_else(|| {
-            serde_json::to_vec(&BridgeReply::rejected("LDM app unavailable")).unwrap_or_default()
+            serde_json::to_vec(&BridgeReply::rejected("Mini Downloader app unavailable")).unwrap_or_default()
         });
         let mut out = stdout.lock();
         if write_frame(&mut out, &reply, true).is_err() {

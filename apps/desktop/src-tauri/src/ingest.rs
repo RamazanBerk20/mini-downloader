@@ -6,10 +6,10 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use ldm_core::aria2::{build_add_options, Engine, EngineDefaults};
-use ldm_core::db::Db;
-use ldm_core::ipc::{CaptureJob, DownloadKind};
-use ldm_core::model::{DownloadStatus, NewDownload};
+use minidl_core::aria2::{build_add_options, Engine, EngineDefaults};
+use minidl_core::db::Db;
+use minidl_core::ipc::{CaptureJob, DownloadKind};
+use minidl_core::model::{DownloadStatus, NewDownload};
 
 fn kind_str(k: DownloadKind) -> &'static str {
     match k {

@@ -3,7 +3,7 @@
 //! aria2 requires **every option value to be a string** (`"16"`, `"1M"`,
 //! `"true"`) — a JSON number or bool is rejected. All builders here emit strings.
 
-use ldm_ipc::CaptureJob;
+use minidl_ipc::CaptureJob;
 use serde_json::{Map, Value};
 
 /// Per-download tuning that maps to IDM-style "connections/segments".
@@ -75,7 +75,7 @@ pub fn build_add_options(job: &CaptureJob, dir: &str, defaults: &EngineDefaults)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ldm_ipc::DownloadKind;
+    use minidl_ipc::DownloadKind;
 
     fn job() -> CaptureJob {
         CaptureJob {

@@ -1,4 +1,4 @@
-# Linux Download Manager (LDM)
+# Mini Downloader (Mini Downloader)
 
 An IDM/JDownloader-class download manager for Linux, with a Firefox extension
 that catches downloads. Rust + Tauri v2 GUI wrapping **aria2** as the engine,

@@ -8,9 +8,9 @@ use chrono::{Datelike, Timelike};
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
-use ldm_core::aria2::Engine;
-use ldm_core::db::Db;
-use ldm_core::model::Schedule;
+use minidl_core::aria2::Engine;
+use minidl_core::db::Db;
+use minidl_core::model::Schedule;
 
 pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
     tauri::async_runtime::spawn(async move {

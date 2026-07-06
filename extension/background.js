@@ -1,10 +1,10 @@
-// LDM Connector — background/event page.
+// Mini Downloader Connector — background/event page.
 // Path A (primary): webRequest header sniff + cancel → full cookie/header fidelity.
 // Path B (fallback): downloads.onCreated + cancel/erase + cookies.getAll.
 // Both forward a CaptureJob to the native host over native messaging.
 
 const b = globalThis.browser || globalThis.chrome;
-const HOST = "com.ldm.host";
+const HOST = "com.minidownloader.host";
 
 // Firefox exposes `browser`; Chromium exposes only `chrome`. Firefox MV3 keeps
 // blocking webRequest (Path A: sniff headers + cancel → full cookie fidelity);
@@ -54,11 +54,11 @@ function notify(title, message) {
 async function sendJob(job) {
   try {
     const reply = await b.runtime.sendNativeMessage(HOST, job);
-    if (reply && reply.ok) notify("Sent to LDM", job.filename || job.url);
-    else notify("LDM rejected the download", (reply && reply.error) || "unknown error");
+    if (reply && reply.ok) notify("Sent to Mini Downloader", job.filename || job.url);
+    else notify("Mini Downloader rejected the download", (reply && reply.error) || "unknown error");
     return reply;
   } catch (e) {
-    notify("LDM not reachable", "Open Linux Download Manager and enable browser integration.");
+    notify("Mini Downloader not reachable", "Open Mini Downloader and enable browser integration.");
     return null;
   }
 }
@@ -242,7 +242,7 @@ function createMenu() {
     b.contextMenus.removeAll(() => {
       b.contextMenus.create({
         id: "ldm-download",
-        title: "Download with LDM",
+        title: "Download with Mini Downloader",
         contexts: ["link", "video", "audio", "image", "selection"],
       });
     });

@@ -1,4 +1,4 @@
-//! Shared IPC contract for Linux Download Manager.
+//! Shared IPC contract for Mini Downloader.
 //!
 //! This is the single canonical definition of the message a captured download
 //! travels in, from the Firefox extension all the way to the aria2 engine. The
@@ -17,11 +17,11 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Native-messaging host name — must equal the manifest `name` and the string
 /// the extension passes to `runtime.connectNative()` / `sendNativeMessage()`.
-pub const NATIVE_HOST_NAME: &str = "com.ldm.host";
+pub const NATIVE_HOST_NAME: &str = "com.minidownloader.host";
 
 /// Firefox add-on id — must match `browser_specific_settings.gecko.id` and the
 /// host manifest `allowed_extensions`.
-pub const EXTENSION_ID: &str = "ldm@ramazan.dev";
+pub const EXTENSION_ID: &str = "minidownloader@ramazan.dev";
 
 /// Chromium extension id — derived from the `key` in `manifest.chrome.json`,
 /// used in the host manifest `allowed_origins` (`chrome-extension://<id>/`).
@@ -91,7 +91,7 @@ fn default_kind() -> DownloadKind {
 impl CaptureJob {
     /// Build the ordered list of `"Name: value"` header lines to replay this
     /// request — the exact shape aria2's `header` option and yt-dlp's
-    /// `--add-header` both consume. aria2-specific wiring lives in `ldm-core`;
+    /// `--add-header` both consume. aria2-specific wiring lives in `minidl-core`;
     /// this stays dependency-free.
     pub fn header_lines(&self) -> Vec<String> {
         let mut out = Vec::new();
@@ -154,10 +154,10 @@ pub fn bridge_socket_path() -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("ldm").join("bridge.sock")
+    base.join("minidownloader").join("bridge.sock")
 }
 
-/// `$XDG_DATA_HOME/ldm` or `~/.local/share/ldm`. Persistent; shared by the app
+/// `$XDG_DATA_HOME/minidownloader` or `~/.local/share/minidownloader`. Persistent; shared by the app
 /// and the native host so the host can find where the app binary lives.
 pub fn data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
@@ -168,7 +168,7 @@ pub fn data_dir() -> PathBuf {
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join(".local/share")
         })
-        .join("ldm")
+        .join("minidownloader")
 }
 
 /// File the app writes with the absolute path to its own executable, so the

@@ -1,5 +1,5 @@
 [package]
-name = "ldm-ipc"
+name = "minidl-ipc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

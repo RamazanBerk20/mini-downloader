@@ -14,17 +14,17 @@ fn config_home() -> PathBuf {
         .unwrap_or_else(|| home().join(".config"))
 }
 
-/// `$XDG_DATA_HOME/ldm` or `~/.local/share/ldm`. Holds the DB, aria2 session, logs.
+/// `$XDG_DATA_HOME/minidownloader` or `~/.local/share/minidownloader`. Holds the DB, aria2 session, logs.
 pub fn data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home().join(".local/share"))
-        .join("ldm")
+        .join("minidownloader")
 }
 
-/// `$XDG_CONFIG_HOME/ldm` or `~/.config/ldm`.
+/// `$XDG_CONFIG_HOME/minidownloader` or `~/.config/minidownloader`.
 pub fn config_dir() -> PathBuf {
-    config_home().join("ldm")
+    config_home().join("minidownloader")
 }
 
 /// A per-user writable bin dir for tools that self-update (yt-dlp).

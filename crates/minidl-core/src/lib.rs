@@ -1,4 +1,4 @@
-//! Core engine for Linux Download Manager (GUI-agnostic).
+//! Core engine for Mini Downloader (GUI-agnostic).
 //!
 //! - [`aria2`]: process supervision + JSON-RPC + notifications.
 //! - [`db`]: SQLite persistence.
@@ -13,4 +13,4 @@ pub mod model;
 pub mod paths;
 pub mod ytdlp;
 
-pub use ldm_ipc as ipc;
+pub use minidl_ipc as ipc;

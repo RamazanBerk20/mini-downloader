@@ -13,9 +13,9 @@ use tauri::{async_runtime::JoinHandle, AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-use ldm_core::db::Db;
-use ldm_core::model::DownloadStatus;
-use ldm_core::ytdlp::MediaInfo;
+use minidl_core::db::Db;
+use minidl_core::model::DownloadStatus;
+use minidl_core::ytdlp::MediaInfo;
 
 use crate::events::{EV_COMPLETE, EV_ERROR, EV_STATE, EV_TICK};
 
@@ -42,7 +42,7 @@ impl YtDlp {
     pub fn resolve(app: AppHandle, db: Db, download_dir: PathBuf) -> Self {
         // Prefer a user-writable yt-dlp copy (self-updatable), then the bundled
         // sidecar next to the app, then PATH.
-        let user = ldm_core::paths::bin_dir().join("yt-dlp");
+        let user = minidl_core::paths::bin_dir().join("yt-dlp");
         let ytdlp = if user.is_file() {
             Some(user)
         } else {
@@ -66,7 +66,7 @@ impl YtDlp {
 
     pub async fn probe(&self, url: &str) -> Result<MediaInfo, String> {
         let bin = self.ytdlp.clone().ok_or("yt-dlp not found")?;
-        ldm_core::ytdlp::probe(&bin, url).await.map_err(|e| e.to_string())
+        minidl_core::ytdlp::probe(&bin, url).await.map_err(|e| e.to_string())
     }
 
     /// Start a download for an existing DB row.
@@ -111,7 +111,7 @@ async fn run(
     url: String,
     format_id: Option<String>,
 ) {
-    let name_file = std::env::temp_dir().join(format!("ldm-ytdlp-{id}.name"));
+    let name_file = std::env::temp_dir().join(format!("minidl-ytdlp-{id}.name"));
     let _ = std::fs::remove_file(&name_file);
     let out_tmpl = format!("{}/%(title)s.%(ext)s", dir.display());
 

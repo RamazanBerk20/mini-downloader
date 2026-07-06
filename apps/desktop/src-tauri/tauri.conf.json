@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Linux Download Manager",
+  "productName": "Mini Downloader",
   "version": "0.1.0",
-  "identifier": "io.ldm.app",
+  "identifier": "io.minidownloader.app",
   "build": {
     "beforeDevCommand": "./node_modules/.bin/vite",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Linux Download Manager",
+        "title": "Mini Downloader",
         "width": 1000,
         "height": 680,
         "minWidth": 720,
@@ -26,7 +26,7 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["magnet", "ldm"]
+        "schemes": ["magnet", "minidownloader"]
       }
     }
   },
@@ -49,7 +49,7 @@
         "recommends": ["yt-dlp"],
         "section": "net",
         "files": {
-          "/usr/bin/ldm-native-host": "../../../target/release/ldm-native-host"
+          "/usr/bin/minidl-native-host": "../../../target/release/minidl-native-host"
         },
         "postInstallScript": "scripts/postinstall.sh",
         "postRemoveScript": "scripts/postremove.sh"
@@ -57,7 +57,7 @@
       "rpm": {
         "depends": ["aria2", "ffmpeg"],
         "files": {
-          "/usr/bin/ldm-native-host": "../../../target/release/ldm-native-host"
+          "/usr/bin/minidl-native-host": "../../../target/release/minidl-native-host"
         },
         "postInstallScript": "scripts/postinstall.sh",
         "postRemoveScript": "scripts/postremove.sh"

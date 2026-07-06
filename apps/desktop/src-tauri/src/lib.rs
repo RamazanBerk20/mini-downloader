@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Manager};
 
-use ldm_core::aria2::{Engine, EngineDefaults, LaunchOptions};
-use ldm_core::db::Db;
-use ldm_core::paths;
+use minidl_core::aria2::{Engine, EngineDefaults, LaunchOptions};
+use minidl_core::db::Db;
+use minidl_core::paths;
 
 use state::AppState;
 
@@ -166,7 +166,7 @@ pub fn run() {
             // System tray.
             tray::build(app.handle())?;
 
-            // Deep links (magnet:, ldm:).
+            // Deep links (magnet:, minidownloader:).
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let h = app.handle().clone();

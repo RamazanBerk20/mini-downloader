@@ -10,9 +10,9 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_notification::NotificationExt;
 
-use ldm_core::aria2::{Engine, STATUS_KEYS};
-use ldm_core::db::Db;
-use ldm_core::model::DownloadStatus;
+use minidl_core::aria2::{Engine, STATUS_KEYS};
+use minidl_core::db::Db;
+use minidl_core::model::DownloadStatus;
 
 use crate::events::{Tick, EV_COMPLETE, EV_ERROR, EV_STATE, EV_TICK};
 
@@ -231,7 +231,7 @@ pub async fn reconcile(engine: &Engine, db: &Db) {
 
 /// Move a finished single-file HTTP download into its category folder. Returns
 /// the (possibly new) directory.
-fn organize(db: &Db, row: &ldm_core::model::Download, filename: &str) -> String {
+fn organize(db: &Db, row: &minidl_core::model::Download, filename: &str) -> String {
     let auto = db
         .get_setting("auto_organize")
         .ok()
@@ -242,10 +242,10 @@ fn organize(db: &Db, row: &ldm_core::model::Download, filename: &str) -> String 
         return row.dir.clone();
     }
     let cats = db.list_categories().unwrap_or_default();
-    let Some(cat) = ldm_core::categories::classify(filename, &cats) else {
+    let Some(cat) = minidl_core::categories::classify(filename, &cats) else {
         return row.dir.clone();
     };
-    let target = ldm_core::categories::expand(&cat.dir);
+    let target = minidl_core::categories::expand(&cat.dir);
     let target_str = target.to_string_lossy().to_string();
     if target_str == row.dir {
         return row.dir.clone();

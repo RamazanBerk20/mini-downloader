@@ -1,5 +1,5 @@
 [package]
-name = "ldm-core"
+name = "minidl-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 # scheduler, categories, and SQLite persistence. No Tauri dependency — the
 # desktop app depends on this, not the other way around.
 [dependencies]
-ldm-ipc = { path = "../ldm-ipc" }
+minidl-ipc = { path = "../minidl-ipc" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

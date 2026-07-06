@@ -6,10 +6,10 @@ use base64::Engine;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
-use ldm_core::grabber::ParsedLink;
-use ldm_core::ipc::{CaptureJob, DownloadKind};
-use ldm_core::model::{Category, Download, DownloadStatus, NewDownload, Schedule};
-use ldm_core::ytdlp::MediaInfo;
+use minidl_core::grabber::ParsedLink;
+use minidl_core::ipc::{CaptureJob, DownloadKind};
+use minidl_core::model::{Category, Download, DownloadStatus, NewDownload, Schedule};
+use minidl_core::ytdlp::MediaInfo;
 
 use crate::events::EV_STATE;
 use crate::ingest::{ingest, job_from_url};
@@ -287,7 +287,7 @@ pub async fn set_setting(key: String, value: String, state: State<'_, AppState>)
 
 #[tauri::command]
 pub async fn grab_links(text: String) -> Result<Vec<ParsedLink>, String> {
-    Ok(ldm_core::grabber::parse_links(&text))
+    Ok(minidl_core::grabber::parse_links(&text))
 }
 
 #[tauri::command]

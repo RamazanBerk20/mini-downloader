@@ -1,7 +1,7 @@
 {
-  "name": "ldm-desktop",
+  "name": "minidl-desktop",
   "version": "0.1.0",
-  "description": "Linux Download Manager desktop app",
+  "description": "Mini Downloader desktop app",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -10,9 +10,9 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 
-use ldm_core::aria2::{Engine, EngineDefaults};
-use ldm_core::db::Db;
-use ldm_core::ipc::{self, BridgeReply, BridgeRequest};
+use minidl_core::aria2::{Engine, EngineDefaults};
+use minidl_core::db::Db;
+use minidl_core::ipc::{self, BridgeReply, BridgeRequest};
 
 use crate::events::EV_STATE;
 use crate::ingest::ingest;
@@ -143,10 +143,10 @@ fn record_app_path() {
     }
 }
 
-/// Locate the `ldm-native-host` binary shipped next to the app executable.
+/// Locate the `minidl-native-host` binary shipped next to the app executable.
 fn host_binary() -> Option<PathBuf> {
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    let cand = dir.join("ldm-native-host");
+    let cand = dir.join("minidl-native-host");
     if cand.is_file() {
         Some(cand)
     } else {
@@ -165,7 +165,7 @@ fn write_manifest(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
 /// Firefox family uses `allowed_extensions`, Chromium family uses
 /// `allowed_origins`. Returns the list of manifest paths written.
 pub fn install_browser_integration() -> Result<Vec<String>, String> {
-    let host = host_binary().ok_or("ldm-native-host binary not found next to the app")?;
+    let host = host_binary().ok_or("minidl-native-host binary not found next to the app")?;
     let host_path = host.to_string_lossy().to_string();
     let home = std::env::var_os("HOME").ok_or("HOME not set")?;
     let home = Path::new(&home);
@@ -174,7 +174,7 @@ pub fn install_browser_integration() -> Result<Vec<String>, String> {
     // ---- Firefox family (allowed_extensions) ----
     let ff = json!({
         "name": ipc::NATIVE_HOST_NAME,
-        "description": "Linux Download Manager native bridge",
+        "description": "Mini Downloader native bridge",
         "path": host_path,
         "type": "stdio",
         "allowed_extensions": [ipc::EXTENSION_ID],
@@ -192,7 +192,7 @@ pub fn install_browser_integration() -> Result<Vec<String>, String> {
     // ---- Chromium family (allowed_origins) ----
     let cr = json!({
         "name": ipc::NATIVE_HOST_NAME,
-        "description": "Linux Download Manager native bridge",
+        "description": "Mini Downloader native bridge",
         "path": host_path,
         "type": "stdio",
         "allowed_origins": [format!("chrome-extension://{}/", ipc::CHROME_EXTENSION_ID)],

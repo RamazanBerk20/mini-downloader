@@ -5,16 +5,16 @@ set -e
 
 MANIFEST_DIR=/usr/lib/mozilla/native-messaging-hosts
 mkdir -p "$MANIFEST_DIR"
-cat > "$MANIFEST_DIR/com.ldm.host.json" <<'JSON'
+cat > "$MANIFEST_DIR/com.minidownloader.host.json" <<'JSON'
 {
-  "name": "com.ldm.host",
-  "description": "Linux Download Manager native bridge",
-  "path": "/usr/bin/ldm-native-host",
+  "name": "com.minidownloader.host",
+  "description": "Mini Downloader native bridge",
+  "path": "/usr/bin/minidl-native-host",
   "type": "stdio",
-  "allowed_extensions": ["ldm@ramazan.dev"]
+  "allowed_extensions": ["minidownloader@ramazan.dev"]
 }
 JSON
-chmod 0644 "$MANIFEST_DIR/com.ldm.host.json"
+chmod 0644 "$MANIFEST_DIR/com.minidownloader.host.json"
 
 # Also install for a system-wide Chromium later (harmless if absent).
 if command -v update-desktop-database >/dev/null 2>&1; then

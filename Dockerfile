@@ -1,4 +1,4 @@
-# LDM build/dev container — Ubuntu 22.04 for a glibc/WebKitGTK floor that keeps
+# Mini Downloader build/dev container — Ubuntu 22.04 for a glibc/WebKitGTK floor that keeps
 # AppImage output runnable on older distros.
 FROM ubuntu:22.04
 

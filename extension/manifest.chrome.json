@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Linux Download Manager Connector",
+  "name": "Mini Downloader Connector",
   "version": "0.1.0",
-  "description": "Catch downloads in your browser and hand them to Linux Download Manager.",
+  "description": "Catch downloads in your browser and hand them to Mini Downloader.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2YFZuEZtv1ihM9chj7PchfcII0PzIUU2kbBgZf1182bbisFJcvGCpCg6Fpb/ZiJD/oybt5WcuHEi0u16015iRlnl4RaFwo+s5yXc5o5dqY+3zxRKI9sYSpK+FCeqH99CQQoFkRyEBHjp8eUt6XG1Fnf2+SskndBbbIXexCRpy/s9DK4U9cnyc4nldtCzTA7mC0M2qo/FHrn3yXUUozWnUxaf76QYnr4AB+XwuN3qfz7oN9Ds1htCsMMr3jdp9GLJXwcl7FMoWNT4YXNDaoRvKAIrVy8XXUFiPwWeTmJbkXVImI0Ei4sXJWhWlH1uxJ3YrwvkA0A5ot5QQzYHFNexYQIDAQAB",
   "background": {
     "service_worker": "background.js"
@@ -20,7 +20,7 @@
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Download with LDM",
+    "default_title": "Download with Mini Downloader",
     "default_icon": { "48": "icons/48.png", "96": "icons/96.png" }
   },
   "content_scripts": [

@@ -1,15 +1,15 @@
 [package]
-name = "ldm-native-host"
+name = "minidl-native-host"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Firefox native-messaging bridge for Linux Download Manager"
+description = "Firefox native-messaging bridge for Mini Downloader"
 
 # Tiny stdio bridge Firefox launches. Kept dependency-light so it starts fast.
 [[bin]]
-name = "ldm-native-host"
+name = "minidl-native-host"
 path = "src/main.rs"
 
 [dependencies]
-ldm-ipc = { path = "../ldm-ipc" }
+minidl-ipc = { path = "../minidl-ipc" }
 serde_json = { workspace = true }

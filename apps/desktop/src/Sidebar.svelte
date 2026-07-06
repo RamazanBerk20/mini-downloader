@@ -54,7 +54,7 @@
 </script>
 
 <nav class="sidebar" aria-label="Filters">
-  <h1 class="wordmark">Download Manager<small>aria2 · yt-dlp</small></h1>
+  <h1 class="wordmark">Mini Downloader<small>aria2 · yt-dlp</small></h1>
 
   <div class="nav-group">
     <span class="nav-label" id="nav-status">Status</span>

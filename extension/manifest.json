@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Linux Download Manager Connector",
+  "name": "Mini Downloader Connector",
   "version": "0.1.0",
-  "description": "Catch downloads in Firefox and hand them to Linux Download Manager.",
+  "description": "Catch downloads in Firefox and hand them to Mini Downloader.",
   "browser_specific_settings": {
     "gecko": {
-      "id": "ldm@ramazan.dev",
+      "id": "minidownloader@ramazan.dev",
       "strict_min_version": "128.0"
     }
   },
@@ -27,7 +27,7 @@
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Download with LDM",
+    "default_title": "Download with Mini Downloader",
     "default_icon": { "48": "icons/48.png", "96": "icons/96.png" }
   },
   "content_scripts": [

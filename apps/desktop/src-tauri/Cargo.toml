@@ -1,9 +1,9 @@
 [package]
-name = "ldm-desktop"
+name = "minidl-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Linux Download Manager"
+description = "Mini Downloader"
 
 [lib]
 # Keep the lib name stable (referenced by main.rs). The `_lib` suffix avoids a
@@ -28,5 +28,5 @@ chrono = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-ldm-core = { path = "../../../crates/ldm-core" }
+minidl-core = { path = "../../../crates/minidl-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }

@@ -1,0 +1,7 @@
+{
+  "name": "com.minidownloader.host",
+  "description": "Mini Downloader native bridge",
+  "path": "/usr/lib/minidownloader/minidl-native-host",
+  "type": "stdio",
+  "allowed_extensions": ["minidownloader@ramazan.dev"]
+}

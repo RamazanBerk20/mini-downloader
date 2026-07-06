@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LDM dev environment setup — CachyOS / Arch-family
+# Mini Downloader dev environment setup — CachyOS / Arch-family
 # Installs everything needed to build the Rust+Tauri app, the aria2/yt-dlp/ffmpeg
 # engine, and the Firefox extension tooling.
 set -euo pipefail
