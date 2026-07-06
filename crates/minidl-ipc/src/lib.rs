@@ -149,7 +149,9 @@ impl BridgeReply {
 
 /// Path of the Unix domain socket the app listens on and the native host
 /// connects to. Lives under `$XDG_RUNTIME_DIR` (user-private, wiped on logout);
-/// falls back to `/tmp` when the runtime dir is unset.
+/// falls back to `/tmp` when the runtime dir is unset. Unix only — Windows uses
+/// a named pipe (see [`bridge_socket_name`]).
+#[cfg(unix)]
 pub fn bridge_socket_path() -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -157,14 +159,29 @@ pub fn bridge_socket_path() -> PathBuf {
     base.join("minidownloader").join("bridge.sock")
 }
 
-/// `$XDG_DATA_HOME/minidownloader` or `~/.local/share/minidownloader`. Persistent; shared by the app
-/// and the native host so the host can find where the app binary lives.
+/// Cross-platform local-socket name for the bridge: a filesystem Unix domain
+/// socket on Unix (user-private, chmod'able), the `\\.\pipe\minidownloader-bridge`
+/// named pipe on Windows (per-user DACL by default).
+pub fn bridge_socket_name() -> std::io::Result<interprocess::local_socket::Name<'static>> {
+    #[cfg(unix)]
+    {
+        use interprocess::local_socket::{GenericFilePath, ToFsName};
+        bridge_socket_path().to_fs_name::<GenericFilePath>()
+    }
+    #[cfg(windows)]
+    {
+        use interprocess::local_socket::{GenericNamespaced, ToNsName};
+        String::from("minidownloader-bridge").to_ns_name::<GenericNamespaced>()
+    }
+}
+
+/// Per-user persistent data dir (`~/.local/share/minidownloader` on Linux,
+/// `%APPDATA%\minidownloader` on Windows). Shared by the app and the native
+/// host so the host can find where the app binary lives.
 pub fn data_dir() -> PathBuf {
-    std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
+    dirs::data_dir()
         .unwrap_or_else(|| {
-            std::env::var_os("HOME")
-                .map(PathBuf::from)
+            dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("/tmp"))
                 .join(".local/share")
         })

@@ -20,12 +20,14 @@ use minidl_core::ytdlp::MediaInfo;
 use crate::events::{EV_COMPLETE, EV_ERROR, EV_STATE, EV_TICK};
 
 fn which(name: &str) -> Option<PathBuf> {
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     std::env::var_os("PATH")
-        .and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|c| c.is_file()))
+        .and_then(|p| std::env::split_paths(&p).map(|d| d.join(&file)).find(|c| c.is_file()))
 }
 
 fn exe_dir_bin(name: &str) -> Option<PathBuf> {
-    let cand = std::env::current_exe().ok()?.parent()?.join(name);
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    let cand = std::env::current_exe().ok()?.parent()?.join(file);
     cand.is_file().then_some(cand)
 }
 

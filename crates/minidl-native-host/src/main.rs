@@ -1,20 +1,22 @@
-//! Firefox native-messaging host: a thin, short-lived bridge.
+//! Browser native-messaging host: a thin, short-lived bridge.
 //!
-//! Firefox launches this per captured job (via `sendNativeMessage`), owns its
-//! stdio, and kills it after one reply. The real work runs in the long-lived
-//! Tauri app, which this process reaches over a Unix domain socket — launching
-//! the app first if it is not already running.
+//! The browser launches this per captured job (via `sendNativeMessage`), owns
+//! its stdio, and kills it after one reply. The real work runs in the
+//! long-lived Tauri app, which this process reaches over a local socket (Unix
+//! domain socket on Linux/macOS, named pipe on Windows) — launching the app
+//! first if it is not already running.
 //!
 //! Framing:
-//! - Firefox side (stdio): uint32 length prefix in **native** byte order + JSON.
-//! - App side (UDS): uint32 length prefix in **little-endian** + JSON (both ends
-//!   are ours).
+//! - Browser side (stdio): uint32 length prefix in **native** byte order + JSON.
+//! - App side (local socket): uint32 length prefix in **little-endian** + JSON
+//!   (both ends are ours).
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use minidl_ipc::{app_path_file, bridge_socket_path, BridgeReply, BridgeRequest, CaptureJob};
+use interprocess::local_socket::{prelude::*, Stream};
+
+use minidl_ipc::{app_path_file, bridge_socket_name, BridgeReply, BridgeRequest, CaptureJob};
 
 const MAX_MSG: usize = 64 * 1024 * 1024;
 
@@ -47,8 +49,9 @@ fn write_frame<W: Write>(w: &mut W, msg: &[u8], native: bool) -> std::io::Result
 }
 
 /// Connect to the running app; if it is not up, launch it and poll the socket.
-fn connect_or_launch() -> Option<UnixStream> {
-    if let Ok(s) = UnixStream::connect(bridge_socket_path()) {
+fn connect_or_launch() -> Option<Stream> {
+    let name = bridge_socket_name().ok()?;
+    if let Ok(s) = Stream::connect(name.clone()) {
         return Some(s);
     }
     if let Ok(path) = std::fs::read_to_string(app_path_file()) {
@@ -58,7 +61,7 @@ fn connect_or_launch() -> Option<UnixStream> {
         }
     }
     for _ in 0..50 {
-        if let Ok(s) = UnixStream::connect(bridge_socket_path()) {
+        if let Ok(s) = Stream::connect(name.clone()) {
             return Some(s);
         }
         std::thread::sleep(Duration::from_millis(100));

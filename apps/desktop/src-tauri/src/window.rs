@@ -35,12 +35,6 @@ pub fn reveal(app: &AppHandle) {
     }
 }
 
-/// Hide the main window to the tray if it exists.
-pub fn hide(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        hide_to_tray(&w);
-    }
-}
 
 /// Wayland decoration workaround (see module docs): every time the window is
 /// focused, toggle `resizable` off/on to re-wire the titlebar buttons after a

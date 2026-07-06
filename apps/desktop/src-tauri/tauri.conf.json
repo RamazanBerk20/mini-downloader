@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "io.minidownloader.app",
   "build": {
-    "beforeDevCommand": "./node_modules/.bin/vite",
+    "beforeDevCommand": "node node_modules/vite/bin/vite.js",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "./node_modules/.bin/vite build",
+    "beforeBuildCommand": "node node_modules/vite/bin/vite.js build",
     "frontendDist": "../dist"
   },
   "app": {

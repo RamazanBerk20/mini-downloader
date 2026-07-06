@@ -1,7 +1,6 @@
 //! Spawn and own a private `aria2c` daemon on a random loopback port with a
 //! per-launch RPC secret.
 
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
@@ -34,16 +33,15 @@ fn free_port() -> Result<u16> {
 /// 16 random bytes as hex, fresh per launch, memory-only.
 fn random_secret() -> Result<String> {
     let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut b))
-        .context("reading /dev/urandom")?;
+    getrandom::getrandom(&mut b).context("getrandom")?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
 fn resolve_on_path(name: &str) -> Option<PathBuf> {
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
     std::env::var_os("PATH").and_then(|paths| {
         std::env::split_paths(&paths)
-            .map(|d| d.join(name))
+            .map(|d| d.join(&file))
             .find(|c| c.is_file())
     })
 }

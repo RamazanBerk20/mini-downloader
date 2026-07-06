@@ -82,7 +82,10 @@ pub fn run() {
             // Prefer a bundled aria2c sidecar next to the app, else system PATH.
             let aria2c_path = std::env::current_exe()
                 .ok()
-                .and_then(|p| p.parent().map(|d| d.join("aria2c")))
+                .and_then(|p| {
+                    p.parent()
+                        .map(|d| d.join(format!("aria2c{}", std::env::consts::EXE_SUFFIX)))
+                })
                 .filter(|p| p.is_file());
 
             let engine = tauri::async_runtime::block_on(Engine::launch(LaunchOptions {
