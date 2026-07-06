@@ -148,15 +148,19 @@ impl BridgeReply {
 }
 
 /// Path of the Unix domain socket the app listens on and the native host
-/// connects to. Lives under `$XDG_RUNTIME_DIR` (user-private, wiped on logout);
-/// falls back to `/tmp` when the runtime dir is unset. Unix only — Windows uses
-/// a named pipe (see [`bridge_socket_name`]).
+/// connects to. Lives under `$XDG_RUNTIME_DIR` (user-private tmpfs, wiped on
+/// logout). When the runtime dir is unset it falls back to the per-user data dir
+/// — deliberately **not** `/tmp`: a world-writable `/tmp/minidownloader` would
+/// let another local user pre-create the directory and squat the socket,
+/// capturing the cookies/headers the native host forwards. The data dir lives
+/// under the user's home, which other users cannot write into. Unix only —
+/// Windows uses a named pipe (see [`bridge_socket_name`]).
 #[cfg(unix)]
 pub fn bridge_socket_path() -> PathBuf {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("minidownloader").join("bridge.sock")
+    match std::env::var_os("XDG_RUNTIME_DIR") {
+        Some(rt) => PathBuf::from(rt).join("minidownloader").join("bridge.sock"),
+        None => data_dir().join("bridge.sock"),
+    }
 }
 
 /// Cross-platform local-socket name for the bridge: a filesystem Unix domain
@@ -227,8 +231,9 @@ mod tests {
 
     #[test]
     fn bridge_socket_under_runtime_dir() {
-        // Just assert the tail; the base varies by environment.
+        // Just assert the tail; the base varies by environment. `Path::ends_with`
+        // matches whole components, so this checks the last two path segments.
         let p = bridge_socket_path();
-        assert!(p.ends_with("ldm/bridge.sock"));
+        assert!(p.ends_with("minidownloader/bridge.sock"));
     }
 }

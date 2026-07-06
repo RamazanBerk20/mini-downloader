@@ -18,7 +18,7 @@ captures downloads over native messaging.
 - aria2 runs on a **random loopback port + per-launch secret** (never 6800). Request/reply over HTTP; a **read-only WebSocket** receives push notifications.
 - The DB owns durable state; aria2 owns live transfer state. GIDs persist across restart via `--save-session`/`--input-file`; `sync::reconcile` re-maps on startup.
 - Every download (aria2 or yt-dlp) is a DB row with a stable `id`; live progress `downloads:tick` events are **keyed by id**.
-- Browser capture: extension → `minidl-native-host` (stdio) → **UDS** (`$XDG_RUNTIME_DIR/ldm/bridge.sock`, 0600) → app `ingest()`. Cookies/headers travel in `CaptureJob`.
+- Browser capture: extension → `minidl-native-host` (stdio) → **UDS** (`$XDG_RUNTIME_DIR/minidownloader/bridge.sock`, 0600; falls back to the per-user data dir when `XDG_RUNTIME_DIR` is unset — never `/tmp`) → app `ingest()`. Cookies/headers travel in `CaptureJob`.
 - Sidecar resolution: bundled binary next to the app exe, else system `PATH`. In dev there are no sidecars, so system `aria2c`/`yt-dlp`/`ffmpeg` are used.
 
 ## Commands

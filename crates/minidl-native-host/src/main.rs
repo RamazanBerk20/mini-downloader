@@ -57,7 +57,18 @@ fn connect_or_launch() -> Option<Stream> {
     if let Ok(path) = std::fs::read_to_string(app_path_file()) {
         let path = path.trim();
         if !path.is_empty() {
-            let _ = std::process::Command::new(path).arg("--background").spawn();
+            // Detach the app's stdio. If it inherited ours, the long-lived GUI
+            // would hold the browser's native-messaging stdout pipe (the browser
+            // never sees EOF → leaked fd every cold start) and any byte the GUI
+            // writes to stdout would corrupt this process's length-prefixed reply
+            // frames. The job travels over the UDS, not these pipes.
+            use std::process::Stdio;
+            let _ = std::process::Command::new(path)
+                .arg("--background")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
         }
     }
     for _ in 0..50 {

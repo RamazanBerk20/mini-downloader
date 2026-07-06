@@ -28,7 +28,9 @@ pub struct MediaInfo {
 /// Run `yt-dlp -J` and extract the title + selectable formats.
 pub async fn probe(ytdlp: &Path, url: &str) -> Result<MediaInfo> {
     let out = tokio::process::Command::new(ytdlp)
-        .args(["-J", "--no-warnings", "--no-playlist", url])
+        // `--` terminates option parsing so a URL beginning with `-` (e.g. a
+        // pasted `--config-location=...`) is never treated as a yt-dlp flag.
+        .args(["-J", "--no-warnings", "--no-playlist", "--", url])
         .output()
         .await
         .context("running yt-dlp -J")?;

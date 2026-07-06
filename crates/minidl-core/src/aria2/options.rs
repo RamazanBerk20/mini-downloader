@@ -30,6 +30,26 @@ impl Default for EngineDefaults {
     }
 }
 
+/// Reduce an untrusted filename to a safe basename for aria2's `out`.
+///
+/// The filename originates from a `Content-Disposition` header the browser
+/// extension parsed, i.e. it is fully attacker-controlled. aria2 joins `out`
+/// onto `dir` **without** stripping `..`, so `filename="../../.config/autostart/x.desktop"`
+/// would escape the download directory (arbitrary file write → code execution).
+/// Take only the last path component and reject dot-segments; on rejection we
+/// return `None` and let aria2 derive the name from the URL.
+fn safe_out_name(name: &str) -> Option<String> {
+    let base = name
+        .rsplit(|c| c == '/' || c == '\\')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if base.is_empty() || base == "." || base == ".." {
+        return None;
+    }
+    Some(base.to_string())
+}
+
 /// Build the aria2 options object for an `addUri` call from a captured job.
 ///
 /// `dir` is the resolved target directory (category-aware — set upfront so the
@@ -40,7 +60,9 @@ pub fn build_add_options(job: &CaptureJob, dir: &str, defaults: &EngineDefaults)
     let mut opts = Map::new();
     opts.insert("dir".into(), Value::String(dir.to_string()));
     if let Some(name) = &job.filename {
-        opts.insert("out".into(), Value::String(name.clone()));
+        if let Some(out) = safe_out_name(name) {
+            opts.insert("out".into(), Value::String(out));
+        }
     }
     if let Some(referer) = &job.referrer {
         opts.insert("referer".into(), Value::String(referer.clone()));
@@ -103,6 +125,24 @@ mod tests {
                 other => panic!("option {k} is not a string/array: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn traversal_filename_reduced_to_basename() {
+        let mut j = job();
+        j.filename = Some("../../../../.config/autostart/pwn.desktop".into());
+        let opts = build_add_options(&j, "/dl", &EngineDefaults::default());
+        assert_eq!(opts["out"], Value::String("pwn.desktop".into()));
+
+        // A pure dot-segment / trailing separator yields no `out` (aria2 names it).
+        j.filename = Some("../../".into());
+        let opts = build_add_options(&j, "/dl", &EngineDefaults::default());
+        assert!(!opts.contains_key("out"));
+
+        // Backslash separator (Windows-style) is stripped too.
+        j.filename = Some("..\\..\\evil.exe".into());
+        let opts = build_add_options(&j, "/dl", &EngineDefaults::default());
+        assert_eq!(opts["out"], Value::String("evil.exe".into()));
     }
 
     #[test]

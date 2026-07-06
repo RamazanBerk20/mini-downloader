@@ -30,7 +30,8 @@ fn free_port() -> Result<u16> {
     Ok(l.local_addr()?.port())
 }
 
-/// 16 random bytes as hex, fresh per launch, memory-only.
+/// 16 random bytes as hex, fresh per launch. On unix it is handed to aria2 via a
+/// 0600 conf file (never argv — `/proc/<pid>/cmdline` is world-readable).
 fn random_secret() -> Result<String> {
     let mut b = [0u8; 16];
     getrandom::getrandom(&mut b).context("getrandom")?;
@@ -65,11 +66,36 @@ impl Aria2Process {
         }
         let dht_path = opts.data_dir.join("dht.dat");
 
+        // Keep the RPC secret off argv: a second local user could otherwise read
+        // it from `/proc/<pid>/cmdline` (or `ps`) and drive our aria2 (arbitrary
+        // file write via addUri `dir`/`out`). On unix pass it through a 0600 conf
+        // file; Windows has no `/proc` and no unix perms API, so fall back to argv.
+        #[cfg(unix)]
+        let secret_arg = {
+            use std::io::Write;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+            let conf_path = opts.data_dir.join("aria2.conf");
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&conf_path)
+                .context("create aria2 rpc-secret conf")?;
+            writeln!(f, "rpc-secret={secret}").context("write aria2 rpc-secret conf")?;
+            drop(f);
+            // `.mode()` only applies on creation; enforce 0600 if the file pre-existed.
+            std::fs::set_permissions(&conf_path, std::fs::Permissions::from_mode(0o600)).ok();
+            format!("--conf-path={}", conf_path.display())
+        };
+        #[cfg(not(unix))]
+        let secret_arg = format!("--rpc-secret={secret}");
+
         let child = Command::new(&bin)
             .arg("--enable-rpc=true")
             .arg("--rpc-listen-all=false")
             .arg(format!("--rpc-listen-port={port}"))
-            .arg(format!("--rpc-secret={secret}"))
+            .arg(&secret_arg)
             // Large torrent/metalink payloads arrive base64 over RPC.
             .arg("--rpc-max-request-size=32M")
             .arg("--continue=true")
