@@ -5,6 +5,7 @@
 
 const b = globalThis.browser || globalThis.chrome;
 const HOST = "com.minidownloader.host";
+const t = (k) => b.i18n.getMessage(k);
 
 // Firefox exposes `browser`; Chromium exposes only `chrome`. Firefox MV3 keeps
 // blocking webRequest (Path A: sniff headers + cancel → full cookie fidelity);
@@ -54,11 +55,11 @@ function notify(title, message) {
 async function sendJob(job) {
   try {
     const reply = await b.runtime.sendNativeMessage(HOST, job);
-    if (reply && reply.ok) notify("Sent to Mini Downloader", job.filename || job.url);
-    else notify("Mini Downloader rejected the download", (reply && reply.error) || "unknown error");
+    if (reply && reply.ok) notify(t("notifySentTitle"), job.filename || job.url);
+    else notify(t("notifyRejectedTitle"), (reply && reply.error) || t("notifyUnknownError"));
     return reply;
   } catch (e) {
-    notify("Mini Downloader not reachable", "Open Mini Downloader and enable browser integration.");
+    notify(t("notifyNotReachableTitle"), t("notifyNotReachableBody"));
     return null;
   }
 }
@@ -242,7 +243,7 @@ function createMenu() {
     b.contextMenus.removeAll(() => {
       b.contextMenus.create({
         id: "ldm-download",
-        title: "Download with Mini Downloader",
+        title: t("actionTitle"),
         contexts: ["link", "video", "audio", "image", "selection"],
       });
     });

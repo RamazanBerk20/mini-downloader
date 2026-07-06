@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT="dist-ext"
-SHARED="background.js content.js popup.html popup.js options.html options.js icons"
+SHARED="background.js content.js popup.html popup.js options.html options.js i18n.js _locales icons"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/firefox" "$OUT/chrome"

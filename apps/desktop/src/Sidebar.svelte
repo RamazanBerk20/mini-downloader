@@ -2,6 +2,7 @@
   import Icon from "./lib/Icon.svelte";
   import type { IconName } from "./lib/icons";
   import type { Category, Download } from "./types";
+  import { t, type MsgKey } from "./lib/i18n.svelte";
 
   let {
     all,
@@ -25,15 +26,15 @@
     onSettings: () => void;
   } = $props();
 
-  const STATUS: { key: string; label: string; icon: IconName }[] = [
-    { key: "all", label: "All", icon: "list" },
-    { key: "active", label: "Active", icon: "download" },
-    { key: "paused", label: "Paused", icon: "pause" },
-    { key: "complete", label: "Completed", icon: "check" },
-    { key: "error", label: "Failed", icon: "warning" },
+  const STATUS: { key: string; label: MsgKey; icon: IconName }[] = [
+    { key: "all", label: "statusAll", icon: "list" },
+    { key: "active", label: "statusActive", icon: "download" },
+    { key: "paused", label: "statusPaused", icon: "pause" },
+    { key: "complete", label: "statusCompleted", icon: "check" },
+    { key: "error", label: "statusFailed", icon: "warning" },
   ];
   const SPEEDS: [string, string][] = [
-    ["0", "Unlimited"],
+    ["0", ""],
     ["512000", "500 KB/s"],
     ["1048576", "1 MB/s"],
     ["5242880", "5 MB/s"],
@@ -57,7 +58,7 @@
   <h1 class="wordmark">Mini Downloader<small>aria2 · yt-dlp</small></h1>
 
   <div class="nav-group">
-    <span class="nav-label" id="nav-status">Status</span>
+    <span class="nav-label" id="nav-status">{t("navStatus")}</span>
     {#each STATUS as s}
       <button
         class="nav-item"
@@ -65,7 +66,7 @@
         onclick={() => onStatus(s.key)}
       >
         <Icon name={s.icon} size={16} />
-        <span class="label">{s.label}</span>
+        <span class="label">{t(s.label)}</span>
         <span class="count">{counts[s.key] ?? 0}</span>
       </button>
     {/each}
@@ -73,7 +74,7 @@
 
   {#if categories.length}
     <div class="nav-group">
-      <span class="nav-label">Categories</span>
+      <span class="nav-label">{t("navCategories")}</span>
       {#each categories as c (c.id)}
         <button
           class="nav-item"
@@ -91,14 +92,14 @@
   <div class="side-foot">
     <label class="side-speed">
       <Icon name="gauge" size={16} />
-      <span class="sr-only">Global speed limit</span>
+      <span class="sr-only">{t("globalSpeed")}</span>
       <select value={globalSpeed} onchange={(e) => onSpeed((e.target as HTMLSelectElement).value)}>
-        {#each SPEEDS as [v, label]}<option value={v}>{label}</option>{/each}
+        {#each SPEEDS as [v, label]}<option value={v}>{v === "0" ? t("speedUnlimited") : label}</option>{/each}
       </select>
     </label>
     <button class="nav-item" onclick={onSettings}>
       <Icon name="gear" size={16} />
-      <span class="label">Settings</span>
+      <span class="label">{t("navSettings")}</span>
     </button>
   </div>
 </nav>

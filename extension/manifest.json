@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Mini Downloader Connector",
+  "name": "__MSG_extName__",
   "version": "0.1.0",
-  "description": "Catch downloads in Firefox and hand them to Mini Downloader.",
+  "description": "__MSG_extDescription__",
+  "default_locale": "en",
   "browser_specific_settings": {
     "gecko": {
       "id": "minidownloader@ramazan.dev",
@@ -27,7 +28,7 @@
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Download with Mini Downloader",
+    "default_title": "__MSG_actionTitle__",
     "default_icon": { "48": "icons/48.png", "96": "icons/96.png" }
   },
   "content_scripts": [

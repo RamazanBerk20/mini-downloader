@@ -30,11 +30,12 @@
   <body>
     <h1>Mini Downloader</h1>
     <div class="row">
-      <label><input type="checkbox" id="enabled" /> Catch downloads</label>
-      <a href="#" id="opts">Options</a>
+      <label><input type="checkbox" id="enabled" /> <span data-i18n="popupCatchDownloads">Catch downloads</span></label>
+      <a href="#" id="opts" data-i18n="popupOptions">Options</a>
     </div>
-    <div class="row"><strong>Media on this page</strong><button id="grabpage">Grab page video</button></div>
-    <div id="media"><p class="empty">No media detected.</p></div>
+    <div class="row"><strong data-i18n="popupMediaOnPage">Media on this page</strong><button id="grabpage" data-i18n="popupGrabPageVideo">Grab page video</button></div>
+    <div id="media"><p class="empty" data-i18n="popupNoMedia">No media detected.</p></div>
+    <script src="i18n.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

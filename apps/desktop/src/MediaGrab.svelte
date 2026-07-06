@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "./api";
+  import { t } from "./lib/i18n.svelte";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
   import type { Format, MediaInfo } from "./types";
@@ -56,23 +57,23 @@
 <div class="overlay" onclick={onclose} role="presentation"></div>
 <div class="modal" role="dialog" aria-modal="true" aria-labelledby="media-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
   <div class="dhead">
-    <h2 id="media-h">Grab video</h2>
-    <button class="icon-btn" aria-label="Close" onclick={onclose}><Icon name="close" size={18} /></button>
+    <h2 id="media-h">{t("grabVideoTitle")}</h2>
+    <button class="icon-btn" aria-label={t("close")} onclick={onclose}><Icon name="close" size={18} /></button>
   </div>
 
   <form class="addbar" style="padding:0" onsubmit={probe}>
-    <input placeholder="Video page URL (YouTube, etc.)" bind:value={url} aria-label="Video URL" />
-    <button class="btn btn-primary" type="submit" disabled={loading}>{loading ? "Probing…" : "Probe"}</button>
+    <input placeholder={t("videoUrlPlaceholder")} bind:value={url} aria-label="Video URL" />
+    <button class="btn btn-primary" type="submit" disabled={loading}>{loading ? t("probing") : t("probe")}</button>
   </form>
 
   {#if error}<p class="hint" style="color:var(--error-fg)">{error}</p>{/if}
 
   {#if info}
     <p style="margin:0.9rem 0 0.4rem; font-weight:500;">{info.title}</p>
-    <button class="btn btn-primary" onclick={() => grab()}><Icon name="download" size={16} /> Best quality</button>
+    <button class="btn btn-primary" onclick={() => grab()}><Icon name="download" size={16} /> {t("bestQuality")}</button>
     <table class="fmt-table">
       <thead>
-        <tr><th>Quality</th><th>Format</th><th>Codec</th><th>Size</th><th></th></tr>
+        <tr><th>{t("colQuality")}</th><th>{t("colFormat")}</th><th>{t("colCodec")}</th><th>{t("colSize")}</th><th></th></tr>
       </thead>
       <tbody>
         {#each info.formats as f (f.format_id)}
@@ -81,7 +82,7 @@
             <td class="fmt-mono">{f.ext}</td>
             <td class="fmt-mono">{codec(f)}</td>
             <td class="fmt-mono">{fmtSize(f.filesize)}</td>
-            <td><button class="icon-btn" aria-label="Grab {f.resolution} {f.ext}" title="Grab" onclick={() => grab(f.format_id)}><Icon name="download" size={16} /></button></td>
+            <td><button class="icon-btn" aria-label="Grab {f.resolution} {f.ext}" title={t("grab")} onclick={() => grab(f.format_id)}><Icon name="download" size={16} /></button></td>
           </tr>
         {/each}
       </tbody>

@@ -5,9 +5,15 @@
 
 :root {
   /* Type */
-  --font-sans: "Geist Sans", "SF Pro Display", "Helvetica Neue", system-ui, sans-serif;
-  --font-serif: "Instrument Serif", "Charter", "Georgia", serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+  /* Bundled faces are Latin-only; the trailing families cover Cyrillic, CJK and
+     Arabic via the OS (Noto is default on most Linux/Windows), so non-Latin
+     locales render without tofu. */
+  --font-sans: "Geist Sans", "SF Pro Display", "Helvetica Neue", system-ui, "Noto Sans",
+    "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans Arabic", sans-serif;
+  --font-serif: "Instrument Serif", "Charter", "Georgia", "Noto Serif", "Noto Serif CJK SC",
+    "Noto Naskh Arabic", serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, "Noto Sans Mono CJK SC",
+    monospace;
 
   /* Warm monochrome — light */
   --canvas: #f7f6f3;
@@ -168,7 +174,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 .shell { display: grid; grid-template-columns: 232px 1fr; height: 100%; }
 
 .sidebar {
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
   padding: 1.1rem 0.75rem;
   display: flex; flex-direction: column; gap: 1.4rem;
   overflow-y: auto;
@@ -190,7 +196,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
   display: flex; align-items: center; gap: 0.55rem;
   padding: 0.4rem 0.5rem; border: none; border-radius: 7px;
   background: transparent; color: var(--text); cursor: pointer;
-  font-size: 0.87rem; text-align: left; width: 100%;
+  font-size: 0.87rem; text-align: start; width: 100%;
   transition: background 0.15s, color 0.15s;
 }
 .nav-item:hover { background: var(--surface-2); }
@@ -221,10 +227,10 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
   color: var(--strong); margin: 0; flex: none;
 }
 .search {
-  margin-left: auto; position: relative; display: flex; align-items: center;
+  margin-inline-start: auto; position: relative; display: flex; align-items: center;
 }
-.search svg { position: absolute; left: 0.55rem; color: var(--muted); pointer-events: none; }
-.search input { padding-left: 2rem; width: 190px; }
+.search svg { position: absolute; inset-inline-start: 0.55rem; color: var(--muted); pointer-events: none; }
+.search input { padding-inline-start: 2rem; width: 190px; }
 .head-actions { display: flex; gap: 0.35rem; }
 
 .addbar { display: flex; gap: 0.5rem; padding: 0.3rem 1.4rem 0.9rem; }
@@ -303,8 +309,8 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 92vw);
-  background: var(--canvas); border-left: 1px solid var(--border);
+  position: fixed; top: 0; inset-inline-end: 0; bottom: 0; width: min(440px, 92vw);
+  background: var(--canvas); border-inline-start: 1px solid var(--border);
   z-index: 41; padding: 1.2rem 1.3rem; overflow-y: auto;
   box-shadow: var(--shadow-float);
   animation: slidein 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -339,24 +345,26 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
   transition: background 0.18s, border-color 0.18s;
 }
 .switch .track::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 16px; height: 16px;
   border-radius: 50%; background: var(--muted); transition: transform 0.18s, background 0.18s;
 }
 .switch input:checked + .track { background: var(--ink); border-color: var(--ink); }
 .switch input:checked + .track::after { transform: translateX(18px); background: var(--ink-fg); }
 .switch input:focus-visible + .track { outline: 2px solid var(--ring); outline-offset: 2px; }
 
+.drawer-foot { margin-top: 1.3rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
+
+/* Quiet ghost link — the only color is a small desaturated-rose heart, so it
+   sits within the monochrome UI instead of shouting like a filled button. */
 .sponsor {
-  display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%;
-  padding: 0.65rem 0.9rem; margin: 0.9rem 0 0.2rem;
-  border: 1px solid color-mix(in srgb, #e0245e 32%, var(--border));
-  border-radius: 10px;
-  background: color-mix(in srgb, #e0245e 10%, var(--surface));
-  color: #e0245e; font-weight: 500; font-size: 0.9rem; cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.3rem 0.5rem; margin: 0.1rem 0 0.3rem;
+  border: none; border-radius: 6px; background: transparent;
+  color: var(--muted); font-size: 0.8rem; font-weight: 500; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.sponsor:hover { background: color-mix(in srgb, #e0245e 18%, var(--surface)); }
-.sponsor:active { transform: scale(0.98); }
+.sponsor:hover { background: var(--surface-2); color: var(--text); }
+.sponsor svg { color: color-mix(in srgb, #e0245e 60%, var(--muted)); }
 
 .cat { display: flex; align-items: center; gap: 0.6rem; margin: 0.4rem 0; }
 .cat strong { flex: 0 0 90px; font-weight: 500; }
@@ -374,7 +382,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 
 /* Format table (MediaGrab) */
 .fmt-table { width: 100%; border-collapse: collapse; margin-top: 0.6rem; }
-.fmt-table th { text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 500; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
+.fmt-table th { text-align: start; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 500; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
 .fmt-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.82rem; }
 .fmt-table tr:hover td { background: var(--surface-2); }
 .fmt-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted); }
@@ -412,10 +420,16 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 /* ---------- Responsive: collapse sidebar ---------- */
 @media (max-width: 720px) {
   .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .sidebar { flex-direction: row; align-items: center; overflow-x: auto; gap: 0.8rem; padding: 0.6rem 0.9rem; border-right: none; border-bottom: 1px solid var(--border); }
+  .sidebar { flex-direction: row; align-items: center; overflow-x: auto; gap: 0.8rem; padding: 0.6rem 0.9rem; border-inline-end: none; border-bottom: 1px solid var(--border); }
   .wordmark, .nav-label, .side-foot { display: none; }
   .nav-group { flex-direction: row; }
 }
+
+/* ---------- RTL (Arabic): flip the transform-based motion that logical
+   properties can't reach; layout itself follows `dir` + logical props. ---------- */
+[dir="rtl"] .switch input:checked + .track::after { transform: translateX(-18px); }
+[dir="rtl"] .drawer { animation-name: slideinRtl; }
+@keyframes slideinRtl { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {

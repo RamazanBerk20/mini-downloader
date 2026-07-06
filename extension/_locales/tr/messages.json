@@ -1,0 +1,23 @@
+{
+  "extName": { "message": "Mini Downloader Bağlayıcı" },
+  "extDescription": { "message": "İndirmeleri tarayıcınızda yakalayın ve Mini Downloader'a aktarın." },
+  "actionTitle": { "message": "Mini Downloader ile indir" },
+  "popupCatchDownloads": { "message": "İndirmeleri yakala" },
+  "popupOptions": { "message": "Seçenekler" },
+  "popupMediaOnPage": { "message": "Bu sayfadaki medya" },
+  "popupGrabPageVideo": { "message": "Sayfa videosunu al" },
+  "popupNoMedia": { "message": "Medya bulunamadı." },
+  "popupGrab": { "message": "Al" },
+  "popupSent": { "message": "Gönderildi" },
+  "optionsTitle": { "message": "Mini Downloader Bağlayıcı Seçenekleri" },
+  "optionsMinSize": { "message": "Yakalanacak en küçük dosya boyutu (bayt)" },
+  "optionsMinSizeHint": { "message": "Bundan küçük indirmeler tarayıcınıza bırakılır. Varsayılan 1048576 (1 MiB)." },
+  "optionsDisabledHosts": { "message": "Devre dışı siteler (her satıra bir ana bilgisayar adı)" },
+  "optionsSave": { "message": "Kaydet" },
+  "optionsSaved": { "message": "Kaydedildi" },
+  "notifySentTitle": { "message": "Mini Downloader'a gönderildi" },
+  "notifyRejectedTitle": { "message": "Mini Downloader indirmeyi reddetti" },
+  "notifyUnknownError": { "message": "bilinmeyen hata" },
+  "notifyNotReachableTitle": { "message": "Mini Downloader'a ulaşılamıyor" },
+  "notifyNotReachableBody": { "message": "Mini Downloader'ı açın ve tarayıcı entegrasyonunu etkinleştirin." }
+}

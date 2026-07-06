@@ -1,8 +1,18 @@
 <script lang="ts">
   import { api } from "./api";
   import Icon from "./lib/Icon.svelte";
+  import { t, type MsgKey } from "./lib/i18n.svelte";
   import type { IconName } from "./lib/icons";
   import type { Download } from "./types";
+
+  const STATUS_KEY: Record<string, MsgKey> = {
+    active: "statusActive",
+    waiting: "statusWaiting",
+    paused: "statusPaused",
+    complete: "statusCompleted",
+    error: "statusFailed",
+    queued: "statusQueued",
+  };
 
   let {
     d,
@@ -70,7 +80,7 @@
   <div class="row-head">
     <Icon name={fileIcon(d)} size={16} />
     <span class="row-name" title={d.url}>{name(d)}</span>
-    <span class="badge {d.status}">{d.status}</span>
+    <span class="badge {d.status}">{t(STATUS_KEY[d.status] ?? "statusActive")}</span>
   </div>
 
   <div
@@ -95,25 +105,25 @@
 
     <span class="row-actions">
       {#if isRunning}
-        <button class="icon-btn" title="Pause" aria-label="Pause {name(d)}" onclick={() => onact(() => api.pause(d.id))}>
+        <button class="icon-btn" title={t("pause")} aria-label="{t('pause')} {name(d)}" onclick={() => onact(() => api.pause(d.id))}>
           <Icon name="pause" size={16} />
         </button>
       {:else if d.status === "paused"}
-        <button class="icon-btn" title="Resume" aria-label="Resume {name(d)}" onclick={() => onact(() => api.resume(d.id))}>
+        <button class="icon-btn" title={t("resume")} aria-label="{t('resume')} {name(d)}" onclick={() => onact(() => api.resume(d.id))}>
           <Icon name="play" size={16} />
         </button>
       {/if}
       {#if d.status === "complete"}
-        <button class="icon-btn" title="Open folder" aria-label="Open folder for {name(d)}" onclick={() => onact(() => api.openFolder(d.id))}>
+        <button class="icon-btn" title={t("openFolder")} aria-label="{t('openFolder')} {name(d)}" onclick={() => onact(() => api.openFolder(d.id))}>
           <Icon name="folder" size={16} />
         </button>
       {/if}
       {#if d.status === "error"}
-        <button class="icon-btn" title="Retry" aria-label="Retry {name(d)}" onclick={() => onact(async () => { await api.remove(d.id, false); await api.add(d.url); })}>
+        <button class="icon-btn" title={t("retry")} aria-label="{t('retry')} {name(d)}" onclick={() => onact(async () => { await api.remove(d.id, false); await api.add(d.url); })}>
           <Icon name="retry" size={16} />
         </button>
       {/if}
-      <button class="icon-btn danger" title="Remove" aria-label="Remove {name(d)}" onclick={() => onact(() => api.remove(d.id, false))}>
+      <button class="icon-btn danger" title={t("remove")} aria-label="{t('remove')} {name(d)}" onclick={() => onact(() => api.remove(d.id, false))}>
         <Icon name="trash" size={16} />
       </button>
     </span>

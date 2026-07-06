@@ -1,4 +1,5 @@
 const b = globalThis.browser || globalThis.chrome;
+const t = (k) => b.i18n.getMessage(k);
 
 async function currentTab() {
   const [tab] = await b.tabs.query({ active: true, currentWindow: true });
@@ -39,7 +40,7 @@ async function init() {
 function render(list, tab) {
   const root = document.getElementById("media");
   if (!list.length) {
-    root.innerHTML = '<p class="empty">No media detected.</p>';
+    root.innerHTML = `<p class="empty">${t("popupNoMedia")}</p>`;
     return;
   }
   root.innerHTML = "";
@@ -49,14 +50,14 @@ function render(list, tab) {
     const short = m.url.length > 70 ? m.url.slice(0, 70) + "…" : m.url;
     div.innerHTML = `<div class="tag">${m.type}</div><div class="u">${short}</div>`;
     const btn = document.createElement("button");
-    btn.textContent = "Grab";
+    btn.textContent = t("popupGrab");
     btn.addEventListener("click", () => {
       const kind = m.type === "dash" ? "dash" : m.type === "hls" ? "hls" : "http";
       b.runtime.sendMessage({
         type: "ldm-grab",
         job: { url: m.url, page_url: tab && tab.url, kind, extra_headers: [] },
       });
-      btn.textContent = "Sent";
+      btn.textContent = t("popupSent");
       btn.disabled = true;
     });
     div.appendChild(btn);

@@ -10,6 +10,7 @@
   import Settings from "./Settings.svelte";
   import MediaGrab from "./MediaGrab.svelte";
   import LinkGrabber from "./LinkGrabber.svelte";
+  import { t } from "./lib/i18n.svelte";
 
   let all = $state<Download[]>([]);
   let categories = $state<Category[]>([]);
@@ -48,10 +49,14 @@
 
   const pageTitle = $derived(
     categoryId !== null
-      ? (categories.find((c) => c.id === categoryId)?.name ?? "Category")
-      : ({ all: "All downloads", active: "Active", paused: "Paused", complete: "Completed", error: "Failed" }[
-          statusFilter
-        ] ?? "Downloads"),
+      ? (categories.find((c) => c.id === categoryId)?.name ?? t("titleCategory"))
+      : ({
+          all: t("titleAll"),
+          active: t("titleActive"),
+          paused: t("titlePaused"),
+          complete: t("titleCompleted"),
+          error: t("titleFailed"),
+        }[statusFilter] ?? "Downloads"),
   );
 
   async function refresh() {
@@ -219,38 +224,38 @@
       <h2 class="page-title">{pageTitle}</h2>
       <div class="search">
         <Icon name="search" size={15} />
-        <input type="search" placeholder="Search" bind:value={search} bind:this={searchEl} aria-label="Search downloads" />
+        <input type="search" placeholder={t("search")} bind:value={search} bind:this={searchEl} aria-label="Search downloads" />
       </div>
       <div class="head-actions">
         {#if completedCount > 0}
           <button class="btn btn-ghost" title="Remove completed downloads from the list" onclick={() => act(api.removeCompleted)}>
-            <Icon name="check" size={15} /> Clear completed
+            <Icon name="check" size={15} /> {t("clearCompleted")}
           </button>
         {/if}
-        <button class="icon-btn" title="Add .torrent / .metalink file" aria-label="Add torrent or metalink file" onclick={pickFile}>
+        <button class="icon-btn" title={t("tipAddFile")} aria-label={t("tipAddFile")} onclick={pickFile}>
           <Icon name="file" />
         </button>
-        <button class="icon-btn" title="Grab video (yt-dlp)" aria-label="Grab video" onclick={() => (showMedia = true)}>
+        <button class="icon-btn" title={t("tipGrabVideo")} aria-label={t("tipGrabVideo")} onclick={() => (showMedia = true)}>
           <Icon name="video" />
         </button>
-        <button class="icon-btn" title="Grab many links" aria-label="Grab links from text" onclick={() => (showGrabber = true)}>
+        <button class="icon-btn" title={t("tipGrabLinks")} aria-label={t("tipGrabLinks")} onclick={() => (showGrabber = true)}>
           <Icon name="link" />
         </button>
-        <button class="icon-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts" onclick={() => (showHelp = true)}>
+        <button class="icon-btn" title={t("tipShortcuts")} aria-label={t("tipShortcuts")} onclick={() => (showHelp = true)}>
           <Icon name="help" />
         </button>
       </div>
     </div>
 
     <form class="addbar" onsubmit={add}>
-      <input placeholder="Paste a URL or magnet link" bind:value={url} bind:this={addEl} aria-label="Add download URL" />
-      <button class="btn btn-primary" type="submit"><Icon name="add" size={16} /> Add</button>
+      <input placeholder={t("addPlaceholder")} bind:value={url} bind:this={addEl} aria-label="Add download URL" />
+      <button class="btn btn-primary" type="submit"><Icon name="add" size={16} /> {t("add")}</button>
     </form>
 
     {#if error}
       <div class="banner" role="alert">
         <span>{error}</span>
-        <button class="icon-btn" aria-label="Dismiss" onclick={() => (error = "")}><Icon name="close" size={16} /></button>
+        <button class="icon-btn" aria-label={t("dismiss")} onclick={() => (error = "")}><Icon name="close" size={16} /></button>
       </div>
     {/if}
 
@@ -259,12 +264,12 @@
         <div class="empty">
           <Icon name="inbox" size={56} />
           {#if all.length === 0}
-            <h2>No downloads yet</h2>
-            <p>Paste a URL above, or capture one from Firefox.</p>
-            <p class="keys"><kbd>Ctrl</kbd> <kbd>N</kbd> to add · <kbd>?</kbd> for shortcuts</p>
+            <h2>{t("emptyTitle")}</h2>
+            <p>{t("emptySub")}</p>
+            <p class="keys"><kbd>Ctrl</kbd> <kbd>N</kbd> {t("emptyToAdd")} · <kbd>?</kbd> {t("emptyForShortcuts")}</p>
           {:else}
-            <h2>Nothing here</h2>
-            <p>No downloads match this filter.</p>
+            <h2>{t("noMatchTitle")}</h2>
+            <p>{t("noMatchSub")}</p>
           {/if}
         </div>
       {:else}
@@ -292,20 +297,20 @@
   <div class="overlay" onclick={() => (showHelp = false)} role="presentation"></div>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="help-h" tabindex="-1" use:trapFocus={{ onEscape: () => (showHelp = false) }}>
     <div class="dhead">
-      <h2 id="help-h">Keyboard shortcuts</h2>
-      <button class="icon-btn" aria-label="Close" onclick={() => (showHelp = false)}><Icon name="close" size={18} /></button>
+      <h2 id="help-h">{t("shortcutsTitle")}</h2>
+      <button class="icon-btn" aria-label={t("close")} onclick={() => (showHelp = false)}><Icon name="close" size={18} /></button>
     </div>
     <div class="shortcuts">
-      <span class="k"><kbd>Ctrl</kbd><kbd>N</kbd></span><span class="d">Focus the add field</span>
-      <span class="k"><kbd>/</kbd></span><span class="d">Search</span>
-      <span class="k"><kbd>1</kbd>–<kbd>5</kbd></span><span class="d">Switch status filter</span>
-      <span class="k"><kbd>Ctrl</kbd><kbd>,</kbd></span><span class="d">Settings</span>
-      <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span><span class="d">Pause all</span>
-      <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>R</kbd></span><span class="d">Resume all</span>
-      <span class="k"><kbd>Space</kbd></span><span class="d">Pause/resume focused download</span>
-      <span class="k"><kbd>Del</kbd></span><span class="d">Remove focused download</span>
-      <span class="k"><kbd>Enter</kbd></span><span class="d">Open folder (completed)</span>
-      <span class="k"><kbd>Esc</kbd></span><span class="d">Close dialogs</span>
+      <span class="k"><kbd>Ctrl</kbd><kbd>N</kbd></span><span class="d">{t("scFocusAdd")}</span>
+      <span class="k"><kbd>/</kbd></span><span class="d">{t("scSearch")}</span>
+      <span class="k"><kbd>1</kbd>–<kbd>5</kbd></span><span class="d">{t("scFilter")}</span>
+      <span class="k"><kbd>Ctrl</kbd><kbd>,</kbd></span><span class="d">{t("scSettings")}</span>
+      <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span><span class="d">{t("scPauseAll")}</span>
+      <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>R</kbd></span><span class="d">{t("scResumeAll")}</span>
+      <span class="k"><kbd>Space</kbd></span><span class="d">{t("scPauseResume")}</span>
+      <span class="k"><kbd>Del</kbd></span><span class="d">{t("scRemove")}</span>
+      <span class="k"><kbd>Enter</kbd></span><span class="d">{t("scOpen")}</span>
+      <span class="k"><kbd>Esc</kbd></span><span class="d">{t("scClose")}</span>
     </div>
   </div>
 {/if}
@@ -314,7 +319,7 @@
   <div class="toast" role="status" aria-live="polite">
     <Icon name="download" size={18} />
     <span class="u">{clipboardUrl.length > 54 ? clipboardUrl.slice(0, 54) + "…" : clipboardUrl}</span>
-    <button class="btn btn-primary" onclick={addClipboard}>Download</button>
-    <button class="btn btn-ghost" onclick={() => (clipboardUrl = null)}>Dismiss</button>
+    <button class="btn btn-primary" onclick={addClipboard}>{t("download")}</button>
+    <button class="btn btn-ghost" onclick={() => (clipboardUrl = null)}>{t("dismiss")}</button>
   </div>
 {/if}

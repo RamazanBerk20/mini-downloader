@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from "./api";
+  import { t } from "./lib/i18n.svelte";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
   import type { ParsedLink } from "./types";
@@ -40,17 +41,17 @@
 <div class="overlay" onclick={onclose} role="presentation"></div>
 <div class="modal" role="dialog" aria-modal="true" aria-labelledby="grab-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
   <div class="dhead">
-    <h2 id="grab-h">Grab links</h2>
-    <button class="icon-btn" aria-label="Close" onclick={onclose}><Icon name="close" size={18} /></button>
+    <h2 id="grab-h">{t("grabLinksTitle")}</h2>
+    <button class="icon-btn" aria-label={t("close")} onclick={onclose}><Icon name="close" size={18} /></button>
   </div>
 
-  <textarea rows="6" placeholder="Paste text, a link list, or HTML" bind:value={text} aria-label="Text to extract links from"></textarea>
-  <button class="btn" onclick={parse}><Icon name="search" size={16} /> Extract links</button>
+  <textarea rows="6" placeholder={t("pasteLinksPlaceholder")} bind:value={text} aria-label="Text to extract links from"></textarea>
+  <button class="btn" onclick={parse}><Icon name="search" size={16} /> {t("extractLinks")}</button>
 
   {#if error}<p class="hint" style="color:var(--error-fg)">{error}</p>{/if}
 
   {#if links.length}
-    <p class="hint">{checked.size} of {links.length} selected</p>
+    <p class="hint">{t("selectedCount", { n: checked.size, m: links.length })}</p>
     <div class="linklist">
       {#each links as l (l.url)}
         <label class="linkrow">
@@ -61,7 +62,7 @@
       {/each}
     </div>
     <button class="btn btn-primary" style="margin-top:0.8rem" onclick={addSelected}>
-      <Icon name="download" size={16} /> Add {checked.size} selected
+      <Icon name="download" size={16} /> {t("addSelected", { n: checked.size })}
     </button>
   {/if}
 </div>

@@ -1,4 +1,5 @@
 const b = globalThis.browser || globalThis.chrome;
+const t = (k) => b.i18n.getMessage(k);
 const DEFAULTS = { enabled: true, minSize: 1048576, disabledHosts: [] };
 
 async function load() {
@@ -21,7 +22,7 @@ async function save() {
   };
   await b.storage.local.set({ settings: cfg });
   const st = document.getElementById("status");
-  st.textContent = "Saved";
+  st.textContent = t("optionsSaved");
   setTimeout(() => (st.textContent = ""), 1500);
 }
 

@@ -9,6 +9,7 @@
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
   import type { Category, Schedule } from "./types";
+  import { t, LOCALES, currentLocale, setLocale, type LocaleCode, type MsgKey } from "./lib/i18n.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -22,11 +23,11 @@
   let split = $state(16);
   let connections = $state(16);
 
-  const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const ACTIONS = [
-    ["pause_all", "Pause all"],
-    ["resume_all", "Resume all"],
-    ["set_speed", "Set speed limit"],
+  const DAYS = ["dayMon", "dayTue", "dayWed", "dayThu", "dayFri", "daySat", "daySun"] as const;
+  const ACTIONS: [string, MsgKey][] = [
+    ["pause_all", "schedPauseAll"],
+    ["resume_all", "schedResumeAll"],
+    ["set_speed", "schedSetSpeed"],
   ];
 
   let nAction = $state("pause_all");
@@ -79,6 +80,11 @@
       browserStatus = "Autostart error: " + String(err);
     }
   }
+  async function onLocaleChange(e: Event) {
+    const code = (e.target as HTMLSelectElement).value as LocaleCode;
+    setLocale(code);
+    await api.setSetting("locale", code);
+  }
   async function saveDir(c: Category, e: Event) {
     c.dir = (e.target as HTMLInputElement).value;
     await api.saveCategory(c.name, c.dir, c.rules, c.priority);
@@ -101,8 +107,11 @@
 
   const fmtTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-  const daysLabel = (mask: number) => DAYS.filter((_, i) => mask & (1 << i)).join(" ");
-  const actionLabel = (a: string) => ACTIONS.find(([v]) => v === a)?.[1] ?? a;
+  const daysLabel = (mask: number) => DAYS.filter((_, i) => mask & (1 << i)).map((k) => t(k)).join(" ");
+  const actionLabel = (a: string) => {
+    const key = ACTIONS.find(([v]) => v === a)?.[1];
+    return key ? t(key) : a;
+  };
 
   function toggleDay(i: number) {
     const s = new Set(nDays);
@@ -144,59 +153,64 @@
 <div class="overlay" onclick={onclose} role="presentation"></div>
 <div class="drawer" role="dialog" aria-modal="true" aria-labelledby="set-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
   <div class="dhead">
-    <h2 id="set-h">Settings</h2>
-    <button class="icon-btn" aria-label="Close settings" onclick={onclose}><Icon name="close" size={18} /></button>
+    <h2 id="set-h">{t("settings")}</h2>
+    <button class="icon-btn" aria-label={t("close")} onclick={onclose}><Icon name="close" size={18} /></button>
   </div>
 
-  <button class="sponsor" onclick={() => openUrl(SPONSOR_URL)}>
-    <Icon name="heart" size={18} />
-    <span>Sponsor Mini Downloader</span>
-  </button>
-
   <section class="section">
-    <h3>General</h3>
+    <h3>{t("sectGeneral")}</h3>
     <div class="srow">
-      <span>Auto-organize finished files</span>
-      <label class="switch"><input type="checkbox" checked={autoOrganize} onchange={toggleOrganize} aria-label="Auto-organize finished files" /><span class="track"></span></label>
+      <span>{t("optAutoOrganize")}</span>
+      <label class="switch"><input type="checkbox" checked={autoOrganize} onchange={toggleOrganize} aria-label={t("optAutoOrganize")} /><span class="track"></span></label>
     </div>
     <div class="srow">
-      <span>Watch clipboard for links</span>
-      <label class="switch"><input type="checkbox" checked={clipboardWatch} onchange={toggleClipboard} aria-label="Watch clipboard for links" /><span class="track"></span></label>
+      <span>{t("optClipboard")}</span>
+      <label class="switch"><input type="checkbox" checked={clipboardWatch} onchange={toggleClipboard} aria-label={t("optClipboard")} /><span class="track"></span></label>
     </div>
     <div class="srow">
-      <span>Close to tray (keep running)</span>
-      <label class="switch"><input type="checkbox" checked={closeToTray} onchange={toggleCloseToTray} aria-label="Close to tray" /><span class="track"></span></label>
+      <span>{t("optCloseTray")}</span>
+      <label class="switch"><input type="checkbox" checked={closeToTray} onchange={toggleCloseToTray} aria-label={t("optCloseTray")} /><span class="track"></span></label>
     </div>
     <div class="srow">
-      <span>Start on login (minimized)</span>
-      <label class="switch"><input type="checkbox" checked={autostart} onchange={toggleAutostart} aria-label="Start on login" /><span class="track"></span></label>
+      <span>{t("optAutostart")}</span>
+      <label class="switch"><input type="checkbox" checked={autostart} onchange={toggleAutostart} aria-label={t("optAutostart")} /><span class="track"></span></label>
     </div>
   </section>
 
   <section class="section">
-    <h3>Connections</h3>
+    <h3>{t("sectLanguage")}</h3>
     <div class="srow">
-      <span>Connections per server</span>
+      <span>{t("sectLanguage")}</span>
+      <select value={currentLocale()} onchange={onLocaleChange} aria-label={t("sectLanguage")}>
+        {#each Object.entries(LOCALES) as [code, meta]}<option value={code}>{meta.name}</option>{/each}
+      </select>
+    </div>
+  </section>
+
+  <section class="section">
+    <h3>{t("sectConnections")}</h3>
+    <div class="srow">
+      <span>{t("optConnPerServer")}</span>
       <span class="fmt-mono" style="color:var(--muted)">{connections}</span>
     </div>
-    <input type="range" min="1" max="16" bind:value={connections} onchange={saveEngine} aria-label="Connections per server" />
+    <input type="range" min="1" max="16" bind:value={connections} onchange={saveEngine} aria-label={t("optConnPerServer")} />
     <div class="srow">
-      <span>Segments per file</span>
+      <span>{t("optSegments")}</span>
       <span class="fmt-mono" style="color:var(--muted)">{split}</span>
     </div>
-    <input type="range" min="1" max="32" bind:value={split} onchange={saveEngine} aria-label="Segments per file" />
-    <p class="hint">Higher = faster on servers that allow multiple connections. Applies to new downloads.</p>
+    <input type="range" min="1" max="32" bind:value={split} onchange={saveEngine} aria-label={t("optSegments")} />
+    <p class="hint">{t("connHint")}</p>
   </section>
 
   <section class="section">
-    <h3>Firefox integration</h3>
-    <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> Install native-messaging host</button>
+    <h3>{t("sectBrowser")}</h3>
+    <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
     {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
-    <p class="hint">Load the extension from <code>extension/</code> via <code>about:debugging</code>.</p>
+    <p class="hint">{t("browserHint")}</p>
   </section>
 
   <section class="section">
-    <h3>Scheduler</h3>
+    <h3>{t("sectScheduler")}</h3>
     {#each schedules as s (s.id)}
       <div class="cat">
         <Icon name="clock" size={16} />
@@ -213,7 +227,7 @@
     {/each}
     <div class="schedform">
       <select bind:value={nAction} aria-label="Schedule action">
-        {#each ACTIONS as [v, l]}<option value={v}>{l}</option>{/each}
+        {#each ACTIONS as [v, l]}<option value={v}>{t(l)}</option>{/each}
       </select>
       <input type="time" bind:value={nTime} aria-label="Schedule time" />
       {#if nAction === "set_speed"}
@@ -221,21 +235,28 @@
       {/if}
       <div class="days" role="group" aria-label="Days">
         {#each DAYS as d, i}
-          <button type="button" class="tag day" class:on={nDays.has(i)} aria-pressed={nDays.has(i)} onclick={() => toggleDay(i)}>{d}</button>
+          <button type="button" class="tag day" class:on={nDays.has(i)} aria-pressed={nDays.has(i)} onclick={() => toggleDay(i)}>{t(d)}</button>
         {/each}
       </div>
-      <button class="btn" onclick={addSchedule}><Icon name="add" size={16} /> Add rule</button>
+      <button class="btn" onclick={addSchedule}><Icon name="add" size={16} /> {t("schedAddRule")}</button>
     </div>
   </section>
 
   <section class="section">
-    <h3>Categories</h3>
+    <h3>{t("sectCategories")}</h3>
     {#each categories as c (c.id)}
       <div class="cat">
         <strong>{c.name}</strong>
         <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
-        <button class="icon-btn" title="Browse folder" aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
+        <button class="icon-btn" title={t("browseFolder")} aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
       </div>
     {/each}
   </section>
+
+  <footer class="drawer-foot">
+    <button class="sponsor" onclick={() => openUrl(SPONSOR_URL)}>
+      <Icon name="heart" size={15} />
+      <span>{t("sponsor")}</span>
+    </button>
+  </footer>
 </div>

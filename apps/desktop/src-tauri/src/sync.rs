@@ -128,10 +128,11 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
             let _ = db.set_error(row.id, code, message);
             let _ = app.emit(EV_ERROR, json!({ "gid": gid, "id": row.id, "code": code, "message": message }));
             let name = row.filename.clone().unwrap_or_else(|| row.url.clone());
+            let locale = db.get_setting("locale").ok().flatten().unwrap_or_default();
             let _ = app
                 .notification()
                 .builder()
-                .title("Download failed")
+                .title(minidl_core::i18n::tr(&locale, minidl_core::i18n::Msg::DownloadFailed))
                 .body(&name)
                 .show();
         }
@@ -150,10 +151,11 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
             let final_dir = organize(db, &row, &final_name);
             let path = format!("{final_dir}/{final_name}");
             let _ = app.emit(EV_COMPLETE, json!({ "gid": gid, "id": row.id, "name": final_name, "path": path }));
+            let locale = db.get_setting("locale").ok().flatten().unwrap_or_default();
             let _ = app
                 .notification()
                 .builder()
-                .title("Download complete")
+                .title(minidl_core::i18n::tr(&locale, minidl_core::i18n::Msg::DownloadComplete))
                 .body(&final_name)
                 .show();
         }

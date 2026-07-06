@@ -1,0 +1,23 @@
+{
+  "extName": { "message": "موصّل Mini Downloader" },
+  "extDescription": { "message": "التقط التنزيلات في متصفحك وسلّمها إلى Mini Downloader." },
+  "actionTitle": { "message": "التنزيل باستخدام Mini Downloader" },
+  "popupCatchDownloads": { "message": "التقاط التنزيلات" },
+  "popupOptions": { "message": "الخيارات" },
+  "popupMediaOnPage": { "message": "الوسائط في هذه الصفحة" },
+  "popupGrabPageVideo": { "message": "التقاط فيديو الصفحة" },
+  "popupNoMedia": { "message": "لم يتم اكتشاف أي وسائط." },
+  "popupGrab": { "message": "التقاط" },
+  "popupSent": { "message": "تم الإرسال" },
+  "optionsTitle": { "message": "خيارات موصّل Mini Downloader" },
+  "optionsMinSize": { "message": "الحد الأدنى لحجم الملف المراد التقاطه (بايت)" },
+  "optionsMinSizeHint": { "message": "التنزيلات الأصغر من ذلك تُترك للمتصفح. الافتراضي 1048576 (1 ميبي بايت)." },
+  "optionsDisabledHosts": { "message": "المواقع المعطّلة (اسم مضيف واحد في كل سطر)" },
+  "optionsSave": { "message": "حفظ" },
+  "optionsSaved": { "message": "تم الحفظ" },
+  "notifySentTitle": { "message": "تم الإرسال إلى Mini Downloader" },
+  "notifyRejectedTitle": { "message": "رفض Mini Downloader التنزيل" },
+  "notifyUnknownError": { "message": "خطأ غير معروف" },
+  "notifyNotReachableTitle": { "message": "تعذّر الوصول إلى Mini Downloader" },
+  "notifyNotReachableBody": { "message": "افتح Mini Downloader وفعّل تكامل المتصفح." }
+}
