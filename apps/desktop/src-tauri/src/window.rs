@@ -1,12 +1,13 @@
 //! Shared show/hide logic for the tray.
 //!
-//! Hiding to tray uses `hide()` (a Wayland client cannot unminimize itself, so
-//! minimize is a dead end for restoring). The catch: `hide()`/`show()` unmaps
-//! and remaps the surface, and KWin/Wayland then leaves the titlebar buttons
-//! (minimize / maximize / close) unresponsive until a geometry/state change
-//! re-syncs the decorations — exactly what a manual maximize double-click does.
-//! So on restore we nudge the window size by a pixel and back, which sends the
-//! configure round-trip that re-wires the decorations, with no lasting change.
+//! Known upstream bug: on Wayland, hiding then showing a window leaves the
+//! titlebar buttons (minimize / maximize / close) unresponsive —
+//! <https://github.com/tauri-apps/tauri/issues/11856> /
+//! <https://github.com/tauri-apps/tao/issues/1046>. Fixed in tao by
+//! <https://github.com/tauri-apps/tao/pull/1218> (unreleased as of tao 0.35).
+//! Until that ships, the endorsed workaround is to toggle the `resizable`
+//! property whenever the window gains focus, which re-syncs the decorations
+//! invisibly. See `install_decoration_fix`.
 
 use tauri::{AppHandle, Manager, WebviewWindow};
 
@@ -15,27 +16,11 @@ pub fn hide_to_tray(w: &WebviewWindow) {
     let _ = w.hide();
 }
 
-/// Restore + focus the window from the tray, re-waking its titlebar controls.
+/// Restore + focus the window from the tray.
 pub fn show(w: &WebviewWindow) {
-    let w = w.clone();
-    tauri::async_runtime::spawn(async move {
-        let _ = w.unminimize();
-        let _ = w.show();
-        let _ = w.set_focus();
-
-        #[cfg(target_os = "linux")]
-        {
-            use std::time::Duration;
-            tokio::time::sleep(Duration::from_millis(60)).await;
-            if let Ok(sz) = w.inner_size() {
-                let bigger = tauri::PhysicalSize::new(sz.width + 1, sz.height + 1);
-                let _ = w.set_size(bigger);
-                tokio::time::sleep(Duration::from_millis(40)).await;
-                let _ = w.set_size(sz);
-            }
-            let _ = w.set_focus();
-        }
-    });
+    let _ = w.unminimize();
+    let _ = w.show();
+    let _ = w.set_focus();
 }
 
 /// True when the window is currently hidden to the tray.
@@ -54,5 +39,25 @@ pub fn reveal(app: &AppHandle) {
 pub fn hide(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         hide_to_tray(&w);
+    }
+}
+
+/// Wayland decoration workaround (see module docs): every time the window is
+/// focused, toggle `resizable` off/on to re-wire the titlebar buttons after a
+/// hide/show remap. Harmless no-op elsewhere; remove once tao 0.36 ships.
+pub fn install_decoration_fix(w: &WebviewWindow) {
+    #[cfg(target_os = "linux")]
+    {
+        let win = w.clone();
+        w.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(true) = event {
+                let _ = win.set_resizable(false);
+                let _ = win.set_resizable(true);
+            }
+        });
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = w;
     }
 }

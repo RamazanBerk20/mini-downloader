@@ -177,6 +177,7 @@ pub fn run() {
 
             // Close-to-tray: hide instead of quitting (unless disabled).
             if let Some(win) = app.get_webview_window("main") {
+                window::install_decoration_fix(&win);
                 let win2 = win.clone();
                 let db2 = db.clone();
                 win.on_window_event(move |event| {
