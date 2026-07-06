@@ -38,8 +38,8 @@ Chromium — cookies, referer and all.
 
 Grab from [Releases](https://github.com/RamazanBerk20/mini-downloader/releases):
 
-- **Debian/Ubuntu**: `sudo apt install ./mini-downloader_*_amd64.deb`
-- **Fedora/openSUSE**: `sudo rpm -i mini-downloader-*.x86_64.rpm`
+- **Debian/Ubuntu**: `sudo apt install ./Mini.Downloader_*_amd64.deb`
+- **Fedora/openSUSE**: `sudo rpm -i Mini.Downloader-*.x86_64.rpm`
 - **AppImage**: `chmod +x Mini*Downloader*.AppImage && ./Mini*Downloader*.AppImage`
   (needs `aria2` installed; `yt-dlp` + `ffmpeg` for video)
 

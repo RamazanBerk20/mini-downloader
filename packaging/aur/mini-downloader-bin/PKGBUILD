@@ -12,7 +12,7 @@ provides=('mini-downloader')
 conflicts=('mini-downloader')
 # NOTE: verify the exact asset filename against the GitHub release before
 # bumping pkgver — tauri derives it from the product name.
-source=("$url/releases/download/v$pkgver/mini-downloader_${pkgver}_amd64.deb")
+source=("$url/releases/download/v$pkgver/Mini.Downloader_${pkgver}_amd64.deb")
 sha256sums=('SKIP')
 
 package() {
