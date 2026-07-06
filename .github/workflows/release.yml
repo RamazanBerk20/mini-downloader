@@ -87,6 +87,7 @@ jobs:
             ffmpeg yourself for video muxing).
 
   extension:
+    needs: build # the draft release must exist before uploading to it
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
