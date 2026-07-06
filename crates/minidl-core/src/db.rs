@@ -150,17 +150,24 @@ impl Db {
     }
 
     fn migrate(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < 1 {
-            conn.execute_batch(MIGRATION_1)?;
+            // Wrap DDL + seed + version bump in one transaction. Otherwise a crash
+            // after `CREATE TABLE downloads` commits but before `user_version=1`
+            // leaves the DB half-migrated: the next launch re-runs MIGRATION_1,
+            // `CREATE TABLE` fails "already exists", and the app can never open it.
+            // (`user_version` is part of the DB header and rolls back with the tx.)
+            let tx = conn.transaction()?;
+            tx.execute_batch(MIGRATION_1)?;
             for (name, dir, rules) in DEFAULT_CATEGORIES {
-                conn.execute(
+                tx.execute(
                     "INSERT OR IGNORE INTO categories (name, dir, rules) VALUES (?1, ?2, ?3)",
                     params![name, dir, rules],
                 )?;
             }
-            conn.execute_batch("PRAGMA user_version=1;")?;
+            tx.execute_batch("PRAGMA user_version=1;")?;
+            tx.commit()?;
         }
         Ok(())
     }
@@ -243,6 +250,20 @@ impl Db {
             params![status.as_str(), finished, id],
         )?;
         Ok(())
+    }
+
+    /// Flip status only if it actually differs; returns `true` when a row was
+    /// changed. Used as an atomic finalize gate so a completion seen by both the
+    /// WebSocket consumer and the 1 Hz poller fires side effects (notify /
+    /// organize) exactly once — the loser's `UPDATE` matches no row.
+    pub fn set_status_if_changed(&self, id: i64, status: DownloadStatus) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let finished = if status.is_terminal() { Some(now()) } else { None };
+        let n = conn.execute(
+            "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3 AND status<>?1",
+            params![status.as_str(), finished, id],
+        )?;
+        Ok(n > 0)
     }
 
     pub fn set_error(&self, id: i64, code: Option<&str>, message: Option<&str>) -> Result<()> {
@@ -341,12 +362,17 @@ impl Db {
 
     pub fn upsert_category(&self, name: &str, dir: &str, rules: &str, priority: i64) -> Result<i64> {
         let conn = self.conn.lock().unwrap();
-        conn.execute(
+        // `RETURNING id` gives the row's id on both the INSERT and the DO UPDATE
+        // path. `last_insert_rowid()` would return a stale/unrelated rowid when
+        // the ON CONFLICT branch runs (no insert happens).
+        let id = conn.query_row(
             "INSERT INTO categories (name, dir, rules, priority) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(name) DO UPDATE SET dir=?2, rules=?3, priority=?4",
+             ON CONFLICT(name) DO UPDATE SET dir=?2, rules=?3, priority=?4
+             RETURNING id",
             params![name, dir, rules, priority],
+            |r| r.get(0),
         )?;
-        Ok(conn.last_insert_rowid())
+        Ok(id)
     }
 
     pub fn delete_category(&self, id: i64) -> Result<()> {
@@ -469,6 +495,19 @@ mod tests {
         let cats = db.list_categories().unwrap();
         assert!(cats.iter().any(|c| c.name == "Video"));
         assert!(cats.len() >= 6);
+    }
+
+    #[test]
+    fn upsert_category_returns_stable_id_on_update() {
+        let db = Db::open_in_memory().unwrap();
+        let id1 = db.upsert_category("Custom", "~/a", "[]", 5).unwrap();
+        // Second call hits ON CONFLICT DO UPDATE — must return the same id, not a
+        // bogus last_insert_rowid().
+        let id2 = db.upsert_category("Custom", "~/b", "[]", 9).unwrap();
+        assert_eq!(id1, id2);
+        let cat = db.list_categories().unwrap().into_iter().find(|c| c.name == "Custom").unwrap();
+        assert_eq!(cat.id, id1);
+        assert_eq!(cat.dir, "~/b");
     }
 
     #[test]

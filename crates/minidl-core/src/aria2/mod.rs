@@ -29,9 +29,31 @@ pub struct Engine {
 impl Engine {
     /// Spawn aria2c, wait for its RPC, and start the notification listener.
     pub async fn launch(opts: LaunchOptions) -> Result<Self> {
-        let process = Aria2Process::spawn(&opts)?;
-        let rpc = RpcClient::new(process.port, process.secret.clone());
-        rpc.wait_ready(50, Duration::from_millis(100)).await?;
+        // `free_port()` binds :0 then drops the listener, so another process can
+        // steal the port before aria2c binds it (TOCTOU). If RPC never comes up,
+        // retry with a fresh port/process a couple of times before giving up.
+        let mut last_err = None;
+        let mut process = None;
+        let mut rpc = None;
+        for _ in 0..3 {
+            let proc = Aria2Process::spawn(&opts)?;
+            let client = RpcClient::new(proc.port, proc.secret.clone());
+            match client.wait_ready(50, Duration::from_millis(100)).await {
+                Ok(()) => {
+                    process = Some(proc);
+                    rpc = Some(client);
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    // `proc` drops here → the stuck aria2c is killed before retry.
+                }
+            }
+        }
+        let process = process.ok_or_else(|| {
+            last_err.unwrap_or_else(|| anyhow::anyhow!("aria2 RPC did not become ready"))
+        })?;
+        let rpc = rpc.expect("rpc set when process is set");
 
         let (events, _rx) = broadcast::channel(256);
         let notify_task = notify::spawn_listener(process.port, events.clone());

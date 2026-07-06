@@ -24,8 +24,16 @@ pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
         let db = db.clone();
         let mut rx = engine.subscribe();
         tauri::async_runtime::spawn(async move {
-            while let Ok(ev) = rx.recv().await {
-                handle_transition(&app, &engine, &db, ev.gid()).await;
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                match rx.recv().await {
+                    Ok(ev) => handle_transition(&app, &engine, &db, ev.gid()).await,
+                    // A burst that overruns the 256-slot ring is recoverable — the
+                    // 1 Hz poller still catches the transition. Keep consuming;
+                    // only a closed channel (engine gone) ends the task.
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                }
             }
         });
     }
@@ -93,6 +101,9 @@ pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
             for gid in known.difference(&current) {
                 handle_transition(&app, &engine, &db, gid).await;
             }
+            // Drop cache entries for gids no longer active so the map can't grow
+            // without bound over a long session.
+            gid_id.retain(|g, _| current.contains(g));
             known = current;
         }
     });
@@ -123,6 +134,11 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
 
     match new_status {
         DownloadStatus::Error => {
+            // Atomic gate: the WS consumer and the poller can both observe the
+            // same transition — only the first flip fires the notification.
+            if !db.set_status_if_changed(row.id, DownloadStatus::Error).unwrap_or(false) {
+                return;
+            }
             let code = st.get("errorCode").and_then(|v| v.as_str());
             let message = st.get("errorMessage").and_then(|v| v.as_str());
             let _ = db.set_error(row.id, code, message);
@@ -137,6 +153,24 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
                 .show();
         }
         DownloadStatus::Complete => {
+            // A magnet/torrent metadata download "completes" by spawning the real
+            // content under a new `followedBy` GID. Rebind this row to that child
+            // GID instead of reporting completion — otherwise we notify "complete"
+            // while nothing real downloaded and the child GID is never tracked.
+            if let Some(child) = first_followed_by(&st) {
+                let _ = db.set_gid(row.id, &child);
+                if let Some(ih) = st.get("infoHash").and_then(|v| v.as_str()).filter(|s| !s.is_empty()) {
+                    let _ = db.set_info_hash(row.id, ih);
+                }
+                let _ = db.set_status(row.id, DownloadStatus::Active);
+                let _ = app.emit(EV_STATE, json!({ "gid": child, "id": row.id, "status": "active" }));
+                return;
+            }
+            // Atomic finalize gate: run organize + notify exactly once even if two
+            // tasks race the same completion.
+            if !db.set_status_if_changed(row.id, DownloadStatus::Complete).unwrap_or(false) {
+                return;
+            }
             let name = basename(&st);
             let final_name = if name.is_empty() {
                 row.filename.clone().unwrap_or_default()
@@ -146,7 +180,6 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
                 }
                 name
             };
-            let _ = db.set_status(row.id, DownloadStatus::Complete);
             // Category auto-organize (single-file HTTP): may move the file.
             let final_dir = organize(db, &row, &final_name);
             let path = format!("{final_dir}/{final_name}");
@@ -189,6 +222,12 @@ pub async fn reconcile(engine: &Engine, db: &Db) {
 
     for row in db.running_rows().unwrap_or_default() {
         let Some(gid) = &row.gid else {
+            // yt-dlp rows carry no GID; their subprocess died with the app. Mark
+            // still-running ones Paused (interrupted) so they don't linger as
+            // un-resumable "active" zombies with frozen progress.
+            if matches!(row.status, DownloadStatus::Active | DownloadStatus::Waiting) {
+                let _ = db.set_status(row.id, DownloadStatus::Paused);
+            }
             continue;
         };
         match live.get(gid) {
@@ -268,6 +307,17 @@ fn organize(db: &Db, row: &minidl_core::model::Download, filename: &str) -> Stri
     } else {
         row.dir.clone()
     }
+}
+
+/// First `followedBy` GID of a status object, if any — present on a magnet /
+/// torrent metadata download that has spawned the real content download.
+fn first_followed_by(st: &Value) -> Option<String> {
+    st.get("followedBy")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .filter(|s| !s.is_empty())
 }
 
 fn str_field(v: &Value, key: &str) -> String {

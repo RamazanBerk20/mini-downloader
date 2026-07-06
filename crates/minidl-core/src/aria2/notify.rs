@@ -24,7 +24,7 @@ pub fn spawn_listener(port: u16, events: broadcast::Sender<Aria2Event>) -> JoinH
         loop {
             match connect_async(url.as_str()).await {
                 Ok((ws, _resp)) => {
-                    backoff = 1;
+                    let started = tokio::time::Instant::now();
                     // Keep the write half bound (not dropped) so the socket stays open.
                     let (_write, mut read) = ws.split();
                     while let Some(msg) = read.next().await {
@@ -39,7 +39,15 @@ pub fn spawn_listener(port: u16, events: broadcast::Sender<Aria2Event>) -> JoinH
                             _ => {}
                         }
                     }
-                    // Connection closed — loop reconnects.
+                    // Only treat this as a healthy session (reset backoff) if it
+                    // lasted a while. A socket that is accepted then immediately
+                    // closed would otherwise busy-loop reconnecting with no delay.
+                    if started.elapsed() >= Duration::from_secs(1) {
+                        backoff = 1;
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(backoff)).await;
+                        backoff = (backoff * 2).min(30);
+                    }
                 }
                 Err(_) => {
                     tokio::time::sleep(Duration::from_secs(backoff)).await;

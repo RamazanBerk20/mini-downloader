@@ -44,10 +44,18 @@ fn keys_value(keys: &[&str]) -> Value {
 
 impl RpcClient {
     pub fn new(port: u16, secret: impl Into<String>) -> Self {
+        // Bound every call: an aria2 that is alive but wedged (SIGSTOP, stalled
+        // disk/NFS) must not hang the poll loop forever — without a timeout the
+        // request never returns and the `Err(_) => continue` fallback never fires.
+        let http = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
             secret: secret.into(),
-            http: reqwest::Client::new(),
+            http,
             next_id: std::sync::Arc::new(AtomicU64::new(1)),
         }
     }

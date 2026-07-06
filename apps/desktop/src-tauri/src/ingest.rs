@@ -77,10 +77,31 @@ pub async fn ingest(
 
     match result {
         Ok(gids) => {
-            if let Some(g) = gids.first() {
-                db.set_gid(id, g).map_err(|e| e.to_string())?;
-            }
+            // A metalink can expand to several files, each with its own GID. The
+            // row we already inserted tracks the first; give every *additional*
+            // GID its own row so its progress is tracked, it can be paused, and it
+            // survives reconcile. An empty GID list means aria2 accepted nothing —
+            // fail the row instead of leaving it Active-with-no-GID (a permanent
+            // zombie the poller can never map).
+            let Some((first, rest)) = gids.split_first() else {
+                let _ = db.set_error(id, None, Some("engine returned no download id"));
+                return Err("engine returned no download id".into());
+            };
+            db.set_gid(id, first).map_err(|e| e.to_string())?;
             db.set_status(id, DownloadStatus::Active).map_err(|e| e.to_string())?;
+            for g in rest {
+                if let Ok(child_id) = db.insert_download(&NewDownload {
+                    url: target.clone(),
+                    filename: None,
+                    dir: dir.clone(),
+                    kind: kind_str(job.kind).into(),
+                    referrer: job.referrer.clone(),
+                    category_id,
+                }) {
+                    let _ = db.set_gid(child_id, g);
+                    let _ = db.set_status(child_id, DownloadStatus::Active);
+                }
+            }
             Ok(id)
         }
         Err(e) => {
