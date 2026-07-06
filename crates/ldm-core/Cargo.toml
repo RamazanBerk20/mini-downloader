@@ -1,0 +1,15 @@
+[package]
+name = "ldm-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# GUI-agnostic engine: aria2 JSON-RPC client, yt-dlp driver, link grabber,
+# scheduler, categories, and SQLite persistence. No Tauri dependency — the
+# desktop app depends on this, not the other way around.
+[dependencies]
+ldm-ipc = { path = "../ldm-ipc" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
