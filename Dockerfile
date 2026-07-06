@@ -19,8 +19,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
       -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
 
-# Node 20 + pnpm + web-ext
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+# Node 22 + pnpm + web-ext
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/* \
     && npm install -g pnpm web-ext
 
