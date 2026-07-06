@@ -20,4 +20,12 @@ api
   })
   .catch(() => {});
 
+// Apply the saved theme override (light/dark). Absent → CSS follows the OS.
+api
+  .getSetting("theme")
+  .then((v) => {
+    if (v === "light" || v === "dark") document.documentElement.dataset.theme = v;
+  })
+  .catch(() => {});
+
 export default app;

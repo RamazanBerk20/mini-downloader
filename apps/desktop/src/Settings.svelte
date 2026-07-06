@@ -35,11 +35,26 @@
   let nDays = $state<Set<number>>(new Set([0, 1, 2, 3, 4, 5, 6]));
   let nSpeed = $state("512000");
   let schedError = $state("");
+  let theme = $state("system");
+  let onComplete = $state("none");
+  let maxConcurrent = $state(5);
+  let ncName = $state("");
+  let ncDir = $state("");
+  let ncRules = $state("");
+
+  const OC_ACTIONS: [string, MsgKey][] = [
+    ["none", "ocNone"],
+    ["quit", "ocQuit"],
+    ["sleep", "ocSleep"],
+    ["shutdown", "ocShutdown"],
+  ];
 
   onMount(async () => {
     autoOrganize = (await api.getSetting("auto_organize")) !== "false";
     clipboardWatch = (await api.getSetting("clipboard_watch")) === "true";
     closeToTray = (await api.getSetting("close_to_tray")) !== "false";
+    theme = (await api.getSetting("theme")) || "system";
+    onComplete = (await api.getSetting("on_complete_action")) || "none";
     categories = await api.listCategories();
     schedules = await api.listSchedules();
     try {
@@ -48,7 +63,48 @@
     try {
       [split, connections] = await api.getEngineDefaults();
     } catch {}
+    try {
+      maxConcurrent = await api.getMaxConcurrent();
+    } catch {}
   });
+
+  function applyTheme(v: string) {
+    const root = document.documentElement;
+    if (v === "light" || v === "dark") root.dataset.theme = v;
+    else delete root.dataset.theme;
+  }
+  async function onThemeChange(e: Event) {
+    theme = (e.target as HTMLSelectElement).value;
+    applyTheme(theme);
+    await api.setSetting("theme", theme);
+  }
+  async function onCompleteChange(e: Event) {
+    onComplete = (e.target as HTMLSelectElement).value;
+    await api.setSetting("on_complete_action", onComplete);
+  }
+  async function onMaxConcurrent(e: Event) {
+    maxConcurrent = parseInt((e.target as HTMLInputElement).value, 10);
+    await api.setMaxConcurrent(maxConcurrent);
+  }
+  async function addCategory() {
+    if (!ncName.trim() || !ncDir.trim()) return;
+    const rules = JSON.stringify(
+      ncRules.split(",").map((s) => s.trim()).filter(Boolean),
+    );
+    await api.saveCategory(ncName.trim(), ncDir.trim(), rules, 0);
+    ncName = "";
+    ncDir = "";
+    ncRules = "";
+    categories = await api.listCategories();
+  }
+  async function removeCategory(id: number) {
+    await api.deleteCategory(id);
+    categories = await api.listCategories();
+  }
+  async function browseNewDir() {
+    const dir = await open({ directory: true, multiple: false });
+    if (typeof dir === "string") ncDir = dir;
+  }
 
   async function saveEngine() {
     try {
@@ -188,6 +244,20 @@
       <span>{t("optAutostart")}</span>
       <label class="switch"><input type="checkbox" checked={autostart} onchange={toggleAutostart} aria-label={t("optAutostart")} /><span class="track"></span></label>
     </div>
+    <div class="srow">
+      <span>{t("theme")}</span>
+      <select value={theme} onchange={onThemeChange} aria-label={t("theme")}>
+        <option value="system">{t("themeSystem")}</option>
+        <option value="light">{t("themeLight")}</option>
+        <option value="dark">{t("themeDark")}</option>
+      </select>
+    </div>
+    <div class="srow">
+      <span>{t("onComplete")}</span>
+      <select value={onComplete} onchange={onCompleteChange} aria-label={t("onComplete")}>
+        {#each OC_ACTIONS as [v, l]}<option value={v}>{t(l)}</option>{/each}
+      </select>
+    </div>
   </section>
 
   <section class="section">
@@ -212,6 +282,11 @@
       <span class="fmt-mono" style="color:var(--muted)">{split}</span>
     </div>
     <input type="range" min="1" max="32" bind:value={split} onchange={saveEngine} aria-label={t("optSegments")} />
+    <div class="srow">
+      <span>{t("maxConcurrent")}</span>
+      <span class="fmt-mono" style="color:var(--muted)">{maxConcurrent}</span>
+    </div>
+    <input type="range" min="1" max="20" bind:value={maxConcurrent} onchange={onMaxConcurrent} aria-label={t("maxConcurrent")} />
     <p class="hint">{t("connHint")}</p>
   </section>
 
@@ -263,8 +338,16 @@
         <strong>{c.name}</strong>
         <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
         <button class="icon-btn" title={t("browseFolder")} aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
+        <button class="icon-btn danger" aria-label="Delete {c.name}" onclick={() => removeCategory(c.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
+    <div class="schedform">
+      <input bind:value={ncName} placeholder={t("catName")} aria-label={t("catName")} style="width:110px" />
+      <input bind:value={ncDir} placeholder={t("catFolder")} aria-label={t("catFolder")} />
+      <button class="icon-btn" title={t("browseFolder")} aria-label={t("browseFolder")} onclick={browseNewDir}><Icon name="folder" size={16} /></button>
+      <input bind:value={ncRules} placeholder={t("catRules")} aria-label={t("catRules")} />
+      <button class="btn" onclick={addCategory}><Icon name="add" size={16} /> {t("addCategory")}</button>
+    </div>
   </section>
 
   <footer class="drawer-foot">

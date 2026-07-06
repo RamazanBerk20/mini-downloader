@@ -18,7 +18,26 @@
     d,
     i,
     onact,
-  }: { d: Download; i: number; onact: (fn: () => Promise<unknown>) => void } = $props();
+    selected = false,
+    onselect,
+  }: {
+    d: Download;
+    i: number;
+    onact: (fn: () => Promise<unknown>) => void;
+    selected?: boolean;
+    onselect?: (id: number, e: MouseEvent) => void;
+  } = $props();
+
+  // Per-download speed cap presets (bytes/sec; 0 = unlimited).
+  const SPEED_PRESETS = [0, 262144, 524288, 1048576, 2097152, 5242880, 10485760];
+  function fmtSpeedOpt(v: number): string {
+    return v === 0 ? t("unlimited") : `${fmt(v)}/s`;
+  }
+  async function copyUrl() {
+    try {
+      await navigator.clipboard.writeText(d.url);
+    } catch {}
+  }
 
   function fileIcon(d: Download): IconName {
     if (d.kind === "video" || d.kind === "hls" || d.kind === "dash") return "video";
@@ -51,6 +70,10 @@
   }
 
   const isRunning = $derived(d.status === "active" || d.status === "waiting");
+  const isTorrent = $derived(d.kind === "magnet" || d.kind === "torrent");
+  const isAria2 = $derived(!(d.kind === "video" || d.kind === "hls" || d.kind === "dash"));
+  // No known total while active → show an indeterminate bar, not a dead 0%.
+  const indeterminate = $derived(d.status === "active" && d.total_bytes <= 0);
 
   function onKey(e: KeyboardEvent) {
     if (e.target !== e.currentTarget) return;
@@ -78,6 +101,15 @@
   onkeydown={onKey}
 >
   <div class="row-head">
+    {#if onselect}
+      <input
+        type="checkbox"
+        class="row-check"
+        checked={selected}
+        aria-label="Select {name(d)}"
+        onclick={(e) => onselect?.(d.id, e)}
+      />
+    {/if}
     <Icon name={fileIcon(d)} size={16} />
     <span class="row-name" title={d.url}>{name(d)}</span>
     <span class="badge {d.status}">{t(STATUS_KEY[d.status] ?? "statusActive")}</span>
@@ -85,25 +117,51 @@
 
   <div
     class="progress"
+    class:indeterminate
     role="progressbar"
     aria-valuemin="0"
     aria-valuemax="100"
     aria-valuenow={pct(d)}
+    aria-valuetext="{pct(d)}%"
     aria-label="Download progress"
   >
-    <span style="width:{pct(d)}%"></span>
+    <span style="width:{indeterminate ? 30 : pct(d)}%"></span>
   </div>
 
   <div class="row-foot">
     <span class="row-meta">
-      {fmt(d.completed_bytes)} / {d.total_bytes > 0 ? fmt(d.total_bytes) : "—"} · {pct(d)}%
+      {#if indeterminate}
+        {t("fetchingMeta")}
+      {:else}
+        {fmt(d.completed_bytes)} / {d.total_bytes > 0 ? fmt(d.total_bytes) : "—"} · {pct(d)}%
+      {/if}
       {#if d.status === "active"}
         · {fmt(d.download_speed)}/s{#if eta(d)} · {eta(d)}{/if}{#if d.connections > 0} · {d.connections}c{/if}
+        {#if isTorrent}· ↑{fmt(d.upload_speed)}/s{#if d.num_seeders > 0} · {d.num_seeders}⚲{/if}{/if}
       {/if}
       {#if d.status === "error" && d.error_message}· <span class="err-text">{d.error_message}</span>{/if}
     </span>
 
     <span class="row-actions">
+      {#if d.status === "waiting"}
+        <button class="icon-btn" title={t("moveUp")} aria-label={t("moveUp")} onclick={() => onact(() => api.moveInQueue(d.id, "up"))}>
+          <Icon name="chevron-up" size={15} />
+        </button>
+        <button class="icon-btn" title={t("moveDown")} aria-label={t("moveDown")} onclick={() => onact(() => api.moveInQueue(d.id, "down"))}>
+          <Icon name="chevron-down" size={15} />
+        </button>
+      {/if}
+      {#if isRunning && isAria2}
+        <select
+          class="speed-sel"
+          title={t("speedLimit")}
+          aria-label="{t('speedLimit')} {name(d)}"
+          value={d.speed_limit ?? 0}
+          onchange={(e) => onact(() => api.setDownloadSpeed(d.id, parseInt((e.currentTarget as HTMLSelectElement).value, 10)))}
+        >
+          {#each SPEED_PRESETS as v}<option value={v}>{fmtSpeedOpt(v)}</option>{/each}
+        </select>
+      {/if}
       {#if isRunning}
         <button class="icon-btn" title={t("pause")} aria-label="{t('pause')} {name(d)}" onclick={() => onact(() => api.pause(d.id))}>
           <Icon name="pause" size={16} />
@@ -119,10 +177,13 @@
         </button>
       {/if}
       {#if d.status === "error"}
-        <button class="icon-btn" title={t("retry")} aria-label="{t('retry')} {name(d)}" onclick={() => onact(async () => { await api.remove(d.id, false); await api.add(d.url); })}>
+        <button class="icon-btn" title={t("retry")} aria-label="{t('retry')} {name(d)}" onclick={() => onact(() => api.retry(d.id))}>
           <Icon name="retry" size={16} />
         </button>
       {/if}
+      <button class="icon-btn" title={t("copyUrl")} aria-label="{t('copyUrl')} {name(d)}" onclick={copyUrl}>
+        <Icon name="link" size={16} />
+      </button>
       <button class="icon-btn danger" title={t("remove")} aria-label="{t('remove')} {name(d)}" onclick={() => onact(() => api.remove(d.id, false))}>
         <Icon name="trash" size={16} />
       </button>

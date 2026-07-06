@@ -9,8 +9,13 @@ export const api = {
   list: (status?: string) => invoke<Download[]>("list_downloads", { status: status ?? null }),
   pause: (id: number) => invoke<void>("pause_download", { id }),
   resume: (id: number) => invoke<void>("resume_download", { id }),
+  retry: (id: number) => invoke<Download>("retry_download", { id }),
   remove: (id: number, deleteFiles: boolean) =>
     invoke<void>("remove_download", { id, deleteFiles }),
+  moveInQueue: (id: number, direction: "top" | "up" | "down" | "bottom") =>
+    invoke<void>("move_in_queue", { id, direction }),
+  setMaxConcurrent: (n: number) => invoke<void>("set_max_concurrent", { n }),
+  getMaxConcurrent: () => invoke<number>("get_max_concurrent"),
   pauseAll: () => invoke<void>("pause_all"),
   resumeAll: () => invoke<void>("resume_all"),
   removeCompleted: () => invoke<number>("remove_completed"),

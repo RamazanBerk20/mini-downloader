@@ -25,6 +25,7 @@
   let showMedia = $state(false);
   let showGrabber = $state(false);
   let showHelp = $state(false);
+  let selected = $state<Set<number>>(new Set());
 
   let addEl: HTMLInputElement;
   let searchEl: HTMLInputElement;
@@ -67,6 +68,32 @@
     }
   }
 
+  // Patch a single row in place. Returns false if the id isn't loaded yet (a
+  // brand-new download) so the caller can fall back to a full refresh. This
+  // avoids re-fetching + re-rendering the whole list on every lifecycle event.
+  function patchRow(id: number, changes: Partial<Download>): boolean {
+    const i = all.findIndex((d) => d.id === id);
+    if (i === -1) return false;
+    Object.assign(all[i], changes);
+    return true;
+  }
+
+  function toggleSelect(id: number) {
+    const s = new Set(selected);
+    if (s.has(id)) s.delete(id);
+    else s.add(id);
+    selected = s;
+  }
+  async function bulk(fn: (id: number) => Promise<unknown>) {
+    for (const id of [...selected]) {
+      try {
+        await fn(id);
+      } catch {}
+    }
+    selected = new Set();
+    await refresh();
+  }
+
   onMount(() => {
     api.listCategories().then((c) => (categories = c)).catch(() => {});
     refresh();
@@ -97,17 +124,30 @@
         if (changed) all = [...all];
       }),
     );
-    subs.push(on("downloads:state", () => refresh()));
     subs.push(
-      on<{ name?: string }>("downloads:complete", (p) => {
-        announce(`Completed: ${p.name ?? "download"}`);
-        refresh();
+      on<{ id?: number; status?: string }>("downloads:state", (p) => {
+        // A single transition patches in place; a new id (capture/deeplink) or a
+        // batch payload needs a full reload.
+        if (typeof p?.id === "number" && p.status) {
+          if (!patchRow(p.id, { status: p.status as Download["status"] })) refresh();
+        } else {
+          refresh();
+        }
       }),
     );
     subs.push(
-      on<{ message?: string }>("downloads:error", (p) => {
+      on<{ id?: number; name?: string }>("downloads:complete", (p) => {
+        announce(`Completed: ${p.name ?? "download"}`);
+        const changes: Partial<Download> = { status: "complete" };
+        if (p.name) changes.filename = p.name;
+        if (typeof p?.id !== "number" || !patchRow(p.id, changes)) refresh();
+      }),
+    );
+    subs.push(
+      on<{ id?: number; message?: string }>("downloads:error", (p) => {
         announce(`Download failed${p.message ? ": " + p.message : ""}`);
-        refresh();
+        if (typeof p?.id !== "number" || !patchRow(p.id, { status: "error", error_message: p.message ?? null }))
+          refresh();
       }),
     );
     subs.push(on("downloads:reconciled", () => refresh()));
@@ -212,6 +252,16 @@
       error = String(e);
     }
   }
+
+  async function setupBrowser() {
+    error = "";
+    try {
+      const msg = await api.installBrowser();
+      announce(msg);
+    } catch (e) {
+      error = String(e);
+    }
+  }
 </script>
 
 <div class="shell">
@@ -267,6 +317,16 @@
       </div>
     {/if}
 
+    {#if selected.size > 0}
+      <div class="selbar" role="toolbar" aria-label="Selection actions">
+        <span>{t("selectedCount", { n: selected.size })}</span>
+        <button class="btn btn-ghost" onclick={() => bulk(api.resume)}><Icon name="play" size={15} /> {t("resume")}</button>
+        <button class="btn btn-ghost" onclick={() => bulk(api.pause)}><Icon name="pause" size={15} /> {t("pause")}</button>
+        <button class="btn btn-ghost" onclick={() => bulk((id) => api.remove(id, false))}><Icon name="trash" size={15} /> {t("remove")}</button>
+        <button class="btn btn-ghost" onclick={() => (selected = new Set())}>{t("close")}</button>
+      </div>
+    {/if}
+
     <div class="main-scroll">
       {#if filtered.length === 0}
         <div class="empty">
@@ -274,6 +334,12 @@
           {#if all.length === 0}
             <h2>{t("emptyTitle")}</h2>
             <p>{t("emptySub")}</p>
+            <div class="onboard">
+              <button class="ob-card" onclick={() => addEl?.focus()}><Icon name="add" size={20} /><span>{t("obPaste")}</span></button>
+              <button class="ob-card" onclick={() => (showMedia = true)}><Icon name="video" size={20} /><span>{t("obVideo")}</span></button>
+              <button class="ob-card" onclick={() => (showGrabber = true)}><Icon name="link" size={20} /><span>{t("obLinks")}</span></button>
+              <button class="ob-card" onclick={setupBrowser}><Icon name="download" size={20} /><span>{t("obBrowser")}</span></button>
+            </div>
             <p class="keys"><kbd>Ctrl</kbd> <kbd>N</kbd> {t("emptyToAdd")} · <kbd>?</kbd> {t("emptyForShortcuts")}</p>
           {:else}
             <h2>{t("noMatchTitle")}</h2>
@@ -283,7 +349,7 @@
       {:else}
         <ul class="dl-list" role="list">
           {#each filtered as d, i (d.id)}
-            <DownloadRow {d} {i} onact={act} />
+            <DownloadRow {d} {i} onact={act} selected={selected.has(d.id)} onselect={toggleSelect} />
           {/each}
         </ul>
       {/if}

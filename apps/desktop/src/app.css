@@ -41,8 +41,10 @@
   font-size: 14px;
 }
 
+/* Dark tokens. Applied when the OS is dark (unless the user forced Light) OR
+   when the user explicitly picks Dark. Kept in a shared @content-free var list. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --canvas: #191919;
     --surface: #212121;
     --surface-2: #262626;
@@ -63,6 +65,27 @@
     --paused-bg: rgba(220, 170, 60, 0.16);   --paused-fg: #d9bd70;
     --queued-bg: rgba(255, 255, 255, 0.06);  --queued-fg: #a6a5a2;
   }
+}
+:root[data-theme="dark"] {
+  --canvas: #191919;
+  --surface: #212121;
+  --surface-2: #262626;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #e6e4e0;
+  --strong: #f5f4f2;
+  --muted: #9b9a97;
+  --ink: #f2f1ee;
+  --ink-fg: #191919;
+  --ring: rgba(240, 240, 240, 0.55);
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 14px 44px rgba(0, 0, 0, 0.5);
+
+  --active-bg: rgba(96, 165, 250, 0.16);   --active-fg: #86bdec;
+  --complete-bg: rgba(74, 163, 86, 0.16);  --complete-fg: #84cb8e;
+  --error-bg: rgba(224, 90, 90, 0.16);     --error-fg: #ed9f9f;
+  --paused-bg: rgba(220, 170, 60, 0.16);   --paused-fg: #d9bd70;
+  --queued-bg: rgba(255, 255, 255, 0.06);  --queued-fg: #a6a5a2;
 }
 
 * { box-sizing: border-box; }
@@ -430,6 +453,47 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 [dir="rtl"] .switch input:checked + .track::after { transform: translateX(-18px); }
 [dir="rtl"] .drawer { animation-name: slideinRtl; }
 @keyframes slideinRtl { from { transform: translateX(-24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---------- Indeterminate progress (unknown total) ---------- */
+.progress.indeterminate { overflow: hidden; }
+.progress.indeterminate > span {
+  background: var(--active-fg);
+  animation: indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(360%); }
+}
+
+/* ---------- Selection toolbar ---------- */
+.selbar {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.45rem 0.7rem; margin: 0 0 0.5rem;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.85rem;
+}
+.selbar > span { color: var(--muted); margin-inline-end: auto; }
+
+/* ---------- Onboarding cards ---------- */
+.onboard {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem;
+  margin: 1.1rem 0 0.4rem; width: min(100%, 420px);
+}
+.ob-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  padding: 1rem 0.75rem; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.85rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ob-card:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.ob-card svg { color: var(--muted); }
+
+/* ---------- Per-row speed select + selection checkbox ---------- */
+.speed-sel {
+  font-size: 0.72rem; padding: 0.12rem 0.25rem; border-radius: 5px;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); max-width: 96px;
+}
+.row-check { margin-inline-end: 0.2rem; cursor: pointer; accent-color: var(--ink); flex: none; }
 
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {

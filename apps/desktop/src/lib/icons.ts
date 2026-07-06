@@ -25,6 +25,8 @@ export const ICONS = {
   dot: `<circle cx="12" cy="12" r="4"/>`,
   help: `<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.4 2.4 0 0 1 4.6.9c0 1.6-2.2 2-2.2 3.4M12 17.2h.01"/>`,
   heart: `<path d="M12 20s-7-4.6-9.2-9A4.6 4.6 0 0 1 12 6.5 4.6 4.6 0 0 1 21.2 11C19 15.4 12 20 12 20z"/>`,
+  "chevron-up": `<path d="M6 15l6-6 6 6"/>`,
+  "chevron-down": `<path d="M6 9l6 6 6-6"/>`,
 } as const;
 
 export type IconName = keyof typeof ICONS;

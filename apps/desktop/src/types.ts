@@ -29,6 +29,12 @@ export interface Download {
   category_id: number | null;
   created_at: number;
   finished_at: number | null;
+  user_agent?: string | null;
+  cookie?: string | null;
+  extra_headers?: string | null;
+  page_url?: string | null;
+  format_id?: string | null;
+  speed_limit?: number | null;
 }
 
 export interface Category {
