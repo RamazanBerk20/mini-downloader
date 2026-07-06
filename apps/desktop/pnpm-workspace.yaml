@@ -1,6 +1,3 @@
+# esbuild's postinstall just verifies its platform binary — allow it.
 allowBuilds:
-  esbuild: set this to true or false
-# Allow esbuild's postinstall (verifies its platform binary); everything else
-# stays script-blocked by pnpm's default policy.
-onlyBuiltDependencies:
-  - esbuild
+  esbuild: true
