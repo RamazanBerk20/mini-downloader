@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
+  import { open } from "@tauri-apps/plugin-dialog";
   import { api } from "./api";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
@@ -79,6 +80,14 @@
     c.dir = (e.target as HTMLInputElement).value;
     await api.saveCategory(c.name, c.dir, c.rules, c.priority);
   }
+  async function browseDir(c: Category) {
+    const dir = await open({ directory: true, multiple: false });
+    if (typeof dir === "string") {
+      c.dir = dir;
+      categories = [...categories];
+      await api.saveCategory(c.name, c.dir, c.rules, c.priority);
+    }
+  }
   async function installBrowser() {
     try {
       browserStatus = "Installed: " + (await api.installBrowser());
@@ -113,6 +122,18 @@
   }
   async function removeSchedule(id: number) {
     await api.deleteSchedule(id);
+    schedules = await api.listSchedules();
+  }
+  async function toggleSchedule(s: Schedule) {
+    await api.saveSchedule({
+      id: s.id,
+      name: s.name,
+      action: s.action,
+      days_mask: s.days_mask,
+      at_minute: s.at_minute,
+      speed_limit: s.speed_limit,
+      enabled: !s.enabled,
+    });
     schedules = await api.listSchedules();
   }
 </script>
@@ -171,10 +192,14 @@
     {#each schedules as s (s.id)}
       <div class="cat">
         <Icon name="clock" size={16} />
-        <span class="hint" style="flex:1">
+        <span class="hint" style="flex:1; opacity:{s.enabled ? 1 : 0.45}">
           {actionLabel(s.action)}{#if s.action === "set_speed" && s.speed_limit} · {Math.round(s.speed_limit / 1024)} KB/s{/if}
           · {fmtTime(s.at_minute)} · {daysLabel(s.days_mask)}
         </span>
+        <label class="switch" title={s.enabled ? "Enabled" : "Disabled"}>
+          <input type="checkbox" checked={s.enabled} onchange={() => toggleSchedule(s)} aria-label="Enable this schedule" />
+          <span class="track"></span>
+        </label>
         <button class="icon-btn danger" aria-label="Delete schedule" onclick={() => removeSchedule(s.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
@@ -201,6 +226,7 @@
       <div class="cat">
         <strong>{c.name}</strong>
         <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
+        <button class="icon-btn" title="Browse folder" aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
       </div>
     {/each}
   </section>

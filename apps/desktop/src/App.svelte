@@ -44,6 +44,8 @@
     return list;
   });
 
+  const completedCount = $derived(all.filter((d) => d.status === "complete").length);
+
   const pageTitle = $derived(
     categoryId !== null
       ? (categories.find((c) => c.id === categoryId)?.name ?? "Category")
@@ -220,6 +222,11 @@
         <input type="search" placeholder="Search" bind:value={search} bind:this={searchEl} aria-label="Search downloads" />
       </div>
       <div class="head-actions">
+        {#if completedCount > 0}
+          <button class="btn btn-ghost" title="Remove completed downloads from the list" onclick={() => act(api.removeCompleted)}>
+            <Icon name="check" size={15} /> Clear completed
+          </button>
+        {/if}
         <button class="icon-btn" title="Add .torrent / .metalink file" aria-label="Add torrent or metalink file" onclick={pickFile}>
           <Icon name="file" />
         </button>

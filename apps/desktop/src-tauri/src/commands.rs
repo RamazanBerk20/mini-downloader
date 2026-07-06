@@ -110,6 +110,22 @@ pub async fn remove_download(
     Ok(())
 }
 
+/// Remove every completed download from the list (keeps the files on disk).
+#[tauri::command]
+pub async fn remove_completed(state: State<'_, AppState>) -> Result<usize, String> {
+    let rows = state.db.list(Some("complete")).map_err(err)?;
+    let mut removed = 0;
+    for d in rows {
+        if let Some(gid) = &d.gid {
+            let _ = state.engine.rpc.remove_download_result(gid).await;
+        }
+        if state.db.delete(d.id).is_ok() {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
 #[tauri::command]
 pub async fn pause_all(state: State<'_, AppState>) -> Result<(), String> {
     state.engine.rpc.pause_all().await.map_err(err).map(|_| ())

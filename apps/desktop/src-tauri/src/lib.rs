@@ -222,6 +222,7 @@ pub fn run() {
             commands::remove_download,
             commands::pause_all,
             commands::resume_all,
+            commands::remove_completed,
             commands::set_global_speed,
             commands::set_download_speed,
             commands::open_containing_folder,

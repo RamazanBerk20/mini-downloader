@@ -13,6 +13,7 @@ export const api = {
     invoke<void>("remove_download", { id, deleteFiles }),
   pauseAll: () => invoke<void>("pause_all"),
   resumeAll: () => invoke<void>("resume_all"),
+  removeCompleted: () => invoke<number>("remove_completed"),
   setGlobalSpeed: (down: number, up: number) =>
     invoke<void>("set_global_speed", { down, up }),
   setDownloadSpeed: (id: number, limit: number) =>
