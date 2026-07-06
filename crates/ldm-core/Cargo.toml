@@ -13,3 +13,14 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }
+# Request/reply JSON-RPC over loopback HTTP (no TLS backend needed).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# Read-only WebSocket for aria2 push notifications (ws:// only, no TLS).
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
+futures-util = "0.3"
+# Embedded SQLite (bundled: no system libsqlite3 dependency).
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

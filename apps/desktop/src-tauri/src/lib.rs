@@ -1,129 +1,69 @@
-mod engine;
+mod commands;
+mod events;
+mod state;
+mod sync;
 
-use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
-use serde::Serialize;
-use serde_json::{json, Value};
 use tauri::{Emitter, Manager};
 
-use engine::Aria2;
-use ldm_core::aria2::{build_add_options, EngineDefaults};
-use ldm_core::ipc::{CaptureJob, DownloadKind};
+use ldm_core::aria2::{Engine, EngineDefaults, LaunchOptions};
+use ldm_core::db::Db;
+use ldm_core::paths;
 
-struct AppState {
-    aria2: Arc<Aria2>,
-    defaults: EngineDefaults,
-    download_dir: PathBuf,
-}
-
-/// One progress row pushed to the frontend.
-#[derive(Serialize, Clone)]
-struct Tick {
-    gid: String,
-    name: String,
-    completed: i64,
-    total: i64,
-    speed: i64,
-    status: String,
-}
-
-/// aria2 reports numeric fields as strings — parse defensively.
-fn parse_i64(v: &Value, key: &str) -> i64 {
-    v.get(key)
-        .and_then(|x| x.as_str())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0)
-}
-
-fn basename(item: &Value) -> String {
-    item.get("files")
-        .and_then(|f| f.get(0))
-        .and_then(|f0| f0.get("path"))
-        .and_then(|p| p.as_str())
-        .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default()
-}
-
-#[tauri::command]
-async fn add_download(url: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let job = CaptureJob {
-        url: url.clone(),
-        filename: None,
-        referrer: None,
-        user_agent: None,
-        cookie: None,
-        extra_headers: vec![],
-        kind: DownloadKind::Http,
-        mime: None,
-        size: None,
-        page_url: None,
-        cookie_store_id: None,
-        torrent_b64: None,
-    };
-    let opts = build_add_options(&job, &state.download_dir.to_string_lossy(), &state.defaults);
-    state
-        .aria2
-        .add_uri(&url, Value::Object(opts))
-        .await
-        .map_err(|e| e.to_string())
-}
+use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            let download_dir = PathBuf::from(home).join("Downloads");
+            let data_dir = paths::data_dir();
+            let download_dir = paths::default_download_dir();
 
-            let aria2 = Arc::new(Aria2::spawn(&download_dir)?);
+            let db = Db::open(&data_dir).map_err(|e| e.to_string())?;
+
+            let engine = tauri::async_runtime::block_on(Engine::launch(LaunchOptions {
+                aria2c_path: None,
+                download_dir: download_dir.clone(),
+                data_dir: data_dir.clone(),
+                max_concurrent: 5,
+            }))
+            .map_err(|e| e.to_string())?;
+            let engine = Arc::new(engine);
+
             app.manage(AppState {
-                aria2: aria2.clone(),
+                engine: engine.clone(),
+                db: db.clone(),
                 defaults: EngineDefaults::default(),
                 download_dir,
+                data_dir,
             });
 
-            // 1 Hz progress poller → batched `downloads:tick` events.
+            // Reconcile against the restored aria2 session, then start live sync.
             let handle = app.handle().clone();
+            let eng = engine.clone();
+            let db_recon = db.clone();
             tauri::async_runtime::spawn(async move {
-                // Wait for aria2's RPC to answer before polling.
-                for _ in 0..50 {
-                    if aria2.get_version().await.is_ok() {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-
-                let mut ticker = tokio::time::interval(Duration::from_secs(1));
-                loop {
-                    ticker.tick().await;
-                    if let Ok(items) = aria2.tell_active().await {
-                        let updates: Vec<Tick> = items
-                            .iter()
-                            .map(|it| Tick {
-                                gid: it.get("gid").and_then(|g| g.as_str()).unwrap_or("").to_string(),
-                                name: basename(it),
-                                completed: parse_i64(it, "completedLength"),
-                                total: parse_i64(it, "totalLength"),
-                                speed: parse_i64(it, "downloadSpeed"),
-                                status: it
-                                    .get("status")
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                            })
-                            .collect();
-                        let _ = handle.emit("downloads:tick", json!({ "updates": updates }));
-                    }
-                }
+                sync::reconcile(&eng, &db_recon).await;
+                let _ = handle.emit(events::EV_RECONCILED, ());
             });
+            sync::spawn(app.handle().clone(), engine, db);
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![add_download])
+        .invoke_handler(tauri::generate_handler![
+            commands::add_download,
+            commands::list_downloads,
+            commands::pause_download,
+            commands::resume_download,
+            commands::remove_download,
+            commands::pause_all,
+            commands::resume_all,
+            commands::set_global_speed,
+            commands::set_download_speed,
+            commands::open_containing_folder,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -50,7 +50,7 @@ pub fn build_add_options(job: &CaptureJob, dir: &str, defaults: &EngineDefaults)
     }
 
     // Cookie + any extra headers go through the `header` array. (Referer/UA get
-    // dedicated options above, so exclude them from header_lines() duplication.)
+    // dedicated options above.)
     let mut headers: Vec<Value> = Vec::new();
     if let Some(cookie) = &job.cookie {
         headers.push(Value::String(format!("Cookie: {cookie}")));
