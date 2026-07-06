@@ -7,6 +7,7 @@ mod scheduler;
 mod state;
 mod sync;
 mod tray;
+mod window;
 mod ytdlp;
 
 use std::sync::atomic::AtomicBool;
@@ -47,11 +48,7 @@ fn ingest_url(app: &tauri::AppHandle, url: String) {
 }
 
 fn show_main(app: &tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    window::reveal(app);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

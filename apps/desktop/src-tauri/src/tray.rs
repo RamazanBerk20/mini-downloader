@@ -45,9 +45,7 @@ fn toggle_window(app: &AppHandle) {
         if w.is_visible().unwrap_or(false) {
             let _ = w.hide();
         } else {
-            let _ = w.show();
-            let _ = w.unminimize();
-            let _ = w.set_focus();
+            crate::window::show(&w);
         }
     }
 }

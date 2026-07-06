@@ -128,12 +128,7 @@ async fn handle_conn(mut conn: UnixStream, ctx: Ctx) {
 }
 
 fn focus_window(app: &AppHandle) {
-    use tauri::Manager;
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    crate::window::reveal(app);
 }
 
 fn record_app_path() {
