@@ -27,4 +27,17 @@ async function save() {
 }
 
 document.getElementById("save").addEventListener("click", save);
+
+// Native-host health check: confirm the bridge reaches the running app.
+document.getElementById("test").addEventListener("click", async () => {
+  const st = document.getElementById("test-status");
+  st.textContent = "…";
+  try {
+    const reply = await b.runtime.sendNativeMessage("com.minidownloader.host", { ping: true });
+    st.textContent = reply && reply.ok ? "✓ " + (reply.error || "Connected") : "No response";
+  } catch (e) {
+    st.textContent = "✗ Not reachable — is Mini Downloader installed & running?";
+  }
+});
+
 load();

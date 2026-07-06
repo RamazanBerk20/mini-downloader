@@ -258,6 +258,16 @@ function createMenu() {
         title: t("actionTitle"),
         contexts: ["link", "video", "audio", "image", "selection"],
       });
+      b.contextMenus.create({
+        id: "ldm-links",
+        title: "Mini Downloader: all links on page",
+        contexts: ["page"],
+      });
+      b.contextMenus.create({
+        id: "ldm-images",
+        title: "Mini Downloader: all images on page",
+        contexts: ["page"],
+      });
     });
   } catch {}
 }
@@ -266,6 +276,35 @@ b.runtime.onStartup.addListener(createMenu);
 createMenu();
 
 b.contextMenus.onClicked.addListener(async (info, tab) => {
+  // Bulk grab: harvest every downloadable link / image on the page.
+  if (info.menuItemId === "ldm-links" || info.menuItemId === "ldm-images") {
+    if (!tab) return;
+    const what = info.menuItemId === "ldm-images" ? "images" : "links";
+    let urls = [];
+    try {
+      urls = (await b.tabs.sendMessage(tab.id, { type: "ldm-harvest", what })) || [];
+    } catch {}
+    urls = urls.slice(0, 200); // cap a runaway page
+    let cookie = "";
+    try {
+      const cs = await b.cookies.getAll({ url: tab.url });
+      cookie = cs.map((c) => `${c.name}=${c.value}`).join("; ");
+    } catch {}
+    let sent = 0;
+    for (const u of urls) {
+      const reply = await sendJob({
+        url: u,
+        referrer: tab.url,
+        cookie: cookie || undefined,
+        extra_headers: [],
+        kind: "http",
+      });
+      if (reply && reply.ok) sent++;
+    }
+    notify(t("notifySentTitle"), `${sent} / ${urls.length}`);
+    return;
+  }
+
   const url = info.linkUrl || info.srcUrl || (info.selectionText || "").trim();
   if (!url || !/^(https?:|ftp:|magnet:)/i.test(url)) return;
   let cookie = "";

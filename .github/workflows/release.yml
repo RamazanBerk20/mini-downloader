@@ -78,7 +78,7 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: "Mini Downloader ${{ github.ref_name }}"
-          releaseDraft: false
+          releaseDraft: true
           releaseBody: |
             ## Mini Downloader ${{ github.ref_name }}
 
@@ -119,3 +119,14 @@ jobs:
           sha256sum * > SHA256SUMS
           gh release upload "${{ github.ref_name }}" SHA256SUMS \
             --repo "${{ github.repository }}" --clobber
+
+  # Publish only after every asset (binaries, extension zips, SHA256SUMS) is
+  # attached, so users never see a half-populated release.
+  publish:
+    needs: [build, extension, checksums]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Flip the draft to published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${{ github.ref_name }}" --repo "${{ github.repository }}" --draft=false

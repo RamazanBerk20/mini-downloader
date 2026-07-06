@@ -23,6 +23,8 @@ jobs:
             librsvg2-dev patchelf libssl-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
 
@@ -40,8 +42,11 @@ jobs:
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile
 
-      - name: Rust unit tests
-        run: cargo test -p minidl-core
+      - name: Clippy (informational)
+        run: cargo clippy --workspace --all-targets
+
+      - name: Rust unit tests (whole workspace)
+        run: cargo test --workspace
 
       - name: Type-check frontend
         working-directory: apps/desktop
