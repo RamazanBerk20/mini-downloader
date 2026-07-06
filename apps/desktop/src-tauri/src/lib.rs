@@ -1,5 +1,7 @@
 mod commands;
 mod events;
+mod ingest;
+mod nativehost;
 mod state;
 mod sync;
 
@@ -16,6 +18,16 @@ use state::AppState;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Single-instance MUST be registered first. A second launch (e.g. the
+        // native host running `ldm-desktop --background`) focuses this instance
+        // instead of starting another.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let data_dir = paths::data_dir();
@@ -31,12 +43,13 @@ pub fn run() {
             }))
             .map_err(|e| e.to_string())?;
             let engine = Arc::new(engine);
+            let defaults = EngineDefaults::default();
 
             app.manage(AppState {
                 engine: engine.clone(),
                 db: db.clone(),
-                defaults: EngineDefaults::default(),
-                download_dir,
+                defaults: defaults.clone(),
+                download_dir: download_dir.clone(),
                 data_dir,
             });
 
@@ -48,7 +61,13 @@ pub fn run() {
                 sync::reconcile(&eng, &db_recon).await;
                 let _ = handle.emit(events::EV_RECONCILED, ());
             });
-            sync::spawn(app.handle().clone(), engine, db);
+            sync::spawn(app.handle().clone(), engine.clone(), db.clone());
+
+            // Browser bridge: listen on the UDS + best-effort manifest install.
+            nativehost::spawn_listener(app.handle().clone(), engine, db, download_dir, defaults);
+            if let Err(e) = nativehost::install_firefox_manifest() {
+                eprintln!("browser integration not installed: {e}");
+            }
 
             Ok(())
         })
@@ -63,6 +82,7 @@ pub fn run() {
             commands::set_global_speed,
             commands::set_download_speed,
             commands::open_containing_folder,
+            commands::install_browser_integration,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

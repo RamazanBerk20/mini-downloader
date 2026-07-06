@@ -153,6 +153,26 @@ pub fn bridge_socket_path() -> PathBuf {
     base.join("ldm").join("bridge.sock")
 }
 
+/// `$XDG_DATA_HOME/ldm` or `~/.local/share/ldm`. Persistent; shared by the app
+/// and the native host so the host can find where the app binary lives.
+pub fn data_dir() -> PathBuf {
+    std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"))
+                .join(".local/share")
+        })
+        .join("ldm")
+}
+
+/// File the app writes with the absolute path to its own executable, so the
+/// native host can launch the app when it is not already running.
+pub fn app_path_file() -> PathBuf {
+    data_dir().join("app-exec-path")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

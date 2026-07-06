@@ -1,0 +1,15 @@
+[package]
+name = "ldm-native-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Firefox native-messaging bridge for Linux Download Manager"
+
+# Tiny stdio bridge Firefox launches. Kept dependency-light so it starts fast.
+[[bin]]
+name = "ldm-native-host"
+path = "src/main.rs"
+
+[dependencies]
+ldm-ipc = { path = "../ldm-ipc" }
+serde_json = { workspace = true }

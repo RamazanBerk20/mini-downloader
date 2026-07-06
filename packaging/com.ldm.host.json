@@ -1,0 +1,7 @@
+{
+  "name": "com.ldm.host",
+  "description": "Linux Download Manager native bridge",
+  "path": "/usr/lib/ldm/ldm-native-host",
+  "type": "stdio",
+  "allowed_extensions": ["ldm@ramazan.dev"]
+}

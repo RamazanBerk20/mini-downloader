@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/ldm-ipc",
     "crates/ldm-core",
+    "crates/ldm-native-host",
     "apps/desktop/src-tauri",
 ]
 

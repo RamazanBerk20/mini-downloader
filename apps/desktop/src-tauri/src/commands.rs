@@ -1,33 +1,15 @@
 //! Tauri command surface. Thin wrappers delegating to the engine + DB.
 
-use serde_json::{json, Value};
+use serde_json::json;
 use tauri::State;
 
-use ldm_core::aria2::build_add_options;
-use ldm_core::ipc::{CaptureJob, DownloadKind};
-use ldm_core::model::{Download, DownloadStatus, NewDownload};
+use ldm_core::model::{Download, DownloadStatus};
 
+use crate::ingest::{ingest, job_from_url};
 use crate::state::AppState;
 
 fn err<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
-}
-
-fn http_job(url: String) -> CaptureJob {
-    CaptureJob {
-        url,
-        filename: None,
-        referrer: None,
-        user_agent: None,
-        cookie: None,
-        extra_headers: vec![],
-        kind: DownloadKind::Http,
-        mime: None,
-        size: None,
-        page_url: None,
-        cookie_store_id: None,
-        torrent_b64: None,
-    }
 }
 
 #[tauri::command]
@@ -36,29 +18,15 @@ pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Dow
     if url.is_empty() {
         return Err("empty URL".into());
     }
-    let dir = state.download_dir.to_string_lossy().to_string();
-    let kind = if url.starts_with("magnet:") { "magnet" } else { "http" };
-    let id = state
-        .db
-        .insert_download(&NewDownload {
-            url: url.clone(),
-            dir: dir.clone(),
-            kind: kind.into(),
-            ..Default::default()
-        })
-        .map_err(err)?;
-
-    let opts = build_add_options(&http_job(url.clone()), &dir, &state.defaults);
-    match state.engine.rpc.add_uri(&[url], Value::Object(opts)).await {
-        Ok(gid) => {
-            state.db.set_gid(id, &gid).map_err(err)?;
-            state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
-        }
-        Err(e) => {
-            state.db.set_error(id, None, Some(&e.to_string())).map_err(err)?;
-            return Err(e.to_string());
-        }
-    }
+    let id = ingest(
+        &state.engine,
+        &state.db,
+        &state.download_dir,
+        &state.defaults,
+        job_from_url(url),
+        None,
+    )
+    .await?;
     state
         .db
         .get(id)
@@ -161,4 +129,11 @@ pub async fn open_containing_folder(
         app.opener().open_path(d.dir, None::<&str>).map_err(err)?;
     }
     Ok(())
+}
+
+/// Install the Firefox native-messaging manifest so the extension can reach the
+/// app. Returns the manifest path.
+#[tauri::command]
+pub async fn install_browser_integration() -> Result<String, String> {
+    crate::nativehost::install_firefox_manifest().map(|p| p.to_string_lossy().to_string())
 }
