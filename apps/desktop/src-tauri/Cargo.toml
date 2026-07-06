@@ -1,0 +1,26 @@
+[package]
+name = "ldm-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Linux Download Manager"
+
+[lib]
+# Keep the lib name stable (referenced by main.rs). The `_lib` suffix avoids a
+# name clash with the binary on Windows.
+name = "desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+ldm-core = { path = "../../../crates/ldm-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# HTTP-POST JSON-RPC to aria2 on loopback — no TLS backend needed (http only).
+reqwest = { version = "0.12", default-features = false, features = ["json"] }

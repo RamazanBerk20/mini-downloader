@@ -3,8 +3,8 @@ resolver = "2"
 members = [
     "crates/ldm-ipc",
     "crates/ldm-core",
+    "apps/desktop/src-tauri",
 ]
-# apps/desktop/src-tauri is added to members once the Tauri app is scaffolded.
 
 [workspace.package]
 version = "0.1.0"
