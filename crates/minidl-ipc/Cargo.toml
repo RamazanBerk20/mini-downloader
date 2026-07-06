@@ -9,3 +9,6 @@ license.workspace = true
 # native-host binary, which must start fast and stay small.
 [dependencies]
 serde = { workspace = true }
+# Cross-platform local socket (Unix domain socket ↔ Windows named pipe) + paths.
+interprocess = { workspace = true }
+dirs = { workspace = true }

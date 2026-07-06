@@ -189,7 +189,7 @@ pub fn run() {
                             .unwrap_or(true);
                         if close_to_tray {
                             api.prevent_close();
-                            let _ = win2.hide();
+                            window::hide_to_tray(&win2);
                         }
                     }
                 });
@@ -199,7 +199,7 @@ pub fn run() {
             let background = std::env::args().any(|a| a == "--background" || a == "--minimized");
             if background {
                 if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
+                    window::hide_to_tray(&w);
                 }
             }
 

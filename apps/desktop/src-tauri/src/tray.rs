@@ -42,10 +42,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
 
 fn toggle_window(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
-        if w.is_visible().unwrap_or(false) {
-            let _ = w.hide();
-        } else {
+        if crate::window::is_tucked(&w) {
             crate::window::show(&w);
+        } else {
+            crate::window::hide_to_tray(&w);
         }
     }
 }
