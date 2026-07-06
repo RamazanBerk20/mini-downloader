@@ -3,7 +3,7 @@
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
@@ -26,7 +26,7 @@ struct Ctx {
     db: Db,
     ytdlp: Arc<crate::ytdlp::YtDlp>,
     download_dir: PathBuf,
-    defaults: EngineDefaults,
+    defaults: Arc<Mutex<EngineDefaults>>,
 }
 
 /// Bind the bridge socket and serve forwarded jobs. Also records this app's
@@ -37,7 +37,7 @@ pub fn spawn_listener(
     db: Db,
     ytdlp: Arc<crate::ytdlp::YtDlp>,
     download_dir: PathBuf,
-    defaults: EngineDefaults,
+    defaults: Arc<Mutex<EngineDefaults>>,
 ) {
     record_app_path();
 
@@ -97,12 +97,13 @@ async fn handle_conn(mut conn: UnixStream, ctx: Ctx) {
 
     let reply = match serde_json::from_slice::<BridgeRequest>(&buf) {
         Ok(req) if req.protocol_version == ipc::PROTOCOL_VERSION => {
+            let defaults = ctx.defaults.lock().unwrap().clone();
             match ingest(
                 &ctx.engine,
                 &ctx.db,
                 &ctx.ytdlp,
                 &ctx.download_dir,
-                &ctx.defaults,
+                defaults,
                 req.job,
                 None,
             )

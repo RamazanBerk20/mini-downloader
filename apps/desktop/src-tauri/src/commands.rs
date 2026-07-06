@@ -33,12 +33,13 @@ pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Dow
     if url.is_empty() {
         return Err("empty URL".into());
     }
+    let defaults = state.defaults.lock().unwrap().clone();
     let id = ingest(
         &state.engine,
         &state.db,
         &state.ytdlp,
         &state.download_dir,
-        &state.defaults,
+        defaults,
         job_from_url(url),
         None,
     )
@@ -182,12 +183,13 @@ async fn add_file_job(
         cookie_store_id: None,
         torrent_b64: Some(b64),
     };
+    let defaults = state.defaults.lock().unwrap().clone();
     let id = ingest(
         &state.engine,
         &state.db,
         &state.ytdlp,
         &state.download_dir,
-        &state.defaults,
+        defaults,
         job,
         None,
     )
@@ -278,6 +280,7 @@ pub async fn add_links_batch(
     state: State<'_, AppState>,
 ) -> Result<usize, String> {
     let mut added = 0;
+    let defaults = state.defaults.lock().unwrap().clone();
     for u in urls {
         let u = u.trim().to_string();
         if u.is_empty() {
@@ -288,7 +291,7 @@ pub async fn add_links_batch(
             &state.db,
             &state.ytdlp,
             &state.download_dir,
-            &state.defaults,
+            defaults.clone(),
             job_from_url(u),
             None,
         )
@@ -342,4 +345,31 @@ pub async fn set_clipboard_watch(enabled: bool, state: State<'_, AppState>) -> R
         .db
         .set_setting("clipboard_watch", if enabled { "true" } else { "false" })
         .map_err(err)
+}
+
+// ---- engine tuning (segments / connections) ----
+
+/// Returns `[split, connections]`.
+#[tauri::command]
+pub async fn get_engine_defaults(state: State<'_, AppState>) -> Result<(u32, u32), String> {
+    let d = state.defaults.lock().unwrap();
+    Ok((d.split, d.max_connection_per_server))
+}
+
+#[tauri::command]
+pub async fn set_engine_defaults(
+    split: u32,
+    connections: u32,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let split = split.clamp(1, 64);
+    let connections = connections.clamp(1, 16);
+    {
+        let mut d = state.defaults.lock().unwrap();
+        d.split = split;
+        d.max_connection_per_server = connections;
+    }
+    state.db.set_setting("split", &split.to_string()).map_err(err)?;
+    state.db.set_setting("max_conn", &connections.to_string()).map_err(err)?;
+    Ok(())
 }

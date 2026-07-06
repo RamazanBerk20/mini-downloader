@@ -29,7 +29,7 @@ pub async fn ingest(
     db: &Db,
     ytdlp: &crate::ytdlp::YtDlp,
     download_dir: &Path,
-    defaults: &EngineDefaults,
+    defaults: EngineDefaults,
     job: CaptureJob,
     category_id: Option<i64>,
 ) -> Result<i64, String> {
@@ -59,7 +59,7 @@ pub async fn ingest(
         return Ok(id);
     }
 
-    let opts = Value::Object(build_add_options(&job, &dir, defaults));
+    let opts = Value::Object(build_add_options(&job, &dir, &defaults));
     let result: anyhow::Result<Vec<String>> = match job.kind {
         DownloadKind::Http | DownloadKind::Magnet => {
             engine.rpc.add_uri(&[job.url.clone()], opts).await.map(|g| vec![g])

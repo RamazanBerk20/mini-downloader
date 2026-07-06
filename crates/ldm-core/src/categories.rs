@@ -4,14 +4,10 @@ use std::path::PathBuf;
 
 use crate::model::Category;
 
-/// Expand a leading `~/` to the user's home directory.
+/// Expand a category directory. A leading `~/Downloads`, `~/Videos`, … resolves
+/// to the *localized* XDG user directory; other `~/` paths expand to `$HOME`.
 pub fn expand(dir: &str) -> PathBuf {
-    if let Some(rest) = dir.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    }
-    PathBuf::from(dir)
+    crate::paths::resolve_home_path(dir)
 }
 
 /// Lowercased file extension, or empty when there is none.

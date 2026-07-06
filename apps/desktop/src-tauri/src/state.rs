@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ldm_core::aria2::{Engine, EngineDefaults};
 use ldm_core::db::Db;
@@ -11,7 +11,8 @@ pub struct AppState {
     pub db: Db,
     pub ytdlp: Arc<crate::ytdlp::YtDlp>,
     pub clipboard_on: Arc<AtomicBool>,
-    pub defaults: EngineDefaults,
+    /// Segment/connection defaults — adjustable at runtime from Settings.
+    pub defaults: Arc<Mutex<EngineDefaults>>,
     pub download_dir: PathBuf,
     /// Used by the native-host bridge + packaging (later milestones).
     #[allow(dead_code)]

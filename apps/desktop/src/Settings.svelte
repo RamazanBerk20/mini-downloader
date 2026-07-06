@@ -15,6 +15,8 @@
   let categories = $state<Category[]>([]);
   let schedules = $state<Schedule[]>([]);
   let browserStatus = $state("");
+  let split = $state(16);
+  let connections = $state(16);
 
   const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const ACTIONS = [
@@ -37,7 +39,18 @@
     try {
       autostart = await isEnabled();
     } catch {}
+    try {
+      [split, connections] = await api.getEngineDefaults();
+    } catch {}
   });
+
+  async function saveEngine() {
+    try {
+      await api.setEngineDefaults(split, connections);
+    } catch (e) {
+      browserStatus = "Engine error: " + String(e);
+    }
+  }
 
   const setBool = (key: string, v: boolean) => api.setSetting(key, v ? "true" : "false");
 
@@ -129,6 +142,21 @@
       <span>Start on login (minimized)</span>
       <label class="switch"><input type="checkbox" checked={autostart} onchange={toggleAutostart} aria-label="Start on login" /><span class="track"></span></label>
     </div>
+  </section>
+
+  <section class="section">
+    <h3>Connections</h3>
+    <div class="srow">
+      <span>Connections per server</span>
+      <span class="fmt-mono" style="color:var(--muted)">{connections}</span>
+    </div>
+    <input type="range" min="1" max="16" bind:value={connections} onchange={saveEngine} aria-label="Connections per server" />
+    <div class="srow">
+      <span>Segments per file</span>
+      <span class="fmt-mono" style="color:var(--muted)">{split}</span>
+    </div>
+    <input type="range" min="1" max="32" bind:value={split} onchange={saveEngine} aria-label="Segments per file" />
+    <p class="hint">Higher = faster on servers that allow multiple connections. Applies to new downloads.</p>
   </section>
 
   <section class="section">

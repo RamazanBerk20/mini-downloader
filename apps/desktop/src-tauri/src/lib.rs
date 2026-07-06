@@ -10,7 +10,7 @@ mod tray;
 mod ytdlp;
 
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tauri::{Emitter, Manager};
 
@@ -31,12 +31,13 @@ fn ingest_url(app: &tauri::AppHandle, url: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
+        let defaults = state.defaults.lock().unwrap().clone();
         let _ = ingest::ingest(
             &state.engine,
             &state.db,
             &state.ytdlp,
             &state.download_dir,
-            &state.defaults,
+            defaults,
             ingest::job_from_url(url),
             None,
         )
@@ -95,7 +96,23 @@ pub fn run() {
             }))
             .map_err(|e| e.to_string())?;
             let engine = Arc::new(engine);
-            let defaults = EngineDefaults::default();
+            let split = db
+                .get_setting("split")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(16);
+            let conns = db
+                .get_setting("max_conn")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(16);
+            let defaults = Arc::new(Mutex::new(EngineDefaults {
+                split,
+                max_connection_per_server: conns,
+                min_split_size: "1M".into(),
+            }));
             let ytdlp = Arc::new(ytdlp::YtDlp::resolve(
                 app.handle().clone(),
                 db.clone(),
@@ -224,6 +241,8 @@ pub fn run() {
             commands::save_schedule,
             commands::delete_schedule,
             commands::set_clipboard_watch,
+            commands::get_engine_defaults,
+            commands::set_engine_defaults,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

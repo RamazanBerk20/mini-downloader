@@ -161,6 +161,7 @@ input, textarea {
 }
 input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offset: 0; border-color: var(--ring); }
 textarea { width: 100%; resize: vertical; line-height: 1.5; }
+input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; padding: 0; margin: 0.1rem 0 0.5rem; }
 
 /* ---------- App shell ---------- */
 

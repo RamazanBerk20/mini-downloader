@@ -43,6 +43,9 @@ export const api = {
     }),
   deleteSchedule: (id: number) => invoke<void>("delete_schedule", { id }),
   setClipboardWatch: (enabled: boolean) => invoke<void>("set_clipboard_watch", { enabled }),
+  getEngineDefaults: () => invoke<[number, number]>("get_engine_defaults"),
+  setEngineDefaults: (split: number, connections: number) =>
+    invoke<void>("set_engine_defaults", { split, connections }),
 };
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
