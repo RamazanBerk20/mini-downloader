@@ -1,0 +1,37 @@
+# Reproducible bundle builds + a dev shell.
+# Build bundles (no GUI):      docker compose run --rm build
+# Interactive dev shell + GUI: xhost +local:docker && docker compose run --rm dev
+#
+# NOTE: Docker is for reproducible builds/CI only. Firefox native-messaging must
+# be tested on the HOST — the native-host manifest path and browser exec chain
+# do not work from inside a container.
+services:
+  dev:
+    build: .
+    image: ldm-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - target-cache:/app/apps/desktop/src-tauri/target
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw          # GUI via XWayland
+    environment:
+      - DISPLAY=${DISPLAY}
+    network_mode: host
+    stdin_open: true
+    tty: true
+    command: bash
+
+  build:                                          # headless bundle producer
+    build: .
+    image: ldm-dev
+    working_dir: /app
+    volumes:
+      - .:/app
+      - cargo-registry:/usr/local/cargo/registry
+      - target-cache:/app/apps/desktop/src-tauri/target
+    command: bash -lc "pnpm install && cargo tauri build --bundles deb,rpm,appimage"
+
+volumes:
+  cargo-registry:
+  target-cache:
