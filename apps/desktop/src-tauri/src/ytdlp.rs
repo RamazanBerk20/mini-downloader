@@ -24,6 +24,11 @@ fn which(name: &str) -> Option<PathBuf> {
         .and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|c| c.is_file()))
 }
 
+fn exe_dir_bin(name: &str) -> Option<PathBuf> {
+    let cand = std::env::current_exe().ok()?.parent()?.join(name);
+    cand.is_file().then_some(cand)
+}
+
 pub struct YtDlp {
     app: AppHandle,
     db: Db,
@@ -35,15 +40,21 @@ pub struct YtDlp {
 
 impl YtDlp {
     pub fn resolve(app: AppHandle, db: Db, download_dir: PathBuf) -> Self {
-        // Prefer a user-writable yt-dlp copy (self-updatable), else PATH.
+        // Prefer a user-writable yt-dlp copy (self-updatable), then the bundled
+        // sidecar next to the app, then PATH.
         let user = ldm_core::paths::bin_dir().join("yt-dlp");
-        let ytdlp = if user.is_file() { Some(user) } else { which("yt-dlp") };
+        let ytdlp = if user.is_file() {
+            Some(user)
+        } else {
+            exe_dir_bin("yt-dlp").or_else(|| which("yt-dlp"))
+        };
+        let ffmpeg = exe_dir_bin("ffmpeg").or_else(|| which("ffmpeg"));
         Self {
             app,
             db,
             download_dir,
             ytdlp,
-            ffmpeg: which("ffmpeg"),
+            ffmpeg,
             running: Arc::new(Mutex::new(HashMap::new())),
         }
     }

@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_notification::NotificationExt;
 
 use ldm_core::aria2::{Engine, STATUS_KEYS};
 use ldm_core::db::Db;
@@ -126,6 +127,13 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
             let message = st.get("errorMessage").and_then(|v| v.as_str());
             let _ = db.set_error(row.id, code, message);
             let _ = app.emit(EV_ERROR, json!({ "gid": gid, "id": row.id, "code": code, "message": message }));
+            let name = row.filename.clone().unwrap_or_else(|| row.url.clone());
+            let _ = app
+                .notification()
+                .builder()
+                .title("Download failed")
+                .body(&name)
+                .show();
         }
         DownloadStatus::Complete => {
             let name = basename(&st);
@@ -142,6 +150,12 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
             let final_dir = organize(db, &row, &final_name);
             let path = format!("{final_dir}/{final_name}");
             let _ = app.emit(EV_COMPLETE, json!({ "gid": gid, "id": row.id, "name": final_name, "path": path }));
+            let _ = app
+                .notification()
+                .builder()
+                .title("Download complete")
+                .body(&final_name)
+                .show();
         }
         other => {
             let _ = db.set_status(row.id, other);

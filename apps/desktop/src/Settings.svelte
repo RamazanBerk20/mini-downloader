@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { api } from "./api";
   import type { Category, Schedule } from "./types";
 
@@ -7,6 +8,8 @@
 
   let autoOrganize = $state(true);
   let clipboardWatch = $state(false);
+  let closeToTray = $state(true);
+  let autostart = $state(false);
   let categories = $state<Category[]>([]);
   let schedules = $state<Schedule[]>([]);
   let browserStatus = $state("");
@@ -27,8 +30,12 @@
   onMount(async () => {
     autoOrganize = (await api.getSetting("auto_organize")) !== "false";
     clipboardWatch = (await api.getSetting("clipboard_watch")) === "true";
+    closeToTray = (await api.getSetting("close_to_tray")) !== "false";
     categories = await api.listCategories();
     schedules = await api.listSchedules();
+    try {
+      autostart = await isEnabled();
+    } catch {}
   });
 
   async function toggleOrganize(e: Event) {
@@ -38,6 +45,19 @@
   async function toggleClipboard(e: Event) {
     clipboardWatch = (e.target as HTMLInputElement).checked;
     await api.setClipboardWatch(clipboardWatch);
+  }
+  async function toggleCloseToTray(e: Event) {
+    closeToTray = (e.target as HTMLInputElement).checked;
+    await api.setSetting("close_to_tray", closeToTray ? "true" : "false");
+  }
+  async function toggleAutostart(e: Event) {
+    autostart = (e.target as HTMLInputElement).checked;
+    try {
+      if (autostart) await enable();
+      else await disable();
+    } catch (err) {
+      browserStatus = "Autostart error: " + String(err);
+    }
   }
   async function saveDir(c: Category, e: Event) {
     c.dir = (e.target as HTMLInputElement).value;
@@ -98,6 +118,14 @@
     <label class="srow">
       <span>Watch clipboard for links</span>
       <input type="checkbox" checked={clipboardWatch} onchange={toggleClipboard} />
+    </label>
+    <label class="srow">
+      <span>Close to tray (keep running)</span>
+      <input type="checkbox" checked={closeToTray} onchange={toggleCloseToTray} />
+    </label>
+    <label class="srow">
+      <span>Start on login (minimized)</span>
+      <input type="checkbox" checked={autostart} onchange={toggleAutostart} />
     </label>
   </section>
 
