@@ -33,7 +33,7 @@
   "bundle": {
     "active": true,
     "targets": ["deb", "rpm", "appimage"],
-    "category": "Network",
+    "category": "Utility",
     "shortDescription": "IDM/JDownloader-style download manager",
     "longDescription": "A multi-connection download manager wrapping aria2, with a Firefox extension for capturing downloads, yt-dlp video grabbing, torrents, link grabber, scheduler and category auto-organize.",
     "icon": [
@@ -47,6 +47,7 @@
       "deb": {
         "depends": ["aria2", "ffmpeg"],
         "recommends": ["yt-dlp"],
+        "section": "net",
         "files": {
           "/usr/bin/ldm-native-host": "../../../target/release/ldm-native-host"
         },
