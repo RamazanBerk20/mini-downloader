@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title data-i18n="optionsTitle">Mini Downloader Connector Options</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; }
+      label { display: block; margin: 1rem 0 0.3rem; font-weight: 600; }
+      input, textarea { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+      .hint { color: #888; font-size: 0.85rem; }
+      button { margin-top: 1.5rem; padding: 0.5rem 1.2rem; }
+      #status { color: #22c55e; margin-left: 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1 data-i18n="extName">Mini Downloader Connector</h1>
+
+    <label><input type="checkbox" id="enabled" /> <span data-i18n="popupCatchDownloads">Catch downloads</span></label>
+
+    <label for="minSize" data-i18n="optionsMinSize">Minimum file size to catch (bytes)</label>
+    <input type="number" id="minSize" min="0" />
+    <p class="hint" data-i18n="optionsMinSizeHint">Downloads smaller than this are left to your browser. Default 1048576 (1 MiB).</p>
+
+    <label for="disabledHosts" data-i18n="optionsDisabledHosts">Disabled sites (one hostname per line)</label>
+    <textarea id="disabledHosts" rows="5" placeholder="example.com"></textarea>
+
+    <div>
+      <button id="save" data-i18n="optionsSave">Save</button><span id="status"></span>
+    </div>
+
+    <script src="i18n.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

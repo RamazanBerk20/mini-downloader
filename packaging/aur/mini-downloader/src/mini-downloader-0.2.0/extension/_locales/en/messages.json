@@ -1,0 +1,23 @@
+{
+  "extName": { "message": "Mini Downloader Connector" },
+  "extDescription": { "message": "Catch downloads in your browser and hand them to Mini Downloader." },
+  "actionTitle": { "message": "Download with Mini Downloader" },
+  "popupCatchDownloads": { "message": "Catch downloads" },
+  "popupOptions": { "message": "Options" },
+  "popupMediaOnPage": { "message": "Media on this page" },
+  "popupGrabPageVideo": { "message": "Grab page video" },
+  "popupNoMedia": { "message": "No media detected." },
+  "popupGrab": { "message": "Grab" },
+  "popupSent": { "message": "Sent" },
+  "optionsTitle": { "message": "Mini Downloader Connector Options" },
+  "optionsMinSize": { "message": "Minimum file size to catch (bytes)" },
+  "optionsMinSizeHint": { "message": "Downloads smaller than this are left to your browser. Default 1048576 (1 MiB)." },
+  "optionsDisabledHosts": { "message": "Disabled sites (one hostname per line)" },
+  "optionsSave": { "message": "Save" },
+  "optionsSaved": { "message": "Saved" },
+  "notifySentTitle": { "message": "Sent to Mini Downloader" },
+  "notifyRejectedTitle": { "message": "Mini Downloader rejected the download" },
+  "notifyUnknownError": { "message": "unknown error" },
+  "notifyNotReachableTitle": { "message": "Mini Downloader not reachable" },
+  "notifyNotReachableBody": { "message": "Open Mini Downloader and enable browser integration." }
+}

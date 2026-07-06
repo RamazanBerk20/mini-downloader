@@ -1,0 +1,121 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            triple: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf libssl-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build native-messaging host
+        run: cargo build --release -p minidl-native-host
+
+      - name: Stage native host sidecar (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force apps/desktop/src-tauri/binaries | Out-Null
+          Copy-Item target/release/minidl-native-host.exe `
+            "apps/desktop/src-tauri/binaries/minidl-native-host-${{ matrix.triple }}.exe"
+
+      - name: Stage aria2c + yt-dlp sidecars (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = "apps/desktop/src-tauri/binaries"
+          # aria2 (pinned upstream release build)
+          Invoke-WebRequest -Uri "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip" -OutFile aria2.zip
+          Expand-Archive aria2.zip -DestinationPath aria2-tmp
+          Copy-Item aria2-tmp/*/aria2c.exe "$bin/aria2c-${{ matrix.triple }}.exe"
+          # yt-dlp (latest official single-binary; self-updates in-app afterwards)
+          Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "$bin/yt-dlp-${{ matrix.triple }}.exe"
+
+      - name: Build + bundle + attach to release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "Mini Downloader ${{ github.ref_name }}"
+          releaseDraft: false
+          releaseBody: |
+            ## Mini Downloader ${{ github.ref_name }}
+
+            Linux: `.deb` / `.rpm` (depend on distro `aria2` + `ffmpeg`) and `.AppImage`.
+            Windows: NSIS `.exe` installer / `.msi` (bundle aria2c + yt-dlp; install
+            ffmpeg yourself for video muxing).
+
+  extension:
+    needs: build # the draft release must exist before uploading to it
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package browser extensions
+        run: |
+          ./scripts/build-extension.sh
+          cd dist-ext
+          (cd firefox && zip -qr ../mini-downloader-firefox-${{ github.ref_name }}.zip .)
+          (cd chrome && zip -qr ../mini-downloader-chrome-${{ github.ref_name }}.zip .)
+      - name: Attach extension packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            dist-ext/mini-downloader-firefox-${{ github.ref_name }}.zip \
+            dist-ext/mini-downloader-chrome-${{ github.ref_name }}.zip \
+            --repo "${{ github.repository }}" --clobber
+
+  checksums:
+    needs: [build, extension]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Compute and attach SHA256SUMS
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir assets && cd assets
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}"
+          sha256sum * > SHA256SUMS
+          gh release upload "${{ github.ref_name }}" SHA256SUMS \
+            --repo "${{ github.repository }}" --clobber

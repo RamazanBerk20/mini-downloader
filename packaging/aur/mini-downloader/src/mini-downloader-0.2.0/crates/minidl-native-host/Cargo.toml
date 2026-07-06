@@ -1,0 +1,16 @@
+[package]
+name = "minidl-native-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Browser native-messaging bridge for Mini Downloader"
+
+# Tiny stdio bridge the browser launches. Kept dependency-light so it starts fast.
+[[bin]]
+name = "minidl-native-host"
+path = "src/main.rs"
+
+[dependencies]
+minidl-ipc = { path = "../minidl-ipc" }
+serde_json = { workspace = true }
+interprocess = { workspace = true }

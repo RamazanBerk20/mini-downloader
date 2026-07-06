@@ -1,0 +1,23 @@
+{
+  "extName": { "message": "Mini Downloader 커넥터" },
+  "extDescription": { "message": "브라우저의 다운로드를 가로채 Mini Downloader로 전달합니다." },
+  "actionTitle": { "message": "Mini Downloader로 다운로드" },
+  "popupCatchDownloads": { "message": "다운로드 가로채기" },
+  "popupOptions": { "message": "옵션" },
+  "popupMediaOnPage": { "message": "이 페이지의 미디어" },
+  "popupGrabPageVideo": { "message": "페이지 동영상 가져오기" },
+  "popupNoMedia": { "message": "미디어가 감지되지 않았습니다." },
+  "popupGrab": { "message": "가져오기" },
+  "popupSent": { "message": "전송됨" },
+  "optionsTitle": { "message": "Mini Downloader 커넥터 옵션" },
+  "optionsMinSize": { "message": "가로챌 최소 파일 크기(바이트)" },
+  "optionsMinSizeHint": { "message": "이보다 작은 다운로드는 브라우저에 맡깁니다. 기본값 1048576(1 MiB)." },
+  "optionsDisabledHosts": { "message": "비활성화된 사이트(줄당 호스트 이름 하나)" },
+  "optionsSave": { "message": "저장" },
+  "optionsSaved": { "message": "저장됨" },
+  "notifySentTitle": { "message": "Mini Downloader로 전송됨" },
+  "notifyRejectedTitle": { "message": "Mini Downloader가 다운로드를 거부했습니다" },
+  "notifyUnknownError": { "message": "알 수 없는 오류" },
+  "notifyNotReachableTitle": { "message": "Mini Downloader에 연결할 수 없음" },
+  "notifyNotReachableBody": { "message": "Mini Downloader를 열고 브라우저 통합을 활성화하세요." }
+}

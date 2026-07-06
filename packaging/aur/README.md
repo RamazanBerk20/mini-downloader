@@ -1,9 +1,10 @@
 # Publishing to the AUR
 
-Two packages:
+Three packages:
 
 - `mini-downloader-bin` — repackages the released `.deb` (fast install)
 - `mini-downloader` — builds from the release tarball (rust + pnpm)
+- `mini-downloader-git` — builds from `main` HEAD (`pkgver()` derived from `git describe`)
 
 ## One-time setup
 
