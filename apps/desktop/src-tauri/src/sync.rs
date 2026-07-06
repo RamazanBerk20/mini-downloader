@@ -32,6 +32,7 @@ pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
     // 2. Progress poller — ticks for active items + transition fallback.
     tauri::async_runtime::spawn(async move {
         let mut known: HashSet<String> = HashSet::new();
+        let mut gid_id: HashMap<String, i64> = HashMap::new();
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
         loop {
             ticker.tick().await;
@@ -49,13 +50,19 @@ pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
                 }
                 current.insert(gid.clone());
                 let name = basename(it);
-                if !name.is_empty() {
-                    if let Ok(Some(d)) = db.find_by_gid(&gid) {
-                        if d.filename.is_none() {
-                            let _ = db.set_filename(d.id, &name);
+                let id = match gid_id.get(&gid) {
+                    Some(i) => *i,
+                    None => match db.find_by_gid(&gid) {
+                        Ok(Some(d)) => {
+                            if !name.is_empty() && d.filename.is_none() {
+                                let _ = db.set_filename(d.id, &name);
+                            }
+                            gid_id.insert(gid.clone(), d.id);
+                            d.id
                         }
-                    }
-                }
+                        _ => 0,
+                    },
+                };
                 let completed = num_field(it, "completedLength");
                 let total = num_field(it, "totalLength");
                 let dl = num_field(it, "downloadSpeed");
@@ -64,6 +71,7 @@ pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
                 let seeders = num_field(it, "numSeeders");
                 let _ = db.checkpoint_progress(&gid, completed, total, dl, ul, conns, seeders);
                 ticks.push(Tick {
+                    id,
                     gid: gid.clone(),
                     name,
                     completed,

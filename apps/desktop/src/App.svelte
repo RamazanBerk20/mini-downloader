@@ -4,6 +4,7 @@
   import { api, on } from "./api";
   import type { Download, Tick } from "./types";
   import Settings from "./Settings.svelte";
+  import MediaGrab from "./MediaGrab.svelte";
 
   let url = $state("");
   let error = $state("");
@@ -11,6 +12,7 @@
   let items = $state<Download[]>([]);
   let globalSpeed = $state("0");
   let showSettings = $state(false);
+  let showMedia = $state(false);
 
   async function pickFile() {
     error = "";
@@ -51,10 +53,10 @@
 
     subs.push(
       on<{ updates: Tick[] }>("downloads:tick", (p) => {
-        const idx = new Map(items.map((d, i) => [d.gid, i] as const));
+        const idx = new Map(items.map((d, i) => [d.id, i] as const));
         let changed = false;
         for (const u of p.updates) {
-          const i = idx.get(u.gid);
+          const i = idx.get(u.id);
           if (i === undefined) continue;
           const d = items[i];
           d.completed_bytes = u.completed;
@@ -148,6 +150,7 @@
     <input placeholder="Paste a URL or magnet link…" bind:value={url} />
     <button type="submit">Add</button>
     <button type="button" class="ghost" onclick={pickFile} title="Add a .torrent or .metalink file">＋ File</button>
+    <button type="button" class="ghost" onclick={() => (showMedia = true)} title="Grab a video via yt-dlp">▶ Video</button>
   </form>
   <div class="toolbar">
     <div class="filters">
@@ -171,6 +174,9 @@
 
 {#if showSettings}
   <Settings onclose={() => { showSettings = false; refresh(); }} />
+{/if}
+{#if showMedia}
+  <MediaGrab onclose={() => { showMedia = false; refresh(); }} />
 {/if}
 
 {#if error}<p class="err">{error} <button class="x" onclick={() => (error = "")}>✕</button></p>{/if}

@@ -8,6 +8,7 @@ use ldm_core::db::Db;
 pub struct AppState {
     pub engine: Arc<Engine>,
     pub db: Db,
+    pub ytdlp: Arc<crate::ytdlp::YtDlp>,
     pub defaults: EngineDefaults,
     pub download_dir: PathBuf,
     /// Used by the native-host bridge + packaging (later milestones).

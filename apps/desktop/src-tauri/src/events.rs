@@ -7,8 +7,10 @@ pub const EV_ERROR: &str = "downloads:error";
 pub const EV_RECONCILED: &str = "downloads:reconciled";
 
 /// One live-progress row. Batched into a `downloads:tick` array per poll.
+/// Keyed by the stable app `id` so aria2 and yt-dlp downloads share one path.
 #[derive(Serialize, Clone)]
 pub struct Tick {
+    pub id: i64,
     pub gid: String,
     pub name: String,
     pub completed: i64,

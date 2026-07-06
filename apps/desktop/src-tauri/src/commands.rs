@@ -5,7 +5,8 @@ use serde_json::json;
 use tauri::State;
 
 use ldm_core::ipc::{CaptureJob, DownloadKind};
-use ldm_core::model::{Category, Download, DownloadStatus};
+use ldm_core::model::{Category, Download, DownloadStatus, NewDownload};
+use ldm_core::ytdlp::MediaInfo;
 
 use crate::ingest::{ingest, job_from_url};
 use crate::state::AppState;
@@ -31,6 +32,7 @@ pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Dow
     let id = ingest(
         &state.engine,
         &state.db,
+        &state.ytdlp,
         &state.download_dir,
         &state.defaults,
         job_from_url(url),
@@ -57,6 +59,9 @@ pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), S
     if let Some(d) = state.db.get(id).map_err(err)? {
         if let Some(gid) = d.gid {
             let _ = state.engine.rpc.pause(&gid).await;
+        } else {
+            // yt-dlp download: stop the process (resume restarts it).
+            state.ytdlp.cancel(id);
         }
         state.db.set_status(id, DownloadStatus::Paused).map_err(err)?;
     }
@@ -66,8 +71,10 @@ pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), S
 #[tauri::command]
 pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), String> {
     if let Some(d) = state.db.get(id).map_err(err)? {
-        if let Some(gid) = d.gid {
-            let _ = state.engine.rpc.unpause(&gid).await;
+        if let Some(gid) = &d.gid {
+            let _ = state.engine.rpc.unpause(gid).await;
+        } else if matches!(d.kind.as_str(), "video" | "hls" | "dash") {
+            state.ytdlp.start(id, d.url.clone(), None);
         }
         state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
     }
@@ -81,6 +88,7 @@ pub async fn remove_download(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     if let Some(d) = state.db.get(id).map_err(err)? {
+        state.ytdlp.cancel(id); // no-op for aria2 downloads
         if let Some(gid) = &d.gid {
             let _ = state.engine.rpc.remove(gid).await;
             let _ = state.engine.rpc.remove_download_result(gid).await;
@@ -170,7 +178,44 @@ async fn add_file_job(
         cookie_store_id: None,
         torrent_b64: Some(b64),
     };
-    let id = ingest(&state.engine, &state.db, &state.download_dir, &state.defaults, job, None).await?;
+    let id = ingest(
+        &state.engine,
+        &state.db,
+        &state.ytdlp,
+        &state.download_dir,
+        &state.defaults,
+        job,
+        None,
+    )
+    .await?;
+    state.db.get(id).map_err(err)?.ok_or_else(|| "download vanished".to_string())
+}
+
+/// Probe a page/URL for downloadable video formats (yt-dlp).
+#[tauri::command]
+pub async fn probe_media(url: String, state: State<'_, AppState>) -> Result<MediaInfo, String> {
+    state.ytdlp.probe(&url).await
+}
+
+/// Start a yt-dlp download of a chosen format (or best when None).
+#[tauri::command]
+pub async fn add_media_download(
+    url: String,
+    format_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Download, String> {
+    let dir = state.download_dir.to_string_lossy().to_string();
+    let id = state
+        .db
+        .insert_download(&NewDownload {
+            url: url.clone(),
+            dir,
+            kind: "video".into(),
+            ..Default::default()
+        })
+        .map_err(err)?;
+    state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+    state.ytdlp.start(id, url, format_id);
     state.db.get(id).map_err(err)?.ok_or_else(|| "download vanished".to_string())
 }
 

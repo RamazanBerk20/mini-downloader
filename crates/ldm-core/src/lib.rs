@@ -10,5 +10,6 @@ pub mod categories;
 pub mod db;
 pub mod model;
 pub mod paths;
+pub mod ytdlp;
 
 pub use ldm_ipc as ipc;

@@ -297,6 +297,22 @@ impl Db {
         Ok(())
     }
 
+    /// Progress update keyed by app id (used by the yt-dlp driver, which has no GID).
+    pub fn checkpoint_progress_by_id(
+        &self,
+        id: i64,
+        completed: i64,
+        total: i64,
+        dl_speed: i64,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE downloads SET completed_bytes=?1, total_bytes=?2, download_speed=?3 WHERE id=?4",
+            params![completed, total, dl_speed, id],
+        )?;
+        Ok(())
+    }
+
     pub fn delete(&self, id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM downloads WHERE id=?1", params![id])?;

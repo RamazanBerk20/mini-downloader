@@ -24,6 +24,7 @@ struct Ctx {
     app: AppHandle,
     engine: Arc<Engine>,
     db: Db,
+    ytdlp: Arc<crate::ytdlp::YtDlp>,
     download_dir: PathBuf,
     defaults: EngineDefaults,
 }
@@ -34,6 +35,7 @@ pub fn spawn_listener(
     app: AppHandle,
     engine: Arc<Engine>,
     db: Db,
+    ytdlp: Arc<crate::ytdlp::YtDlp>,
     download_dir: PathBuf,
     defaults: EngineDefaults,
 ) {
@@ -43,6 +45,7 @@ pub fn spawn_listener(
         app,
         engine,
         db,
+        ytdlp,
         download_dir,
         defaults,
     };
@@ -97,6 +100,7 @@ async fn handle_conn(mut conn: UnixStream, ctx: Ctx) {
             match ingest(
                 &ctx.engine,
                 &ctx.db,
+                &ctx.ytdlp,
                 &ctx.download_dir,
                 &ctx.defaults,
                 req.job,

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Category, Download } from "./types";
+import type { Category, Download, MediaInfo } from "./types";
 
 export const api = {
   add: (url: string) => invoke<Download>("add_download", { url }),
@@ -18,6 +18,9 @@ export const api = {
   setDownloadSpeed: (id: number, limit: number) =>
     invoke<void>("set_download_speed", { id, limit }),
   openFolder: (id: number) => invoke<void>("open_containing_folder", { id }),
+  probeMedia: (url: string) => invoke<MediaInfo>("probe_media", { url }),
+  addMedia: (url: string, formatId?: string) =>
+    invoke<Download>("add_media_download", { url, formatId: formatId ?? null }),
   installBrowser: () => invoke<string>("install_browser_integration"),
   listCategories: () => invoke<Category[]>("list_categories"),
   saveCategory: (name: string, dir: string, rules: string, priority: number) =>

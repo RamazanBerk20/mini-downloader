@@ -4,6 +4,7 @@ mod ingest;
 mod nativehost;
 mod state;
 mod sync;
+mod ytdlp;
 
 use std::sync::Arc;
 
@@ -45,10 +46,16 @@ pub fn run() {
             .map_err(|e| e.to_string())?;
             let engine = Arc::new(engine);
             let defaults = EngineDefaults::default();
+            let ytdlp = Arc::new(ytdlp::YtDlp::resolve(
+                app.handle().clone(),
+                db.clone(),
+                download_dir.clone(),
+            ));
 
             app.manage(AppState {
                 engine: engine.clone(),
                 db: db.clone(),
+                ytdlp: ytdlp.clone(),
                 defaults: defaults.clone(),
                 download_dir: download_dir.clone(),
                 data_dir,
@@ -65,7 +72,14 @@ pub fn run() {
             sync::spawn(app.handle().clone(), engine.clone(), db.clone());
 
             // Browser bridge: listen on the UDS + best-effort manifest install.
-            nativehost::spawn_listener(app.handle().clone(), engine, db, download_dir, defaults);
+            nativehost::spawn_listener(
+                app.handle().clone(),
+                engine,
+                db,
+                ytdlp,
+                download_dir,
+                defaults,
+            );
             if let Err(e) = nativehost::install_firefox_manifest() {
                 eprintln!("browser integration not installed: {e}");
             }
@@ -91,6 +105,8 @@ pub fn run() {
             commands::delete_category,
             commands::get_setting,
             commands::set_setting,
+            commands::probe_media,
+            commands::add_media_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

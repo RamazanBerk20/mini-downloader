@@ -39,7 +39,25 @@ export interface Category {
   priority: number;
 }
 
+export interface Format {
+  format_id: string;
+  ext: string;
+  resolution: string;
+  vcodec: string;
+  acodec: string;
+  filesize: number;
+  protocol: string;
+  note: string;
+  height: number;
+}
+
+export interface MediaInfo {
+  title: string;
+  formats: Format[];
+}
+
 export interface Tick {
+  id: number;
   gid: string;
   name: string;
   completed: number;
