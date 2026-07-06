@@ -129,7 +129,7 @@ fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
 impl Db {
     pub fn open(data_dir: &Path) -> Result<Self> {
         std::fs::create_dir_all(data_dir).ok();
-        let conn = Connection::open(data_dir.join("ldm.db"))?;
+        let conn = Connection::open(data_dir.join("minidl.db"))?;
         Self::init(conn)
     }
 
