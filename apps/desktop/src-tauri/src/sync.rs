@@ -259,6 +259,8 @@ fn organize(db: &Db, row: &ldm_core::model::Download, filename: &str) -> String 
     let moved = std::fs::rename(&src, &dst).is_ok()
         || (std::fs::copy(&src, &dst).is_ok() && std::fs::remove_file(&src).is_ok());
     if moved {
+        // Drop the aria2 control file left in the source dir, if any.
+        let _ = std::fs::remove_file(std::path::Path::new(&row.dir).join(format!("{filename}.aria2")));
         let _ = db.set_dir_and_category(row.id, &target_str, cat.id);
         target_str
     } else {
