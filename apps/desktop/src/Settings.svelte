@@ -210,6 +210,13 @@
       browserStatus = "Error: " + errText(e);
     }
   }
+  async function installExtension() {
+    try {
+      browserStatus = await api.autoInstallExtension();
+    } catch (e) {
+      browserStatus = errText(e);
+    }
+  }
 
   const fmtTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -353,6 +360,7 @@
       </div>
     {/if}
     <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
+    <button class="btn" onclick={installExtension}><Icon name="download" size={16} /> {t("installExtension")}</button>
     {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
     <p class="hint">{t("browserHint")}</p>
     <button class="btn btn-ghost" onclick={() => openUrl(RELEASE_URL)}>{t("installGuide")}</button>

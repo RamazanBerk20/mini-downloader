@@ -111,6 +111,7 @@ export const en = {
   getForFirefox: "Get for Firefox",
   getForChrome: "Get for Chrome",
   installGuide: "Install guide",
+  installExtension: "Install extension automatically",
   fetchingMeta: "Fetching metadata…",
   bulkSelected: "{n} selected",
   announceAdded: "Download added",

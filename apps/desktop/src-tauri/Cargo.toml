@@ -28,6 +28,7 @@ chrono = "0.4"
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+dirs = { workspace = true }
 minidl-core = { path = "../../../crates/minidl-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }
 interprocess = { workspace = true }

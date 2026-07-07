@@ -35,6 +35,22 @@ shows "Get for Firefox / Chrome" buttons.
    auto-publishes.
 6. Fill `STORE_URLS.chrome` with the Web Store URL.
 
+## Activate IDM-style auto-install
+
+Once published, the app can auto-install the extension into every browser (no
+about:debugging, no store visit) — set the constants in
+`apps/desktop/src-tauri/src/extinstall.rs`:
+
+- `AMO_XPI_URL` → the AMO "latest signed .xpi" link, e.g.
+  `https://addons.mozilla.org/firefox/downloads/latest/<slug>/latest.xpi`.
+  The app drops it into every Firefox profile's `extensions/` dir (all OSes, no
+  root) — works even without a Chrome account.
+- `CWS_EXT_ID` → the Chrome Web Store id (needs the CWS listing). The app writes
+  the Web Store external-install pointer (Linux JSON / Windows registry).
+
+Bump to **1.2.5** when these are set (per the release plan). Firefox users then
+get the add-on automatically on next launch; Chromium needs the CWS listing.
+
 ## Notes
 
 - Both steps are `if: ${{ env.X != '' }}` gated — releases without the secrets

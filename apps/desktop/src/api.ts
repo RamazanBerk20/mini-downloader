@@ -57,6 +57,7 @@ export const api = {
   getEngineDefaults: () => invoke<[number, number]>("get_engine_defaults"),
   setEngineDefaults: (split: number, connections: number) =>
     invoke<void>("set_engine_defaults", { split, connections }),
+  autoInstallExtension: () => invoke<string>("auto_install_extension"),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   installUpdate: (assetUrl: string | null, pageUrl: string) =>
     invoke<void>("install_update", { assetUrl, pageUrl }),
