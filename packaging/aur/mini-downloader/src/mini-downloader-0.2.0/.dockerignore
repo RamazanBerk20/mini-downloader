@@ -1,8 +1,0 @@
-node_modules
-target
-apps/desktop/src-tauri/target
-dist
-*.AppImage
-*.deb
-*.rpm
-.git

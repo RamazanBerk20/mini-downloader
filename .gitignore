@@ -36,3 +36,9 @@ dist-ext
 # Chrome extension signing key (secret)
 packaging/chrome-extension-key.pem
 packaging/chrome-key.b64
+
+# AUR local build artifacts (updpkgsums/makepkg leave these in the pkg dirs)
+packaging/aur/*/src/
+packaging/aur/*/pkg/
+packaging/aur/*/*.tar.gz
+packaging/aur/*/*.pkg.tar.zst

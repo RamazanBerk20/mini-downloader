@@ -1,7 +1,0 @@
-/* Self-hosted editorial fonts (latin subset from Google Fonts, OFL). */
-@font-face { font-family: 'Geist Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url('./fonts/geist-400.woff2') format('woff2'); }
-@font-face { font-family: 'Geist Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url('./fonts/geist-500.woff2') format('woff2'); }
-@font-face { font-family: 'Geist Sans'; font-style: normal; font-weight: 600; font-display: swap; src: url('./fonts/geist-600.woff2') format('woff2'); }
-@font-face { font-family: 'Geist Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('./fonts/geist-mono-400.woff2') format('woff2'); }
-@font-face { font-family: 'Geist Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('./fonts/geist-mono-500.woff2') format('woff2'); }
-@font-face { font-family: 'Instrument Serif'; font-style: normal; font-weight: 400; font-display: swap; src: url('./fonts/instrument-serif-400.woff2') format('woff2'); }
