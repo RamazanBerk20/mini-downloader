@@ -94,7 +94,7 @@ export const en = {
   speedLimit: "Speed limit",
   copyUrl: "Copy URL",
   fetchingMeta: "Fetching metadata…",
-  selectedCount: "{n} selected",
+  bulkSelected: "{n} selected",
   obPaste: "Paste a URL",
   obVideo: "Grab a video",
   obLinks: "Grab links",

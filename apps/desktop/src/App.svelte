@@ -319,7 +319,7 @@
 
     {#if selected.size > 0}
       <div class="selbar" role="toolbar" aria-label="Selection actions">
-        <span>{t("selectedCount", { n: selected.size })}</span>
+        <span>{t("bulkSelected", { n: selected.size })}</span>
         <button class="btn btn-ghost" onclick={() => bulk(api.resume)}><Icon name="play" size={15} /> {t("resume")}</button>
         <button class="btn btn-ghost" onclick={() => bulk(api.pause)}><Icon name="pause" size={15} /> {t("pause")}</button>
         <button class="btn btn-ghost" onclick={() => bulk((id) => api.remove(id, false))}><Icon name="trash" size={15} /> {t("remove")}</button>
