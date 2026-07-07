@@ -142,6 +142,8 @@ jobs:
       - name: Publish Chrome extension (Web Store)
         if: ${{ env.CWS_CLIENT_ID != '' }}
         run: |
+          # CWS rejects the `key` field (it assigns the id itself) — strip it.
+          node -e "const f='dist-ext/chrome/manifest.json',m=require('./'+f);delete m.key;require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
           npx --yes chrome-webstore-upload-cli@3 upload \
             --source dist-ext/chrome \
             --extension-id "$CWS_ITEM_ID" \
