@@ -18,8 +18,8 @@ use crate::errors::{CommandError, ErrorKind};
 /// AMO "download latest signed .xpi" URL — fill after the add-on is listed, e.g.
 /// `https://addons.mozilla.org/firefox/downloads/latest/mini-downloader/latest.xpi`.
 const AMO_XPI_URL: &str = "";
-/// Chrome Web Store extension id — fill after publishing (needs a CWS account).
-const CWS_EXT_ID: &str = "";
+/// Chrome Web Store extension id (assigned on publish).
+const CWS_EXT_ID: &str = "hhaobmkdgijodfieadeeanjmnneckafj";
 const CWS_UPDATE_URL: &str = "https://clients2.google.com/service/update2/crx";
 
 /// Firefox profile parent dirs across install types (native / forks / sandboxed).

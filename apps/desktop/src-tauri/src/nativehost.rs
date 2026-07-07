@@ -197,7 +197,10 @@ fn chromium_manifest(host_path: &str) -> serde_json::Value {
         "description": "Mini Downloader native bridge",
         "path": host_path,
         "type": "stdio",
-        "allowed_origins": [format!("chrome-extension://{}/", ipc::CHROME_EXTENSION_ID)],
+        "allowed_origins": [
+            format!("chrome-extension://{}/", ipc::CHROME_EXTENSION_ID),
+            format!("chrome-extension://{}/", ipc::CHROME_STORE_EXTENSION_ID),
+        ],
     })
 }
 

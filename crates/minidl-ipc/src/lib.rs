@@ -23,9 +23,14 @@ pub const NATIVE_HOST_NAME: &str = "com.minidownloader.host";
 /// host manifest `allowed_extensions`.
 pub const EXTENSION_ID: &str = "minidownloader@ramazan.dev";
 
-/// Chromium extension id — derived from the `key` in `manifest.chrome.json`,
-/// used in the host manifest `allowed_origins` (`chrome-extension://<id>/`).
+/// Chromium extension id for an **unpacked** load — derived from the `key` in
+/// `manifest.chrome.json` — used in the host manifest `allowed_origins`.
 pub const CHROME_EXTENSION_ID: &str = "lkllgjnnglfjifnioojkcbefjlfmfahi";
+
+/// Chromium extension id assigned by the **Chrome Web Store** on publish (the
+/// store strips the `key`, so the id differs from the unpacked one). Both are
+/// allowed by the native host so store + unpacked installs work.
+pub const CHROME_STORE_EXTENSION_ID: &str = "hhaobmkdgijodfieadeeanjmnneckafj";
 
 /// What kind of source a captured job points at. The app routes each kind to
 /// the right aria2 method or to yt-dlp.
