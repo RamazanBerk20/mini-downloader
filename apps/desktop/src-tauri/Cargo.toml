@@ -11,11 +11,18 @@ description = "Mini Downloader"
 name = "desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Compile in the in-app auto-updater (requires a configured signing key).
+updater = ["dep:tauri-plugin-updater"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
+# In-app auto-updater — off by default. Enable with `--features updater` after
+# provisioning a signing key + config (see scripts/UPDATER.md).
+tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"

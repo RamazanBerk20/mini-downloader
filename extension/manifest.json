@@ -30,6 +30,7 @@
     "nativeMessaging",
     "notifications",
     "storage",
+    "alarms",
     "tabs"
   ],
   "host_permissions": [

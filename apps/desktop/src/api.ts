@@ -14,6 +14,8 @@ export const api = {
     invoke<void>("remove_download", { id, deleteFiles }),
   moveInQueue: (id: number, direction: "top" | "up" | "down" | "bottom") =>
     invoke<void>("move_in_queue", { id, direction }),
+  setQueuePosition: (id: number, pos: number) =>
+    invoke<void>("set_queue_position", { id, pos }),
   setMaxConcurrent: (n: number) => invoke<void>("set_max_concurrent", { n }),
   getMaxConcurrent: () => invoke<number>("get_max_concurrent"),
   pauseAll: () => invoke<void>("pause_all"),

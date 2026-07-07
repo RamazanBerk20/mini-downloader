@@ -24,11 +24,14 @@ repo). Activation is a maintainer step. macOS is intentionally out of scope.
 
 ## Wire it in
 
-- `apps/desktop/src-tauri/Cargo.toml`: add `tauri-plugin-updater = "2"`.
-- `lib.rs`: `.plugin(tauri_plugin_updater::Builder::new().build())`, and check for
-  an update in the setup hook (skip on distro/AUR builds — gate on an env var or
-  a build feature so the packaged Linux binaries don't self-update over the
-  package manager).
+The plugin is already wired behind the `updater` Cargo feature (off by default):
+- `Cargo.toml` has `tauri-plugin-updater` as an optional dep + `[features] updater`.
+- `lib.rs` registers the plugin under `#[cfg(feature = "updater")]`.
+
+To activate, build with `--features updater` (add the flag to the Linux/Windows
+release legs *only* if you want those binaries to self-update — leave it off for
+distro/AUR builds so they update via the package manager). Then add an
+update-check in the setup hook.
 - `.github/workflows/release.yml`: pass `TAURI_SIGNING_PRIVATE_KEY*` env to the
   `tauri-action` step and set `args: --config '{"bundle":{"createUpdaterArtifacts":true}}'`
   (or add it to the config). tauri-action then generates + attaches `latest.json`.

@@ -94,6 +94,23 @@
     await refresh();
   }
 
+  // Single shared right-click context menu (positioned at the cursor).
+  let menu = $state<{ d: Download; x: number; y: number } | null>(null);
+  function openMenu(d: Download, x: number, y: number) {
+    menu = { d, x, y };
+  }
+  // Drag-reorder: move the dragged row to the drop target's slot in aria2's
+  // waiting queue.
+  async function reorder(srcId: number, targetId: number) {
+    const waiting = all.filter((d) => d.status === "waiting");
+    const pos = waiting.findIndex((d) => d.id === targetId);
+    if (pos < 0) return;
+    try {
+      await api.setQueuePosition(srcId, pos);
+    } catch {}
+    await refresh();
+  }
+
   onMount(() => {
     api.listCategories().then((c) => (categories = c)).catch(() => {});
     refresh();
@@ -137,7 +154,7 @@
     );
     subs.push(
       on<{ id?: number; name?: string }>("downloads:complete", (p) => {
-        announce(`Completed: ${p.name ?? "download"}`);
+        announce(t("announceCompleted", { name: p.name ?? "download" }));
         const changes: Partial<Download> = { status: "complete" };
         if (p.name) changes.filename = p.name;
         if (typeof p?.id !== "number" || !patchRow(p.id, changes)) refresh();
@@ -145,7 +162,7 @@
     );
     subs.push(
       on<{ id?: number; message?: string }>("downloads:error", (p) => {
-        announce(`Download failed${p.message ? ": " + p.message : ""}`);
+        announce(p.message ? t("announceFailedDetail", { msg: p.message }) : t("announceFailed"));
         if (typeof p?.id !== "number" || !patchRow(p.id, { status: "error", error_message: p.message ?? null }))
           refresh();
       }),
@@ -177,6 +194,7 @@
     // A dialog is open → let it own the keyboard (its own focus trap handles
     // Escape). Otherwise single-key shortcuts (/, ?, 1–5) leak to the background
     // and pull focus out of the trapped modal.
+    if (menu && e.key === "Escape") { menu = null; return; }
     if (showSettings || showMedia || showGrabber || showHelp) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); addEl?.focus(); return; }
@@ -200,7 +218,7 @@
     try {
       await api.add(u);
       url = "";
-      announce("Download added");
+      announce(t("announceAdded"));
       await refresh();
     } catch (err) {
       error = errText(err);
@@ -349,7 +367,7 @@
       {:else}
         <ul class="dl-list" role="list">
           {#each filtered as d, i (d.id)}
-            <DownloadRow {d} {i} onact={act} selected={selected.has(d.id)} onselect={toggleSelect} />
+            <DownloadRow {d} {i} onact={act} selected={selected.has(d.id)} onselect={toggleSelect} onmenu={openMenu} onreorder={reorder} />
           {/each}
         </ul>
       {/if}
@@ -395,5 +413,20 @@
     <span class="u">{clipboardUrl.length > 54 ? clipboardUrl.slice(0, 54) + "…" : clipboardUrl}</span>
     <button class="btn btn-primary" onclick={addClipboard}>{t("download")}</button>
     <button class="btn btn-ghost" onclick={() => (clipboardUrl = null)}>{t("dismiss")}</button>
+  </div>
+{/if}
+
+{#if menu}
+  <div class="ctx-backdrop" onclick={() => (menu = null)} oncontextmenu={(e) => { e.preventDefault(); menu = null; }} role="presentation"></div>
+  <div class="ctx-menu" style="left:{menu.x}px; top:{menu.y}px" role="menu">
+    <button role="menuitem" onclick={() => { navigator.clipboard.writeText(menu!.d.url).catch(() => {}); menu = null; }}>{t("copyUrl")}</button>
+    {#if menu.d.status === "complete"}
+      <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.openFolder(id)); }}>{t("openFolder")}</button>
+    {/if}
+    {#if menu.d.status === "error"}
+      <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.retry(id)); }}>{t("retry")}</button>
+    {/if}
+    <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.remove(id, false)); }}>{t("remove")}</button>
+    <button role="menuitem" class="danger" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.remove(id, true)); }}>{t("removeDelete")}</button>
   </div>
 {/if}

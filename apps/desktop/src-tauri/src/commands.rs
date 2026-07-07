@@ -238,6 +238,18 @@ pub async fn move_in_queue(id: i64, direction: String, state: State<'_, AppState
     Ok(())
 }
 
+/// Move a download to an absolute queue position (drag-reorder). aria2 clamps
+/// and only reorders items still in its waiting queue.
+#[tauri::command]
+pub async fn set_queue_position(id: i64, pos: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+    if let Some(d) = state.db.get(id).map_err(err)? {
+        if let Some(gid) = d.gid {
+            let _ = state.engine.rpc.change_position(&gid, pos.max(0), "POS_SET").await;
+        }
+    }
+    Ok(())
+}
+
 /// Max simultaneous downloads (persisted; applied live + read on next launch).
 #[tauri::command]
 pub async fn set_max_concurrent(n: u32, state: State<'_, AppState>) -> Result<(), CommandError> {

@@ -64,9 +64,58 @@ async function sendJob(job) {
     return reply;
   } catch (e) {
     notify(t("notifyNotReachableTitle"), t("notifyNotReachableBody"));
+    // App down/unreachable → queue for retry so the capture isn't lost.
+    enqueueRetry(job);
     return null;
   }
 }
+
+// ---------- Retry queue (app unreachable) ----------
+const RETRY_KEY = "pendingJobs";
+const RETRY_TTL = 60 * 60 * 1000; // drop after 1h
+const RETRY_MAX = 50;
+
+async function enqueueRetry(job) {
+  try {
+    const q = (await b.storage.local.get(RETRY_KEY))[RETRY_KEY] || [];
+    q.push({ job, ts: Date.now() });
+    await b.storage.local.set({ [RETRY_KEY]: q.slice(-RETRY_MAX) });
+  } catch {}
+}
+
+let flushing = false;
+async function flushRetries() {
+  if (flushing) return;
+  flushing = true;
+  try {
+    const q = (await b.storage.local.get(RETRY_KEY))[RETRY_KEY] || [];
+    if (!q.length) return;
+    const now = Date.now();
+    const keep = [];
+    for (const item of q) {
+      if (now - item.ts > RETRY_TTL) continue; // expired
+      let ok = false;
+      try {
+        const reply = await b.runtime.sendNativeMessage(HOST, item.job);
+        ok = !!(reply && reply.ok);
+      } catch {}
+      if (!ok) keep.push(item); // still unreachable → keep for next round
+    }
+    await b.storage.local.set({ [RETRY_KEY]: keep });
+  } catch {
+  } finally {
+    flushing = false;
+  }
+}
+
+b.runtime.onStartup.addListener(flushRetries);
+try {
+  b.alarms.create("ldm-retry", { periodInMinutes: 2 });
+  b.alarms.onAlarm.addListener((a) => {
+    if (a.name === "ldm-retry") flushRetries();
+  });
+} catch {}
+flushRetries();
 
 // Dedup the same URL across Path A / Path B within a short window.
 const recent = new Map();

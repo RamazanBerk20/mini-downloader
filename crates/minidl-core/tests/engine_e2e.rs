@@ -37,6 +37,7 @@ async fn download_completes_with_notification() {
         download_dir: dir.clone(),
         data_dir: dir.clone(),
         max_concurrent: 5,
+        ..Default::default()
     })
     .await
     .expect("engine launch");

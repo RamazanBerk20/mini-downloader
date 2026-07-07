@@ -495,6 +495,20 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 }
 .row-check { margin-inline-end: 0.2rem; cursor: pointer; accent-color: var(--ink); flex: none; }
 
+/* ---------- Right-click context menu ---------- */
+.ctx-backdrop { position: fixed; inset: 0; z-index: 60; }
+.ctx-menu {
+  position: fixed; z-index: 61; min-width: 168px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: var(--shadow-float); padding: 0.25rem; display: flex; flex-direction: column;
+}
+.ctx-menu button {
+  text-align: start; padding: 0.4rem 0.6rem; border: none; background: transparent;
+  color: var(--text); border-radius: 5px; font-size: 0.85rem; cursor: pointer;
+}
+.ctx-menu button:hover { background: var(--surface-2); }
+.ctx-menu button.danger { color: var(--error-fg); }
+
 /* ---------- Reduced motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

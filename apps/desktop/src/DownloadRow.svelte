@@ -20,12 +20,16 @@
     onact,
     selected = false,
     onselect,
+    onmenu,
+    onreorder,
   }: {
     d: Download;
     i: number;
     onact: (fn: () => Promise<unknown>) => void;
     selected?: boolean;
     onselect?: (id: number, e: MouseEvent) => void;
+    onmenu?: (d: Download, x: number, y: number) => void;
+    onreorder?: (srcId: number, targetId: number) => void;
   } = $props();
 
   // Per-download speed cap presets (bytes/sec; 0 = unlimited).
@@ -97,8 +101,17 @@
   class="row {d.status}"
   style="--i:{i}"
   tabindex="0"
-  aria-label="{name(d)}, {d.status}, {pct(d)} percent"
+  aria-label="{name(d)}, {t(STATUS_KEY[d.status] ?? 'statusActive')}, {pct(d)}%"
   onkeydown={onKey}
+  oncontextmenu={(e) => { e.preventDefault(); onmenu?.(d, e.clientX, e.clientY); }}
+  draggable={d.status === "waiting"}
+  ondragstart={(e) => e.dataTransfer?.setData("text/minidl-id", String(d.id))}
+  ondragover={(e) => { if (d.status === "waiting") e.preventDefault(); }}
+  ondrop={(e) => {
+    e.preventDefault();
+    const src = e.dataTransfer?.getData("text/minidl-id");
+    if (src && Number(src) !== d.id) onreorder?.(Number(src), d.id);
+  }}
 >
   <div class="row-head">
     {#if onselect}

@@ -16,6 +16,7 @@
     "nativeMessaging",
     "notifications",
     "storage",
+    "alarms",
     "tabs"
   ],
   "host_permissions": ["<all_urls>"],

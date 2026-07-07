@@ -54,7 +54,11 @@ fn show_main(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Optional in-app updater (feature `updater`); no-op in default builds.
+    #[cfg(feature = "updater")]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         // Single-instance MUST be first. A second launch (native host running
         // `--background`, or a magnet click) forwards its argv here.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -237,6 +241,7 @@ pub fn run() {
             commands::retry_download,
             commands::remove_download,
             commands::move_in_queue,
+            commands::set_queue_position,
             commands::set_max_concurrent,
             commands::get_max_concurrent,
             commands::pause_all,
