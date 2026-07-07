@@ -11,18 +11,11 @@ description = "Mini Downloader"
 name = "desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-[features]
-# Compile in the in-app auto-updater (requires a configured signing key).
-updater = ["dep:tauri-plugin-updater"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-# In-app auto-updater — off by default. Enable with `--features updater` after
-# provisioning a signing key + config (see scripts/UPDATER.md).
-tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
@@ -38,6 +31,8 @@ anyhow = { workspace = true }
 minidl-core = { path = "../../../crates/minidl-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }
 interprocess = { workspace = true }
+# HTTPS to the GitHub releases API for the self-updater (rustls: no OpenSSL dep).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

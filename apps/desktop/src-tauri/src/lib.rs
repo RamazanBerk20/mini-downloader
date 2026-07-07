@@ -8,6 +8,7 @@ mod scheduler;
 mod state;
 mod sync;
 mod tray;
+mod updater;
 mod window;
 mod ytdlp;
 
@@ -54,11 +55,7 @@ fn show_main(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default();
-    // Optional in-app updater (feature `updater`); no-op in default builds.
-    #[cfg(feature = "updater")]
-    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
-    builder
+    tauri::Builder::default()
         // Single-instance MUST be first. A second launch (native host running
         // `--background`, or a magnet click) forwards its argv here.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -268,6 +265,8 @@ pub fn run() {
             commands::set_clipboard_watch,
             commands::get_engine_defaults,
             commands::set_engine_defaults,
+            updater::check_update,
+            updater::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

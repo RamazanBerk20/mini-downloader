@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Category, Download, MediaInfo, ParsedLink, Schedule } from "./types";
+import type { Category, Download, MediaInfo, ParsedLink, Schedule, UpdateInfo } from "./types";
 
 export const api = {
   add: (url: string) => invoke<Download>("add_download", { url }),
@@ -54,6 +54,9 @@ export const api = {
   getEngineDefaults: () => invoke<[number, number]>("get_engine_defaults"),
   setEngineDefaults: (split: number, connections: number) =>
     invoke<void>("set_engine_defaults", { split, connections }),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  installUpdate: (assetUrl: string | null, pageUrl: string) =>
+    invoke<void>("install_update", { assetUrl, pageUrl }),
 };
 
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {

@@ -3,7 +3,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, on, errText } from "./api";
   import { announce, trapFocus } from "./lib/a11y";
-  import type { Category, Download, Tick } from "./types";
+  import type { Category, Download, Tick, UpdateInfo } from "./types";
   import Sidebar from "./Sidebar.svelte";
   import DownloadRow from "./DownloadRow.svelte";
   import Icon from "./lib/Icon.svelte";
@@ -26,6 +26,7 @@
   let showGrabber = $state(false);
   let showHelp = $state(false);
   let selected = $state<Set<number>>(new Set());
+  let updateInfo = $state<UpdateInfo | null>(null);
 
   let addEl: HTMLInputElement;
   let searchEl: HTMLInputElement;
@@ -111,9 +112,22 @@
     await refresh();
   }
 
+  async function doInstall() {
+    if (!updateInfo) return;
+    const info = updateInfo;
+    updateInfo = null;
+    try {
+      await api.installUpdate(info.asset_url, info.url);
+    } catch (e) {
+      error = errText(e);
+    }
+  }
+
   onMount(() => {
     api.listCategories().then((c) => (categories = c)).catch(() => {});
     refresh();
+    // Non-blocking update check against GitHub releases (no self-install on Linux).
+    api.checkUpdate().then((u) => { if (u.newer) updateInfo = u; }).catch(() => {});
 
     const subs: Promise<() => void>[] = [];
     subs.push(
@@ -413,6 +427,15 @@
     <span class="u">{clipboardUrl.length > 54 ? clipboardUrl.slice(0, 54) + "…" : clipboardUrl}</span>
     <button class="btn btn-primary" onclick={addClipboard}>{t("download")}</button>
     <button class="btn btn-ghost" onclick={() => (clipboardUrl = null)}>{t("dismiss")}</button>
+  </div>
+{/if}
+
+{#if updateInfo}
+  <div class="toast" role="status" aria-live="polite">
+    <Icon name="download" size={18} />
+    <span class="u">{t("updateAvailable", { v: updateInfo.latest })}</span>
+    <button class="btn btn-primary" onclick={doInstall}>{updateInfo.can_install ? t("updateInstall") : t("updateView")}</button>
+    <button class="btn btn-ghost" onclick={() => (updateInfo = null)}>{t("dismiss")}</button>
   </div>
 {/if}
 

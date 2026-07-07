@@ -78,6 +78,16 @@ export interface MediaInfo {
   formats: Format[];
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  newer: boolean;
+  url: string;
+  asset_url: string | null;
+  can_install: boolean;
+  notes: string;
+}
+
 export interface Tick {
   id: number;
   gid: string;

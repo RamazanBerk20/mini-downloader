@@ -8,7 +8,7 @@
   const SPONSOR_URL = "https://github.com/sponsors/RamazanBerk20";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
-  import type { Category, Schedule } from "./types";
+  import type { Category, Schedule, UpdateInfo } from "./types";
   import { t, LOCALES, currentLocale, setLocale, type LocaleCode, type MsgKey } from "./lib/i18n.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -41,6 +41,8 @@
   let ncName = $state("");
   let ncDir = $state("");
   let ncRules = $state("");
+  let updateStatus = $state("");
+  let update = $state<UpdateInfo | null>(null);
 
   const OC_ACTIONS: [string, MsgKey][] = [
     ["none", "ocNone"],
@@ -104,6 +106,25 @@
   async function browseNewDir() {
     const dir = await open({ directory: true, multiple: false });
     if (typeof dir === "string") ncDir = dir;
+  }
+  async function checkForUpdates() {
+    updateStatus = t("updateChecking");
+    update = null;
+    try {
+      const u = await api.checkUpdate();
+      update = u;
+      updateStatus = u.newer ? t("updateAvailable", { v: u.latest }) : t("updateUpToDate", { v: u.current });
+    } catch (e) {
+      updateStatus = errText(e);
+    }
+  }
+  async function installUpdate() {
+    if (!update) return;
+    try {
+      await api.installUpdate(update.asset_url, update.url);
+    } catch (e) {
+      updateStatus = errText(e);
+    }
   }
 
   async function saveEngine() {
@@ -348,6 +369,15 @@
       <input bind:value={ncRules} placeholder={t("catRules")} aria-label={t("catRules")} />
       <button class="btn" onclick={addCategory}><Icon name="add" size={16} /> {t("addCategory")}</button>
     </div>
+  </section>
+
+  <section class="section">
+    <h3>{t("sectUpdates")}</h3>
+    <button class="btn" onclick={checkForUpdates}><Icon name="download" size={16} /> {t("updateCheck")}</button>
+    {#if updateStatus}<p class="hint">{updateStatus}</p>{/if}
+    {#if update?.newer}
+      <button class="btn btn-primary" onclick={installUpdate}>{update.can_install ? t("updateInstall") : t("updateView")}</button>
+    {/if}
   </section>
 
   <footer class="drawer-foot">
