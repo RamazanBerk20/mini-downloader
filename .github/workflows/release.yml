@@ -89,6 +89,18 @@ jobs:
   extension:
     needs: build # the draft release must exist before uploading to it
     runs-on: ubuntu-22.04
+    # Store-publish secrets (mapped to env so the step `if:` can test them). All
+    # optional — the job packages + attaches the zips regardless; signing/publish
+    # only run when the maintainer has added the secrets. See
+    # scripts/EXTENSION-PUBLISHING.md.
+    env:
+      AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
+      AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
+      AMO_CHANNEL: ${{ vars.AMO_CHANNEL }}
+      CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+      CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+      CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+      CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
     steps:
       - uses: actions/checkout@v4
       - name: Package browser extensions
@@ -105,6 +117,38 @@ jobs:
             dist-ext/mini-downloader-firefox-${{ github.ref_name }}.zip \
             dist-ext/mini-downloader-chrome-${{ github.ref_name }}.zip \
             --repo "${{ github.repository }}" --clobber
+
+      # Sign / submit the Firefox add-on to AMO. Channel `listed` submits for
+      # store review; `unlisted` returns a self-installable signed .xpi which is
+      # then attached to the release. Skipped entirely without AMO secrets.
+      - name: Sign Firefox add-on (AMO)
+        if: ${{ env.AMO_API_KEY != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx --yes web-ext@8 sign \
+            --source-dir dist-ext/firefox \
+            --channel "${AMO_CHANNEL:-listed}" \
+            --api-key "$AMO_API_KEY" \
+            --api-secret "$AMO_API_SECRET" \
+            --artifacts-dir web-ext-artifacts || true
+          XPI=$(ls web-ext-artifacts/*.xpi 2>/dev/null | head -1 || true)
+          if [ -n "$XPI" ]; then
+            gh release upload "${{ github.ref_name }}" "$XPI" --repo "${{ github.repository }}" --clobber
+          fi
+
+      # Upload + publish the Chromium build to the Chrome Web Store. Skipped
+      # without CWS secrets.
+      - name: Publish Chrome extension (Web Store)
+        if: ${{ env.CWS_CLIENT_ID != '' }}
+        run: |
+          npx --yes chrome-webstore-upload-cli@3 upload \
+            --source dist-ext/chrome \
+            --extension-id "$CWS_ITEM_ID" \
+            --client-id "$CWS_CLIENT_ID" \
+            --client-secret "$CWS_CLIENT_SECRET" \
+            --refresh-token "$CWS_REFRESH_TOKEN" \
+            --auto-publish || true
 
   checksums:
     needs: [build, extension]

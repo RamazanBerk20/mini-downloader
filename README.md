@@ -57,11 +57,16 @@ put it on `PATH` if you want video muxing.
 
 ### Browser extension
 
+Once published to the stores, install in one click from **Firefox Add-ons** /
+the **Chrome Web Store** (buttons appear in Settings → Browser integration).
+Until then, load it manually:
+
 1. Download `mini-downloader-firefox-*.zip` / `mini-downloader-chrome-*.zip`
    from Releases (or build with `./scripts/build-extension.sh`).
 2. **Firefox**: `about:debugging` → This Firefox → Load Temporary Add-on →
-   pick `manifest.json` from the unzipped folder (or install the signed XPI
-   when available).
+   pick `manifest.json` from the unzipped folder. For a *permanent* add-on,
+   install the signed `.xpi` from the release if present (see
+   `scripts/EXTENSION-PUBLISHING.md`).
    **Chromium/Chrome/Edge/Brave**: `chrome://extensions` → Developer mode →
    Load unpacked → the unzipped folder.
 3. Start the app once — it registers the native-messaging host for every
