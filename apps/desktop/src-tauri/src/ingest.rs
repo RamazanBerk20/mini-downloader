@@ -206,7 +206,18 @@ pub async fn ingest(
         return Ok(id);
     }
 
-    let opts = Value::Object(build_add_options(&job, &dir, &defaults));
+    let mut opts_map = build_add_options(&job, &dir, &defaults);
+    // Apply the global default per-download speed cap (bytes/sec) if set.
+    if let Some(limit) = db
+        .get_setting("default_speed_limit")
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse::<i64>().ok())
+        .filter(|n| *n > 0)
+    {
+        opts_map.insert("max-download-limit".into(), Value::String(limit.to_string()));
+    }
+    let opts = Value::Object(opts_map);
     let result: anyhow::Result<Vec<String>> = match job.kind {
         DownloadKind::Http | DownloadKind::Magnet => {
             engine.rpc.add_uri(&[job.url.clone()], opts).await.map(|g| vec![g])

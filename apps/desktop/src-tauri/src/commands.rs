@@ -174,7 +174,17 @@ pub async fn remove_download(
 /// Remove every completed download from the list (keeps the files on disk).
 #[tauri::command]
 pub async fn remove_completed(state: State<'_, AppState>) -> Result<usize, CommandError> {
-    let rows = state.db.list(Some("complete")).map_err(err)?;
+    remove_by_status(&state, "complete").await
+}
+
+/// Remove every failed download from the list.
+#[tauri::command]
+pub async fn remove_failed(state: State<'_, AppState>) -> Result<usize, CommandError> {
+    remove_by_status(&state, "error").await
+}
+
+async fn remove_by_status(state: &State<'_, AppState>, status: &str) -> Result<usize, CommandError> {
+    let rows = state.db.list(Some(status)).map_err(err)?;
     let mut removed = 0;
     for d in rows {
         if let Some(gid) = &d.gid {
@@ -390,6 +400,19 @@ pub async fn save_category(
 #[tauri::command]
 pub async fn delete_category(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.db.delete_category(id).map_err(err)
+}
+
+/// Re-add the built-in default categories (restore after edits/deletes).
+#[tauri::command]
+pub async fn restore_default_categories(state: State<'_, AppState>) -> Result<Vec<Category>, CommandError> {
+    state.db.seed_default_categories().map_err(err)?;
+    state.db.list_categories().map_err(err)
+}
+
+/// Reset a category's folder back to its built-in default.
+#[tauri::command]
+pub async fn reset_category_dir(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.db.reset_category_dir(id).map_err(err)
 }
 
 #[tauri::command]

@@ -16,7 +16,8 @@ const app = mount(App, {
 api
   .getSetting("locale")
   .then((v) => {
-    if (v) setLocale(normalizeLocale(v));
+    // "system" (or unset) → keep following navigator.language from first paint.
+    if (v && v !== "system") setLocale(normalizeLocale(v));
   })
   .catch(() => {});
 

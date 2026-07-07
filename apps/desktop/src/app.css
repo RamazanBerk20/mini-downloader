@@ -203,11 +203,10 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
   overflow-y: auto;
 }
 .wordmark {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.35rem; line-height: 1.1; letter-spacing: -0.02em;
   color: var(--strong); padding: 0 0.4rem; margin: 0;
 }
-.wordmark small { display: block; font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-top: 0.15rem; }
 
 .nav-group { display: flex; flex-direction: column; gap: 0.1rem; }
 .nav-label {
@@ -245,7 +244,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
   padding: 1.1rem 1.4rem 0.6rem;
 }
 .page-title {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 1.7rem; line-height: 1.1; letter-spacing: -0.02em;
   color: var(--strong); margin: 0; flex: none;
 }
@@ -322,7 +321,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 
 .empty { text-align: center; padding: 4rem 1rem; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
 .empty svg { color: var(--border-strong); }
-.empty h2 { font-family: var(--font-serif); font-size: 1.6rem; letter-spacing: -0.02em; color: var(--strong); margin: 0.5rem 0 0; }
+.empty h2 { font-family: var(--font-sans); font-size: 1.6rem; letter-spacing: -0.02em; color: var(--strong); margin: 0.5rem 0 0; }
 .empty p { color: var(--muted); margin: 0; }
 .empty .keys { margin-top: 0.6rem; color: var(--muted); font-size: 0.85rem; }
 
@@ -350,7 +349,7 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 @keyframes popin { from { transform: translate(-50%, -46%); opacity: 0; } to { transform: translate(-50%, -50%); opacity: 1; } }
 
 .dhead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-.dhead h2 { font-family: var(--font-serif); font-size: 1.4rem; letter-spacing: -0.02em; color: var(--strong); margin: 0; }
+.dhead h2 { font-family: var(--font-sans); font-size: 1.4rem; letter-spacing: -0.02em; color: var(--strong); margin: 0; }
 
 .section { padding: 1.1rem 0; border-bottom: 1px solid var(--border); }
 .section:last-child { border-bottom: none; }

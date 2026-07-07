@@ -21,6 +21,7 @@ export const api = {
   pauseAll: () => invoke<void>("pause_all"),
   resumeAll: () => invoke<void>("resume_all"),
   removeCompleted: () => invoke<number>("remove_completed"),
+  removeFailed: () => invoke<number>("remove_failed"),
   setGlobalSpeed: (down: number, up: number) =>
     invoke<void>("set_global_speed", { down, up }),
   setDownloadSpeed: (id: number, limit: number) =>
@@ -34,6 +35,8 @@ export const api = {
   saveCategory: (name: string, dir: string, rules: string, priority: number) =>
     invoke<void>("save_category", { name, dir, rules, priority }),
   deleteCategory: (id: number) => invoke<void>("delete_category", { id }),
+  restoreDefaultCategories: () => invoke<Category[]>("restore_default_categories"),
+  resetCategoryDir: (id: number) => invoke<void>("reset_category_dir", { id }),
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
   setSetting: (key: string, value: string) => invoke<void>("set_setting", { key, value }),
   grabLinks: (text: string) => invoke<ParsedLink[]>("grab_links", { text }),

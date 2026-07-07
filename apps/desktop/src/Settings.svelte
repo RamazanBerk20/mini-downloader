@@ -9,7 +9,12 @@
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
   import type { Category, Schedule, UpdateInfo } from "./types";
-  import { t, LOCALES, currentLocale, setLocale, type LocaleCode, type MsgKey } from "./lib/i18n.svelte";
+  import { t, LOCALES, setLocale, normalizeLocale, type LocaleCode, type MsgKey } from "./lib/i18n.svelte";
+
+  // Store listing URLs — filled by the maintainer after publishing to AMO /
+  // Chrome Web Store (buttons only render when set). See scripts/EXTENSION-PUBLISHING.md.
+  const STORE_URLS = { firefox: "", chrome: "" };
+  const RELEASE_URL = "https://github.com/RamazanBerk20/mini-downloader/releases/latest";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -43,6 +48,8 @@
   let ncRules = $state("");
   let updateStatus = $state("");
   let update = $state<UpdateInfo | null>(null);
+  let langChoice = $state("system");
+  let defaultSpeedKb = $state(0);
 
   const OC_ACTIONS: [string, MsgKey][] = [
     ["none", "ocNone"],
@@ -57,6 +64,10 @@
     closeToTray = (await api.getSetting("close_to_tray")) !== "false";
     theme = (await api.getSetting("theme")) || "system";
     onComplete = (await api.getSetting("on_complete_action")) || "none";
+    const savedLoc = await api.getSetting("locale");
+    langChoice = savedLoc && savedLoc !== "system" ? savedLoc : "system";
+    const dsl = await api.getSetting("default_speed_limit");
+    defaultSpeedKb = dsl ? Math.round(parseInt(dsl, 10) / 1024) : 0;
     categories = await api.listCategories();
     schedules = await api.listSchedules();
     try {
@@ -159,9 +170,26 @@
     }
   }
   async function onLocaleChange(e: Event) {
-    const code = (e.target as HTMLSelectElement).value as LocaleCode;
-    setLocale(code);
-    await api.setSetting("locale", code);
+    const val = (e.target as HTMLSelectElement).value;
+    langChoice = val;
+    if (val === "system") {
+      setLocale(normalizeLocale(navigator.language));
+      await api.setSetting("locale", "system");
+    } else {
+      setLocale(val as LocaleCode);
+      await api.setSetting("locale", val);
+    }
+  }
+  async function saveDefaultSpeed() {
+    const bytes = Math.max(0, Math.round(defaultSpeedKb)) * 1024;
+    await api.setSetting("default_speed_limit", String(bytes));
+  }
+  async function restoreDefaults() {
+    categories = await api.restoreDefaultCategories();
+  }
+  async function resetFolder(id: number) {
+    await api.resetCategoryDir(id);
+    categories = await api.listCategories();
   }
   async function saveDir(c: Category, e: Event) {
     c.dir = (e.target as HTMLInputElement).value;
@@ -285,7 +313,8 @@
     <h3>{t("sectLanguage")}</h3>
     <div class="srow">
       <span>{t("sectLanguage")}</span>
-      <select value={currentLocale()} onchange={onLocaleChange} aria-label={t("sectLanguage")}>
+      <select value={langChoice} onchange={onLocaleChange} aria-label={t("sectLanguage")}>
+        <option value="system">{t("langSystem")}</option>
         {#each Object.entries(LOCALES) as [code, meta]}<option value={code}>{meta.name}</option>{/each}
       </select>
     </div>
@@ -308,14 +337,25 @@
       <span class="fmt-mono" style="color:var(--muted)">{maxConcurrent}</span>
     </div>
     <input type="range" min="1" max="20" bind:value={maxConcurrent} onchange={onMaxConcurrent} aria-label={t("maxConcurrent")} />
+    <div class="srow">
+      <span>{t("defaultSpeedLimit")}</span>
+      <input type="number" min="0" bind:value={defaultSpeedKb} onchange={saveDefaultSpeed} style="width:110px" aria-label={t("defaultSpeedLimit")} />
+    </div>
     <p class="hint">{t("connHint")}</p>
   </section>
 
   <section class="section">
     <h3>{t("sectBrowser")}</h3>
+    {#if STORE_URLS.firefox || STORE_URLS.chrome}
+      <div class="srow" style="justify-content:flex-start; gap:0.5rem">
+        {#if STORE_URLS.firefox}<button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.firefox)}>{t("getForFirefox")}</button>{/if}
+        {#if STORE_URLS.chrome}<button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.chrome)}>{t("getForChrome")}</button>{/if}
+      </div>
+    {/if}
     <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
     {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
     <p class="hint">{t("browserHint")}</p>
+    <button class="btn btn-ghost" onclick={() => openUrl(RELEASE_URL)}>{t("installGuide")}</button>
   </section>
 
   <section class="section">
@@ -359,6 +399,7 @@
         <strong>{c.name}</strong>
         <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
         <button class="icon-btn" title={t("browseFolder")} aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
+        <button class="icon-btn" title={t("resetFolder")} aria-label="{t('resetFolder')} {c.name}" onclick={() => resetFolder(c.id)}><Icon name="retry" size={16} /></button>
         <button class="icon-btn danger" aria-label="Delete {c.name}" onclick={() => removeCategory(c.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
@@ -369,6 +410,7 @@
       <input bind:value={ncRules} placeholder={t("catRules")} aria-label={t("catRules")} />
       <button class="btn" onclick={addCategory}><Icon name="add" size={16} /> {t("addCategory")}</button>
     </div>
+    <button class="btn btn-ghost" onclick={restoreDefaults}><Icon name="retry" size={16} /> {t("restoreDefaults")}</button>
   </section>
 
   <section class="section">

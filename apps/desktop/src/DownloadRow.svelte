@@ -43,6 +43,24 @@
     } catch {}
   }
 
+  // Per-download speed: presets + a Custom… entry that reveals a KB/s field.
+  let showCustom = $state(false);
+  let customKb = $state("");
+  function onSpeedChange(e: Event) {
+    const v = parseInt((e.currentTarget as HTMLSelectElement).value, 10);
+    if (v === -1) {
+      customKb = String(Math.round((d.speed_limit ?? 0) / 1024));
+      showCustom = true;
+      return;
+    }
+    onact(() => api.setDownloadSpeed(d.id, v));
+  }
+  function applyCustom() {
+    const kb = parseInt(customKb, 10);
+    showCustom = false;
+    if (!Number.isNaN(kb) && kb >= 0) onact(() => api.setDownloadSpeed(d.id, kb * 1024));
+  }
+
   function fileIcon(d: Download): IconName {
     if (d.kind === "video" || d.kind === "hls" || d.kind === "dash") return "video";
     if (d.kind === "magnet" || d.kind === "torrent") return "magnet";
@@ -165,15 +183,29 @@
         </button>
       {/if}
       {#if isRunning && isAria2}
-        <select
-          class="speed-sel"
-          title={t("speedLimit")}
-          aria-label="{t('speedLimit')} {name(d)}"
-          value={d.speed_limit ?? 0}
-          onchange={(e) => onact(() => api.setDownloadSpeed(d.id, parseInt((e.currentTarget as HTMLSelectElement).value, 10)))}
-        >
-          {#each SPEED_PRESETS as v}<option value={v}>{fmtSpeedOpt(v)}</option>{/each}
-        </select>
+        {#if showCustom}
+          <input
+            class="speed-sel"
+            type="number"
+            min="0"
+            placeholder="KB/s"
+            bind:value={customKb}
+            onkeydown={(e) => { if (e.key === "Enter") applyCustom(); }}
+            onblur={applyCustom}
+            aria-label="{t('speedLimit')} {name(d)}"
+          />
+        {:else}
+          <select
+            class="speed-sel"
+            title={t("speedLimit")}
+            aria-label="{t('speedLimit')} {name(d)}"
+            value={d.speed_limit ?? 0}
+            onchange={onSpeedChange}
+          >
+            {#each SPEED_PRESETS as v}<option value={v}>{fmtSpeedOpt(v)}</option>{/each}
+            <option value={-1}>{t("speedCustom")}</option>
+          </select>
+        {/if}
       {/if}
       {#if isRunning}
         <button class="icon-btn" title={t("pause")} aria-label="{t('pause')} {name(d)}" onclick={() => onact(() => api.pause(d.id))}>

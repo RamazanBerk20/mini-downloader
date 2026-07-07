@@ -48,6 +48,7 @@
   });
 
   const completedCount = $derived(all.filter((d) => d.status === "complete").length);
+  const errorCount = $derived(all.filter((d) => d.status === "error").length);
 
   const pageTitle = $derived(
     categoryId !== null
@@ -217,6 +218,7 @@
     if (mod && e.shiftKey && e.key.toLowerCase() === "p") { e.preventDefault(); act(api.pauseAll); return; }
     if (mod && e.shiftKey && e.key.toLowerCase() === "r") { e.preventDefault(); act(api.resumeAll); return; }
     if (inField(e.target)) return;
+    if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); selected = new Set(filtered.map((d) => d.id)); return; }
     if (e.key === "/") { e.preventDefault(); searchEl?.focus(); return; }
     if (e.key === "?") { e.preventDefault(); showHelp = !showHelp; return; }
     if (e.key >= "1" && e.key <= "5") {
@@ -322,6 +324,11 @@
             <Icon name="check" size={15} /> {t("clearCompleted")}
           </button>
         {/if}
+        {#if errorCount > 0}
+          <button class="btn btn-ghost" title="Remove failed downloads from the list" onclick={() => act(api.removeFailed)}>
+            <Icon name="warning" size={15} /> {t("clearFailed")}
+          </button>
+        {/if}
         <button class="icon-btn" title={t("tipAddFile")} aria-label={t("tipAddFile")} onclick={pickFile}>
           <Icon name="file" />
         </button>
@@ -410,6 +417,7 @@
       <span class="k"><kbd>Ctrl</kbd><kbd>N</kbd></span><span class="d">{t("scFocusAdd")}</span>
       <span class="k"><kbd>/</kbd></span><span class="d">{t("scSearch")}</span>
       <span class="k"><kbd>1</kbd>–<kbd>5</kbd></span><span class="d">{t("scFilter")}</span>
+      <span class="k"><kbd>Ctrl</kbd><kbd>A</kbd></span><span class="d">{t("scSelectAll")}</span>
       <span class="k"><kbd>Ctrl</kbd><kbd>,</kbd></span><span class="d">{t("scSettings")}</span>
       <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span><span class="d">{t("scPauseAll")}</span>
       <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>R</kbd></span><span class="d">{t("scResumeAll")}</span>

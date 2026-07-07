@@ -437,6 +437,34 @@ impl Db {
         Ok(())
     }
 
+    /// Re-add any missing built-in categories (the "restore defaults" action).
+    /// Existing categories with the same name are left untouched.
+    pub fn seed_default_categories(&self) -> Result<()> {
+        let conn = self.lock();
+        for (name, dir, rules) in DEFAULT_CATEGORIES {
+            conn.execute(
+                "INSERT OR IGNORE INTO categories (name, dir, rules) VALUES (?1, ?2, ?3)",
+                params![name, dir, rules],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Reset a category's folder to its built-in default marker (no-op if the
+    /// category isn't one of the built-ins).
+    pub fn reset_category_dir(&self, id: i64) -> Result<()> {
+        let conn = self.lock();
+        let name: Option<String> = conn
+            .query_row("SELECT name FROM categories WHERE id=?1", params![id], |r| r.get(0))
+            .optional()?;
+        if let Some(name) = name {
+            if let Some(def) = DEFAULT_CATEGORIES.iter().find(|(n, _, _)| *n == name).map(|(_, d, _)| *d) {
+                conn.execute("UPDATE categories SET dir=?1 WHERE id=?2", params![def, id])?;
+            }
+        }
+        Ok(())
+    }
+
     // ---- schedules ----
 
     pub fn list_schedules(&self) -> Result<Vec<Schedule>> {
