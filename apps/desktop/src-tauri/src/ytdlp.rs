@@ -46,18 +46,6 @@ impl Drop for ProcessGroupKiller {
     }
 }
 
-fn which(name: &str) -> Option<PathBuf> {
-    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    std::env::var_os("PATH")
-        .and_then(|p| std::env::split_paths(&p).map(|d| d.join(&file)).find(|c| c.is_file()))
-}
-
-fn exe_dir_bin(name: &str) -> Option<PathBuf> {
-    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    let cand = std::env::current_exe().ok()?.parent()?.join(file);
-    cand.is_file().then_some(cand)
-}
-
 pub struct YtDlp {
     app: AppHandle,
     db: Db,
@@ -70,14 +58,14 @@ pub struct YtDlp {
 impl YtDlp {
     pub fn resolve(app: AppHandle, db: Db, download_dir: PathBuf) -> Self {
         // Prefer a user-writable yt-dlp copy (self-updatable), then the bundled
-        // sidecar next to the app, then PATH.
+        // sidecar next to the app, then PATH (via the shared resolver).
         let user = minidl_core::paths::bin_dir().join("yt-dlp");
         let ytdlp = if user.is_file() {
             Some(user)
         } else {
-            exe_dir_bin("yt-dlp").or_else(|| which("yt-dlp"))
+            minidl_core::paths::resolve_tool("yt-dlp")
         };
-        let ffmpeg = exe_dir_bin("ffmpeg").or_else(|| which("ffmpeg"));
+        let ffmpeg = minidl_core::paths::resolve_tool("ffmpeg");
         Self {
             app,
             db,
@@ -184,6 +172,10 @@ async fn run(
     // working across resume/restart.
     for h in &headers {
         cmd.arg("--add-header").arg(h);
+    }
+    // Route through the configured proxy, if any (mirrors aria2's all-proxy).
+    if let Some(proxy) = db.get_setting("proxy").ok().flatten().filter(|s| !s.is_empty()) {
+        cmd.arg("--proxy").arg(proxy);
     }
     cmd.arg("--downloader")
         .arg("aria2c")

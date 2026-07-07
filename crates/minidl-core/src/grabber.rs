@@ -13,7 +13,9 @@ pub struct ParsedLink {
 }
 
 fn split_candidates(text: &str) -> impl Iterator<Item = &str> {
-    text.split(|c: char| c.is_whitespace() || "\"'<>()[]{}|`\\".contains(c))
+    // NB: `[]{}` are deliberately NOT delimiters — they carry numeric range
+    // patterns (`img[01-50].jpg`, `z{1..9}.bin`) expanded in `parse_links`.
+    text.split(|c: char| c.is_whitespace() || "\"'<>()|`\\".contains(c))
         .filter(|s| !s.is_empty())
 }
 
@@ -49,14 +51,47 @@ fn classify(token: &str) -> Option<ParsedLink> {
     })
 }
 
-/// Extract + dedup links from a blob of text (list, HTML, prose).
+/// Max URLs a single `[a-b]` / `{a..b}` pattern may expand to (runaway guard).
+const MAX_EXPAND: u64 = 1000;
+
+/// Expand one numeric range pattern in a token: `file[001-050].jpg` or
+/// `file{1..50}.jpg`. Leading zeros in the bound set zero-padding width. A
+/// missing/oversized/invalid pattern yields the token unchanged.
+fn expand_pattern(token: &str) -> Vec<String> {
+    let try_range = |open: char, close: char, sep: &str| -> Option<Vec<String>> {
+        let lo = token.find(open)?;
+        let hi = token[lo..].find(close)? + lo;
+        let inner = &token[lo + 1..hi];
+        let (a, b) = inner.split_once(sep)?;
+        let (start, end) = (a.parse::<u64>().ok()?, b.parse::<u64>().ok()?);
+        let (from, to) = if start <= end { (start, end) } else { (end, start) };
+        if to - from + 1 > MAX_EXPAND {
+            return None;
+        }
+        let pad = if a.starts_with('0') || b.starts_with('0') {
+            a.len().max(b.len())
+        } else {
+            0
+        };
+        let (prefix, suffix) = (&token[..lo], &token[hi + 1..]);
+        Some((from..=to).map(|n| format!("{prefix}{n:0>pad$}{suffix}")).collect())
+    };
+    try_range('[', ']', "-")
+        .or_else(|| try_range('{', '}', ".."))
+        .unwrap_or_else(|| vec![token.to_string()])
+}
+
+/// Extract + dedup links from a blob of text (list, HTML, prose). Numeric range
+/// patterns (`[001-200]`, `{1..50}`) are expanded before classification.
 pub fn parse_links(text: &str) -> Vec<ParsedLink> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for tok in split_candidates(text) {
-        if let Some(link) = classify(tok) {
-            if seen.insert(link.url.clone()) {
-                out.push(link);
+        for expanded in expand_pattern(tok) {
+            if let Some(link) = classify(&expanded) {
+                if seen.insert(link.url.clone()) {
+                    out.push(link);
+                }
             }
         }
     }
@@ -89,5 +124,23 @@ mod tests {
         assert_eq!(torrent.kind, "torrent");
         assert_eq!(links.iter().find(|l| l.kind == "magnet").is_some(), true);
         assert_eq!(host_of("https://example.com/a.zip"), "example.com");
+    }
+
+    #[test]
+    fn expands_numeric_patterns() {
+        let links = parse_links("https://x.com/img[01-03].jpg");
+        let urls: Vec<_> = links.iter().map(|l| l.url.clone()).collect();
+        assert_eq!(links.len(), 3);
+        assert!(urls.contains(&"https://x.com/img01.jpg".to_string()));
+        assert!(urls.contains(&"https://x.com/img03.jpg".to_string()));
+
+        // Brace form, no leading zero → no padding.
+        let l2 = parse_links("http://y/z{8..10}.bin");
+        assert_eq!(l2.len(), 3);
+        assert!(l2.iter().any(|l| l.url == "http://y/z9.bin"));
+
+        // A runaway range is left unexpanded (single literal token, unmatched).
+        let l3 = parse_links("https://x/[1-100000].bin");
+        assert!(l3.iter().all(|l| l.url.contains('[')));
     }
 }

@@ -32,6 +32,35 @@ fn allowed_source_scheme(url: &str) -> bool {
         || u.starts_with("magnet:")
 }
 
+/// True if the URL's host is a loopback/private/link-local literal IP (or
+/// `localhost`) — the SSRF surface an auto-captured job could aim at an intranet
+/// service. Only enforced when the user opts in (LAN/NAS downloads are common).
+fn host_is_private(url: &str) -> bool {
+    use std::net::IpAddr;
+    let host = url
+        .splitn(2, "://")
+        .nth(1)
+        .and_then(|r| r.split(['/', '?', '#']).next())
+        .map(|h| h.rsplit_once(':').map(|(a, _)| a).unwrap_or(h))
+        .unwrap_or("");
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => {
+            v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified()
+        }
+        Ok(IpAddr::V6(v6)) => {
+            v6.is_loopback()
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00 // unique-local
+                || (v6.segments()[0] & 0xffc0) == 0xfe80 // link-local
+        }
+        Err(_) => false,
+    }
+}
+
 /// Free bytes on the filesystem backing `dir`, if determinable.
 #[cfg(unix)]
 fn free_space(dir: &Path) -> Option<u64> {
@@ -123,6 +152,20 @@ pub async fn ingest(
     );
     if fetches_url && !allowed_source_scheme(&target) {
         return Err("unsupported or unsafe URL scheme".to_string());
+    }
+
+    // Opt-in SSRF guard: block private/loopback targets (off by default so LAN
+    // and NAS downloads keep working).
+    if fetches_url && !target.starts_with("magnet:") {
+        let block_private = db
+            .get_setting("block_private_ips")
+            .ok()
+            .flatten()
+            .map(|v| v == "true")
+            .unwrap_or(false);
+        if block_private && host_is_private(&target) {
+            return Err("target host is a private/loopback address (blocked in settings)".to_string());
+        }
     }
 
     // Fail fast when the known content size won't fit (plus a 64 MiB margin),

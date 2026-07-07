@@ -24,5 +24,9 @@ futures-util = "0.3"
 # Embedded SQLite (bundled: no system libsqlite3 dependency).
 rusqlite = { version = "0.32", features = ["bundled"] }
 
+# Landlock confinement for spawned engine children (opt-in, Linux only).
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

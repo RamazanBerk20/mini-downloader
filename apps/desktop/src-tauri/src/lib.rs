@@ -94,11 +94,17 @@ pub fn run() {
                 .flatten()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5);
+            let proxy = db.get_setting("proxy").ok().flatten().filter(|s| !s.is_empty());
+            let dht = db.get_setting("dht_enabled").ok().flatten().map(|v| v != "false").unwrap_or(true);
+            let sandbox = db.get_setting("sandbox_children").ok().flatten().map(|v| v == "true").unwrap_or(false);
             let engine = tauri::async_runtime::block_on(Engine::launch(LaunchOptions {
                 aria2c_path,
                 download_dir: download_dir.clone(),
                 data_dir: data_dir.clone(),
                 max_concurrent,
+                proxy,
+                dht,
+                sandbox,
             }))
             .map_err(|e| e.to_string())?;
             let engine = Arc::new(engine);

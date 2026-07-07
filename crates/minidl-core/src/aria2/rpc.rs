@@ -4,6 +4,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 
 /// Lean key set for the 1 Hz progress poll — numbers only. Deliberately omits
 /// `files`/`bittorrent`, which for a multi-thousand-file torrent would serialize
@@ -43,13 +44,20 @@ pub const STATUS_KEYS: &[&str] = &[
     "infoHash",
 ];
 
-/// HTTP JSON-RPC client bound to one aria2 instance.
-#[derive(Clone)]
-pub struct RpcClient {
+/// Current connection target — swapped atomically when aria2 is restarted on a
+/// fresh port/secret, so every cloned `RpcClient` follows the new instance
+/// without any call site changing.
+struct Target {
     endpoint: String,
     secret: String,
+}
+
+/// HTTP JSON-RPC client bound to one aria2 instance (retargetable).
+#[derive(Clone)]
+pub struct RpcClient {
+    target: Arc<RwLock<Target>>,
     http: reqwest::Client,
-    next_id: std::sync::Arc<AtomicU64>,
+    next_id: Arc<AtomicU64>,
 }
 
 fn keys_value(keys: &[&str]) -> Value {
@@ -67,17 +75,31 @@ impl RpcClient {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
         Self {
-            endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
-            secret: secret.into(),
+            target: Arc::new(RwLock::new(Target {
+                endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
+                secret: secret.into(),
+            })),
             http,
-            next_id: std::sync::Arc::new(AtomicU64::new(1)),
+            next_id: Arc::new(AtomicU64::new(1)),
         }
+    }
+
+    /// Point this client (and all its clones) at a restarted aria2.
+    pub fn retarget(&self, port: u16, secret: impl Into<String>) {
+        let mut t = self.target.write().unwrap_or_else(|e| e.into_inner());
+        t.endpoint = format!("http://127.0.0.1:{port}/jsonrpc");
+        t.secret = secret.into();
     }
 
     /// One JSON-RPC call. `params` are the args *after* the secret token.
     pub async fn call(&self, method: &str, params: Vec<Value>) -> Result<Value> {
+        let (endpoint, secret) = {
+            let t = self.target.read().unwrap_or_else(|e| e.into_inner());
+            (t.endpoint.clone(), t.secret.clone())
+        };
+
         let mut arr = Vec::with_capacity(params.len() + 1);
-        arr.push(json!(format!("token:{}", self.secret)));
+        arr.push(json!(format!("token:{secret}")));
         arr.extend(params);
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
@@ -85,7 +107,7 @@ impl RpcClient {
 
         let resp: Value = self
             .http
-            .post(&self.endpoint)
+            .post(&endpoint)
             .json(&body)
             .send()
             .await

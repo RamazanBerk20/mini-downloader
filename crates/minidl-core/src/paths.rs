@@ -34,6 +34,24 @@ pub fn bin_dir() -> PathBuf {
     data_dir().join("bin")
 }
 
+/// Resolve an external tool (aria2c, yt-dlp, ffmpeg): prefer a bundled sidecar
+/// next to the app executable, else fall back to `PATH`. The single source of
+/// truth for "next to exe, else PATH" (previously duplicated per crate).
+pub fn resolve_tool(name: &str) -> Option<PathBuf> {
+    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let cand = dir.join(&file);
+            if cand.is_file() {
+                return Some(cand);
+            }
+        }
+    }
+    std::env::var_os("PATH").and_then(|paths| {
+        std::env::split_paths(&paths).map(|d| d.join(&file)).find(|c| c.is_file())
+    })
+}
+
 /// Map a standard `~/Folder[/sub]` marker to the *localized* platform directory
 /// when the leading folder is a well-known user dir; otherwise a plain `~`
 /// expansion. Used by category target dirs, which are stored with `~/` markers

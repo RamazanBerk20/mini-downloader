@@ -14,6 +14,27 @@ pub struct LaunchOptions {
     /// App data dir; holds the session + DHT files.
     pub data_dir: PathBuf,
     pub max_concurrent: u32,
+    /// Optional `all-proxy` value (http/https/socks) for aria2.
+    pub proxy: Option<String>,
+    /// BitTorrent DHT / PEX / LPD (announce to the swarm). Off = more private.
+    pub dht: bool,
+    /// Confine the aria2c child to write only under download_dir/data_dir via
+    /// Landlock (Linux ≥5.13; no-op elsewhere). Opt-in.
+    pub sandbox: bool,
+}
+
+impl Default for LaunchOptions {
+    fn default() -> Self {
+        Self {
+            aria2c_path: None,
+            download_dir: PathBuf::new(),
+            data_dir: PathBuf::new(),
+            max_concurrent: 5,
+            proxy: None,
+            dht: true,
+            sandbox: false,
+        }
+    }
 }
 
 /// A running aria2c child plus the connection parameters to reach it.
@@ -38,15 +59,6 @@ fn random_secret() -> Result<String> {
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
-fn resolve_on_path(name: &str) -> Option<PathBuf> {
-    let file = format!("{name}{}", std::env::consts::EXE_SUFFIX);
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|d| d.join(&file))
-            .find(|c| c.is_file())
-    })
-}
-
 impl Aria2Process {
     pub fn spawn(opts: &LaunchOptions) -> Result<Self> {
         let port = free_port()?;
@@ -54,7 +66,7 @@ impl Aria2Process {
         let bin = opts
             .aria2c_path
             .clone()
-            .or_else(|| resolve_on_path("aria2c"))
+            .or_else(|| crate::paths::resolve_tool("aria2c"))
             .ok_or_else(|| anyhow!("aria2c not found (no sidecar and not on PATH)"))?;
 
         std::fs::create_dir_all(&opts.download_dir).ok();
@@ -103,8 +115,8 @@ impl Aria2Process {
         #[cfg(not(unix))]
         let secret_arg = format!("--rpc-secret={secret}");
 
-        let child = Command::new(&bin)
-            .arg("--enable-rpc=true")
+        let mut cmd = Command::new(&bin);
+        cmd.arg("--enable-rpc=true")
             .arg("--rpc-listen-all=false")
             .arg(format!("--rpc-listen-port={port}"))
             .arg(&secret_arg)
@@ -124,7 +136,37 @@ impl Aria2Process {
             .arg(format!("--dht-file-path={}", dht_path.display()))
             .arg("--check-certificate=true")
             // Quieter stdout; RPC is the interface.
-            .arg("--quiet=true")
+            .arg("--quiet=true");
+
+        // BitTorrent swarm participation — DHT/PEX/LPD announce our IP; off is
+        // more private (opt-out for privacy-conscious users).
+        let dht = if opts.dht { "true" } else { "false" };
+        cmd.arg(format!("--enable-dht={dht}"))
+            .arg(format!("--enable-dht6={dht}"))
+            .arg(format!("--bt-enable-lpd={dht}"))
+            .arg(format!("--enable-peer-exchange={dht}"));
+        if let Some(proxy) = opts.proxy.as_deref().filter(|p| !p.is_empty()) {
+            cmd.arg(format!("--all-proxy={proxy}"));
+        }
+
+        // Optional Landlock confinement of the child (Linux ≥ 5.13). Off by
+        // default; when on, the child may write only under download_dir/data_dir/tmp.
+        #[cfg(target_os = "linux")]
+        if opts.sandbox {
+            let write_dirs = vec![
+                opts.download_dir.clone(),
+                opts.data_dir.clone(),
+                std::path::PathBuf::from("/tmp"),
+            ];
+            unsafe {
+                std::os::unix::process::CommandExt::pre_exec(&mut cmd, move || {
+                    crate::aria2::sandbox::restrict(&write_dirs);
+                    Ok(())
+                });
+            }
+        }
+
+        let child = cmd
             .spawn()
             .with_context(|| format!("failed to spawn {}", bin.display()))?;
 
@@ -137,7 +179,12 @@ impl Aria2Process {
     }
 
     pub fn resolve_aria2c(explicit: &Option<PathBuf>) -> Option<PathBuf> {
-        explicit.clone().or_else(|| resolve_on_path("aria2c"))
+        explicit.clone().or_else(|| crate::paths::resolve_tool("aria2c"))
+    }
+
+    /// True once the child has exited — the watchdog's restart trigger.
+    pub fn has_exited(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
     }
 
     pub fn data_session_path(data_dir: &Path) -> PathBuf {
