@@ -57,3 +57,20 @@ export const api = {
 export function on<T>(event: string, cb: (payload: T) => void): Promise<UnlistenFn> {
   return listen<T>(event, (e) => cb(e.payload));
 }
+
+/** Extract a human string from a rejected invoke error. Commands now reject with
+ *  a typed `{ kind, message }`; fall back to String() for plain errors. */
+export function errText(e: unknown): string {
+  if (e && typeof e === "object" && "message" in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return String(e);
+}
+
+/** The `kind` tag of a typed command error, if present (e.g. "yt-dlp-missing"). */
+export function errKind(e: unknown): string | null {
+  if (e && typeof e === "object" && "kind" in e) {
+    return String((e as { kind: unknown }).kind);
+  }
+  return null;
+}

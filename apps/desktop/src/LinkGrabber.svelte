@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "./api";
+  import { api, errText } from "./api";
   import { t } from "./lib/i18n.svelte";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
@@ -18,7 +18,7 @@
       links = await api.grabLinks(text);
       checked = new Set(links.map((l) => l.url));
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
   function toggle(u: string) {
@@ -33,7 +33,7 @@
       await api.addLinksBatch(urls);
       onclose();
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 </script>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "./api";
+  import { api, errText } from "./api";
   import { t } from "./lib/i18n.svelte";
   import { trapFocus } from "./lib/a11y";
   import Icon from "./lib/Icon.svelte";
@@ -22,7 +22,7 @@
     try {
       info = await api.probeMedia(u);
     } catch (err) {
-      error = String(err);
+      error = errText(err);
     }
     loading = false;
   }
@@ -32,7 +32,7 @@
       await api.addMedia(url.trim(), fmt);
       onclose();
     } catch (err) {
-      error = String(err);
+      error = errText(err);
     }
   }
 

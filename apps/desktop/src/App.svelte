@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { api, on } from "./api";
+  import { api, on, errText } from "./api";
   import { announce, trapFocus } from "./lib/a11y";
   import type { Category, Download, Tick } from "./types";
   import Sidebar from "./Sidebar.svelte";
@@ -64,7 +64,7 @@
     try {
       all = await api.list();
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 
@@ -203,7 +203,7 @@
       announce("Download added");
       await refresh();
     } catch (err) {
-      error = String(err);
+      error = errText(err);
     }
   }
 
@@ -219,7 +219,7 @@
       else await api.addMetalinkFile(path);
       await refresh();
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 
@@ -231,7 +231,7 @@
       await api.add(u);
       await refresh();
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 
@@ -240,7 +240,7 @@
     try {
       await api.setGlobalSpeed(parseInt(v, 10), 0);
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 
@@ -249,7 +249,7 @@
       await fn();
       await refresh();
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 
@@ -259,7 +259,7 @@
       const msg = await api.installBrowser();
       announce(msg);
     } catch (e) {
-      error = String(e);
+      error = errText(e);
     }
   }
 </script>

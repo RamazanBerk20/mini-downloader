@@ -11,12 +11,13 @@ use minidl_core::ipc::{CaptureJob, DownloadKind};
 use minidl_core::model::{Category, Download, DownloadStatus, NewDownload, Schedule};
 use minidl_core::ytdlp::MediaInfo;
 
+use crate::errors::CommandError;
 use crate::events::EV_STATE;
 use crate::ingest::{ingest, job_from_url};
 use crate::state::AppState;
 
-fn err<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
+fn err<E: std::fmt::Display>(e: E) -> CommandError {
+    CommandError::from(e.to_string())
 }
 
 fn base_name(path: &str) -> String {
@@ -28,7 +29,7 @@ fn base_name(path: &str) -> String {
 }
 
 #[tauri::command]
-pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Download, String> {
+pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Download, CommandError> {
     let url = url.trim().to_string();
     if url.is_empty() {
         return Err("empty URL".into());
@@ -48,19 +49,19 @@ pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Dow
         .db
         .get(id)
         .map_err(err)?
-        .ok_or_else(|| "download vanished after insert".to_string())
+        .ok_or_else(|| err("download vanished after insert"))
 }
 
 #[tauri::command]
 pub async fn list_downloads(
     status: Option<String>,
     state: State<'_, AppState>,
-) -> Result<Vec<Download>, String> {
+) -> Result<Vec<Download>, CommandError> {
     state.db.list(status.as_deref()).map_err(err)
 }
 
 #[tauri::command]
-pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         if d.is_ytdlp() {
             // yt-dlp download: stop the process (resume restarts it).
@@ -74,7 +75,7 @@ pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), S
 }
 
 #[tauri::command]
-pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         if d.is_ytdlp() {
             // Replay auth + the originally chosen format so quality is stable.
@@ -98,7 +99,7 @@ pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), 
 /// Retry a failed/stalled download in place (same row), re-issuing with the
 /// original auth + kind instead of degrading to a bare URL.
 #[tauri::command]
-pub async fn retry_download(id: i64, state: State<'_, AppState>) -> Result<Download, String> {
+pub async fn retry_download(id: i64, state: State<'_, AppState>) -> Result<Download, CommandError> {
     let row = state.db.get(id).map_err(err)?.ok_or("download not found")?;
     if let Some(gid) = &row.gid {
         let _ = state.engine.rpc.remove(gid).await;
@@ -122,7 +123,7 @@ pub async fn remove_download(
     id: i64,
     delete_files: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         state.ytdlp.cancel(id); // no-op for aria2 downloads
         // Capture the file list *before* removing the download result (aria2
@@ -172,7 +173,7 @@ pub async fn remove_download(
 
 /// Remove every completed download from the list (keeps the files on disk).
 #[tauri::command]
-pub async fn remove_completed(state: State<'_, AppState>) -> Result<usize, String> {
+pub async fn remove_completed(state: State<'_, AppState>) -> Result<usize, CommandError> {
     let rows = state.db.list(Some("complete")).map_err(err)?;
     let mut removed = 0;
     for d in rows {
@@ -187,18 +188,18 @@ pub async fn remove_completed(state: State<'_, AppState>) -> Result<usize, Strin
 }
 
 #[tauri::command]
-pub async fn pause_all(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn pause_all(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.engine.rpc.pause_all().await.map_err(err).map(|_| ())
 }
 
 #[tauri::command]
-pub async fn resume_all(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn resume_all(state: State<'_, AppState>) -> Result<(), CommandError> {
     state.engine.rpc.unpause_all().await.map_err(err).map(|_| ())
 }
 
 /// Global speed caps in bytes/sec (0 = unlimited).
 #[tauri::command]
-pub async fn set_global_speed(down: i64, up: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_global_speed(down: i64, up: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     let opts = json!({
         "max-overall-download-limit": down.to_string(),
         "max-overall-upload-limit": up.to_string(),
@@ -207,7 +208,7 @@ pub async fn set_global_speed(down: i64, up: i64, state: State<'_, AppState>) ->
 }
 
 #[tauri::command]
-pub async fn set_download_speed(id: i64, limit: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_download_speed(id: i64, limit: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     // Persist so the cap is re-applied on resume/reissue, then apply live.
     state.db.set_speed_limit(id, if limit > 0 { Some(limit) } else { None }).map_err(err)?;
     if let Some(d) = state.db.get(id).map_err(err)? {
@@ -221,7 +222,7 @@ pub async fn set_download_speed(id: i64, limit: i64, state: State<'_, AppState>)
 
 /// Reorder a waiting download in the aria2 queue: "top" | "up" | "down" | "bottom".
 #[tauri::command]
-pub async fn move_in_queue(id: i64, direction: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn move_in_queue(id: i64, direction: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         if let Some(gid) = d.gid {
             let (pos, how) = match direction.as_str() {
@@ -239,7 +240,7 @@ pub async fn move_in_queue(id: i64, direction: String, state: State<'_, AppState
 
 /// Max simultaneous downloads (persisted; applied live + read on next launch).
 #[tauri::command]
-pub async fn set_max_concurrent(n: u32, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_max_concurrent(n: u32, state: State<'_, AppState>) -> Result<(), CommandError> {
     let n = n.clamp(1, 20);
     state.db.set_setting("max_concurrent", &n.to_string()).map_err(err)?;
     let _ = state
@@ -251,7 +252,7 @@ pub async fn set_max_concurrent(n: u32, state: State<'_, AppState>) -> Result<()
 }
 
 #[tauri::command]
-pub async fn get_max_concurrent(state: State<'_, AppState>) -> Result<u32, String> {
+pub async fn get_max_concurrent(state: State<'_, AppState>) -> Result<u32, CommandError> {
     Ok(state
         .db
         .get_setting("max_concurrent")
@@ -265,7 +266,7 @@ pub async fn open_containing_folder(
     id: i64,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     use tauri_plugin_opener::OpenerExt;
     if let Some(d) = state.db.get(id).map_err(err)? {
         app.opener().open_path(d.dir, None::<&str>).map_err(err)?;
@@ -276,16 +277,17 @@ pub async fn open_containing_folder(
 /// Install the native-messaging host manifest for every detected browser
 /// (Firefox family + Chromium family). Returns a summary.
 #[tauri::command]
-pub async fn install_browser_integration() -> Result<String, String> {
+pub async fn install_browser_integration() -> Result<String, CommandError> {
     crate::nativehost::install_browser_integration()
         .map(|paths| format!("Installed {} manifest(s):\n{}", paths.len(), paths.join("\n")))
+        .map_err(err)
 }
 
 async fn add_file_job(
     path: String,
     kind: DownloadKind,
     state: &State<'_, AppState>,
-) -> Result<Download, String> {
+) -> Result<Download, CommandError> {
     let bytes = std::fs::read(&path).map_err(err)?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     let name = base_name(&path);
@@ -314,13 +316,13 @@ async fn add_file_job(
         None,
     )
     .await?;
-    state.db.get(id).map_err(err)?.ok_or_else(|| "download vanished".to_string())
+    state.db.get(id).map_err(err)?.ok_or_else(|| err("download vanished"))
 }
 
 /// Probe a page/URL for downloadable video formats (yt-dlp).
 #[tauri::command]
-pub async fn probe_media(url: String, state: State<'_, AppState>) -> Result<MediaInfo, String> {
-    state.ytdlp.probe(&url, &[]).await
+pub async fn probe_media(url: String, state: State<'_, AppState>) -> Result<MediaInfo, CommandError> {
+    state.ytdlp.probe(&url, &[]).await.map_err(err)
 }
 
 /// Start a yt-dlp download of a chosen format (or best when None). Persists the
@@ -330,7 +332,7 @@ pub async fn add_media_download(
     url: String,
     format_id: Option<String>,
     state: State<'_, AppState>,
-) -> Result<Download, String> {
+) -> Result<Download, CommandError> {
     let dir = state.download_dir.to_string_lossy().to_string();
     let id = state
         .db
@@ -344,21 +346,21 @@ pub async fn add_media_download(
         .map_err(err)?;
     state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
     state.ytdlp.start(id, url, format_id, vec![]);
-    state.db.get(id).map_err(err)?.ok_or_else(|| "download vanished".to_string())
+    state.db.get(id).map_err(err)?.ok_or_else(|| err("download vanished"))
 }
 
 #[tauri::command]
-pub async fn add_torrent_file(path: String, state: State<'_, AppState>) -> Result<Download, String> {
+pub async fn add_torrent_file(path: String, state: State<'_, AppState>) -> Result<Download, CommandError> {
     add_file_job(path, DownloadKind::Torrent, &state).await
 }
 
 #[tauri::command]
-pub async fn add_metalink_file(path: String, state: State<'_, AppState>) -> Result<Download, String> {
+pub async fn add_metalink_file(path: String, state: State<'_, AppState>) -> Result<Download, CommandError> {
     add_file_job(path, DownloadKind::Metalink, &state).await
 }
 
 #[tauri::command]
-pub async fn list_categories(state: State<'_, AppState>) -> Result<Vec<Category>, String> {
+pub async fn list_categories(state: State<'_, AppState>) -> Result<Vec<Category>, CommandError> {
     state.db.list_categories().map_err(err)
 }
 
@@ -369,29 +371,29 @@ pub async fn save_category(
     rules: String,
     priority: i64,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     state.db.upsert_category(&name, &dir, &rules, priority).map_err(err).map(|_| ())
 }
 
 #[tauri::command]
-pub async fn delete_category(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn delete_category(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.db.delete_category(id).map_err(err)
 }
 
 #[tauri::command]
-pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Option<String>, String> {
+pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Option<String>, CommandError> {
     state.db.get_setting(&key).map_err(err)
 }
 
 #[tauri::command]
-pub async fn set_setting(key: String, value: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_setting(key: String, value: String, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.db.set_setting(&key, &value).map_err(err)
 }
 
 // ---- link grabber ----
 
 #[tauri::command]
-pub async fn grab_links(text: String) -> Result<Vec<ParsedLink>, String> {
+pub async fn grab_links(text: String) -> Result<Vec<ParsedLink>, CommandError> {
     Ok(minidl_core::grabber::parse_links(&text))
 }
 
@@ -400,7 +402,7 @@ pub async fn add_links_batch(
     urls: Vec<String>,
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<usize, String> {
+) -> Result<usize, CommandError> {
     let mut added = 0;
     let defaults = state.defaults.lock().unwrap().clone();
     for u in urls {
@@ -430,7 +432,7 @@ pub async fn add_links_batch(
 // ---- scheduler ----
 
 #[tauri::command]
-pub async fn list_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, String> {
+pub async fn list_schedules(state: State<'_, AppState>) -> Result<Vec<Schedule>, CommandError> {
     state.db.list_schedules().map_err(err)
 }
 
@@ -445,7 +447,7 @@ pub async fn save_schedule(
     speed_limit: Option<i64>,
     enabled: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     state
         .db
         .save_schedule(id, name.as_deref(), &action, days_mask, at_minute, speed_limit, enabled)
@@ -454,14 +456,14 @@ pub async fn save_schedule(
 }
 
 #[tauri::command]
-pub async fn delete_schedule(id: i64, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn delete_schedule(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.db.delete_schedule(id).map_err(err)
 }
 
 // ---- clipboard ----
 
 #[tauri::command]
-pub async fn set_clipboard_watch(enabled: bool, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn set_clipboard_watch(enabled: bool, state: State<'_, AppState>) -> Result<(), CommandError> {
     state.clipboard_on.store(enabled, Ordering::Relaxed);
     state
         .db
@@ -473,7 +475,7 @@ pub async fn set_clipboard_watch(enabled: bool, state: State<'_, AppState>) -> R
 
 /// Returns `[split, connections]`.
 #[tauri::command]
-pub async fn get_engine_defaults(state: State<'_, AppState>) -> Result<(u32, u32), String> {
+pub async fn get_engine_defaults(state: State<'_, AppState>) -> Result<(u32, u32), CommandError> {
     let d = state.defaults.lock().unwrap();
     Ok((d.split, d.max_connection_per_server))
 }
@@ -483,7 +485,7 @@ pub async fn set_engine_defaults(
     split: u32,
     connections: u32,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     let split = split.clamp(1, 64);
     let connections = connections.clamp(1, 16);
     {

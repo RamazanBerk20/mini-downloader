@@ -1,5 +1,6 @@
 mod clipboard;
 mod commands;
+mod errors;
 mod events;
 mod ingest;
 mod nativehost;

@@ -3,7 +3,7 @@
   import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { open } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { api } from "./api";
+  import { api, errText } from "./api";
 
   const SPONSOR_URL = "https://github.com/sponsors/RamazanBerk20";
   import { trapFocus } from "./lib/a11y";
@@ -110,7 +110,7 @@
     try {
       await api.setEngineDefaults(split, connections);
     } catch (e) {
-      browserStatus = "Engine error: " + String(e);
+      browserStatus = "Engine error: " + errText(e);
     }
   }
 
@@ -134,7 +134,7 @@
       if (autostart) await enable();
       else await disable();
     } catch (err) {
-      browserStatus = "Autostart error: " + String(err);
+      browserStatus = "Autostart error: " + errText(err);
     }
   }
   async function onLocaleChange(e: Event) {
@@ -158,7 +158,7 @@
     try {
       browserStatus = "Installed: " + (await api.installBrowser());
     } catch (e) {
-      browserStatus = "Error: " + String(e);
+      browserStatus = "Error: " + errText(e);
     }
   }
 
@@ -198,7 +198,7 @@
       schedError = "";
       schedules = await api.listSchedules();
     } catch (e) {
-      schedError = String(e);
+      schedError = errText(e);
     }
   }
   async function removeSchedule(id: number) {
