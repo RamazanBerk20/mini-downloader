@@ -2314,7 +2314,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minidl-core"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -2333,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-desktop"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2360,7 +2360,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-ipc"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "dirs 5.0.1",
  "interprocess",
@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-native-host"
-version = "1.1.1"
+version = "1.2.0"
 dependencies = [
  "interprocess",
  "minidl-ipc",
