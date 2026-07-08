@@ -1,23 +1,92 @@
 {
-  "extName": { "message": "Connecteur Mini Downloader" },
-  "extDescription": { "message": "Interceptez les téléchargements dans votre navigateur et transmettez-les à Mini Downloader." },
-  "actionTitle": { "message": "Télécharger avec Mini Downloader" },
-  "popupCatchDownloads": { "message": "Intercepter les téléchargements" },
-  "popupOptions": { "message": "Options" },
-  "popupMediaOnPage": { "message": "Médias sur cette page" },
-  "popupGrabPageVideo": { "message": "Récupérer la vidéo de la page" },
-  "popupNoMedia": { "message": "Aucun média détecté." },
-  "popupGrab": { "message": "Récupérer" },
-  "popupSent": { "message": "Envoyé" },
-  "optionsTitle": { "message": "Options du connecteur Mini Downloader" },
-  "optionsMinSize": { "message": "Taille de fichier minimale à intercepter (octets)" },
-  "optionsMinSizeHint": { "message": "Les téléchargements plus petits sont laissés à votre navigateur. Par défaut 1048576 (1 Mio)." },
-  "optionsDisabledHosts": { "message": "Sites désactivés (un nom d'hôte par ligne)" },
-  "optionsSave": { "message": "Enregistrer" },
-  "optionsSaved": { "message": "Enregistré" },
-  "notifySentTitle": { "message": "Envoyé à Mini Downloader" },
-  "notifyRejectedTitle": { "message": "Mini Downloader a refusé le téléchargement" },
-  "notifyUnknownError": { "message": "erreur inconnue" },
-  "notifyNotReachableTitle": { "message": "Mini Downloader injoignable" },
-  "notifyNotReachableBody": { "message": "Ouvrez Mini Downloader et activez l'intégration au navigateur." }
+  "extName": {
+    "message": "Connecteur Mini Downloader"
+  },
+  "extDescription": {
+    "message": "Interceptez les téléchargements dans votre navigateur et transmettez-les à Mini Downloader."
+  },
+  "actionTitle": {
+    "message": "Télécharger avec Mini Downloader"
+  },
+  "popupCatchDownloads": {
+    "message": "Intercepter les téléchargements"
+  },
+  "popupOptions": {
+    "message": "Options"
+  },
+  "popupMediaOnPage": {
+    "message": "Médias sur cette page"
+  },
+  "popupGrabPageVideo": {
+    "message": "Récupérer la vidéo de la page"
+  },
+  "popupNoMedia": {
+    "message": "Aucun média détecté."
+  },
+  "popupGrab": {
+    "message": "Récupérer"
+  },
+  "popupSent": {
+    "message": "Envoyé"
+  },
+  "optionsTitle": {
+    "message": "Options du connecteur Mini Downloader"
+  },
+  "optionsMinSize": {
+    "message": "Taille de fichier minimale à intercepter (octets)"
+  },
+  "optionsMinSizeHint": {
+    "message": "Les téléchargements plus petits sont laissés à votre navigateur. Par défaut 1048576 (1 Mio)."
+  },
+  "optionsDisabledHosts": {
+    "message": "Sites désactivés (un nom d'hôte par ligne)"
+  },
+  "optionsSave": {
+    "message": "Enregistrer"
+  },
+  "optionsSaved": {
+    "message": "Enregistré"
+  },
+  "optionsTestConnection": {
+    "message": "Tester la connexion à l’application"
+  },
+  "optionsTestOk": {
+    "message": "Connecté"
+  },
+  "optionsTestNoResponse": {
+    "message": "Aucune réponse"
+  },
+  "optionsTestFail": {
+    "message": "Injoignable — Mini Downloader est-il installé et lancé ?"
+  },
+  "notifySentTitle": {
+    "message": "Envoyé à Mini Downloader"
+  },
+  "notifyRejectedTitle": {
+    "message": "Mini Downloader a refusé le téléchargement"
+  },
+  "notifyUnknownError": {
+    "message": "erreur inconnue"
+  },
+  "notifyNotReachableTitle": {
+    "message": "Mini Downloader injoignable"
+  },
+  "notifyNotReachableBody": {
+    "message": "Ouvrez Mini Downloader et activez l'intégration au navigateur."
+  },
+  "optionsLanguage": {
+    "message": "Langue"
+  },
+  "optionsLangBrowser": {
+    "message": "Par défaut du navigateur"
+  },
+  "optionsBlacklist": {
+    "message": "Types de fichiers ignorés (séparés par des virgules)"
+  },
+  "optionsBlacklistHint": {
+    "message": "Les téléchargements de ces types restent dans le navigateur."
+  },
+  "optionsMagnetSkip": {
+    "message": "Laisser les liens magnet au système"
+  }
 }

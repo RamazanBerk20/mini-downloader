@@ -9,6 +9,13 @@ import "./app.css";
 // preference loads. setLocale() is reactive, so a later change re-renders.
 setLocale(normalizeLocale(navigator.language));
 
+// Apply the last-known theme override synchronously (localStorage mirror of the
+// DB setting) so the first paint doesn't flash the OS theme.
+try {
+  const cached = localStorage.getItem("theme");
+  if (cached === "light" || cached === "dark") document.documentElement.dataset.theme = cached;
+} catch {}
+
 const app = mount(App, {
   target: document.getElementById("app")!,
 });
@@ -26,6 +33,10 @@ api
   .getSetting("theme")
   .then((v) => {
     if (v === "light" || v === "dark") document.documentElement.dataset.theme = v;
+    else delete document.documentElement.dataset.theme;
+    try {
+      localStorage.setItem("theme", v || "system");
+    } catch {}
   })
   .catch(() => {});
 

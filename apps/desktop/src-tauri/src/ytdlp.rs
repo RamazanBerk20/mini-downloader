@@ -8,16 +8,44 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::{async_runtime::JoinHandle, AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 
 use minidl_core::db::Db;
 use minidl_core::model::DownloadStatus;
 use minidl_core::ytdlp::MediaInfo;
 
 use crate::events::{EV_COMPLETE, EV_ERROR, EV_STATE, EV_TICK};
+
+/// Optional yt-dlp behaviors chosen per download (persisted as JSON in
+/// `downloads.media_opts` so pause→resume and retry replay them).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MediaOpts {
+    pub write_subs: bool,
+    /// Comma-separated `--sub-langs` value; empty means "en".
+    pub sub_langs: String,
+    pub embed_subs: bool,
+    /// Download best audio and extract to `audio_format` (needs ffmpeg).
+    pub audio_only: bool,
+    /// `mp3` | `m4a` | `opus`; empty lets yt-dlp pick.
+    pub audio_format: String,
+    pub embed_thumbnail: bool,
+}
+
+impl MediaOpts {
+    pub fn from_row(media_opts: Option<&str>) -> Option<Self> {
+        media_opts.and_then(|s| serde_json::from_str(s).ok())
+    }
+
+    pub fn to_json(&self) -> Option<String> {
+        serde_json::to_string(self).ok()
+    }
+}
 
 /// RAII guard that kills the yt-dlp process group on drop. Aborting the driver
 /// task unwinds its stack, dropping this guard, so a cancelled download takes its
@@ -53,6 +81,10 @@ pub struct YtDlp {
     ytdlp: Option<PathBuf>,
     ffmpeg: Option<PathBuf>,
     running: Arc<Mutex<HashMap<i64, JoinHandle<()>>>>,
+    /// Caps concurrent yt-dlp processes (a playlist batch must not fork one
+    /// process per entry). Sized from the `max_concurrent` setting at startup;
+    /// live changes to that setting apply to yt-dlp on the next launch.
+    slots: Arc<Semaphore>,
 }
 
 impl YtDlp {
@@ -66,6 +98,13 @@ impl YtDlp {
             minidl_core::paths::resolve_tool("yt-dlp")
         };
         let ffmpeg = minidl_core::paths::resolve_tool("ffmpeg");
+        let max = db
+            .get_setting("max_concurrent")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(5)
+            .clamp(1, 20);
         Self {
             app,
             db,
@@ -73,6 +112,7 @@ impl YtDlp {
             ytdlp,
             ffmpeg,
             running: Arc::new(Mutex::new(HashMap::new())),
+            slots: Arc::new(Semaphore::new(max)),
         }
     }
 
@@ -81,15 +121,23 @@ impl YtDlp {
         self.ytdlp.is_some()
     }
 
-    pub async fn probe(&self, url: &str, headers: &[String]) -> Result<MediaInfo, String> {
+    pub async fn probe(&self, url: &str, headers: &[String], playlist: bool) -> Result<MediaInfo, String> {
         let bin = self.ytdlp.clone().ok_or("yt-dlp not found")?;
-        minidl_core::ytdlp::probe(&bin, url, headers).await.map_err(|e| e.to_string())
+        minidl_core::ytdlp::probe(&bin, url, headers, playlist).await.map_err(|e| e.to_string())
     }
 
     /// Start a download for an existing DB row. `headers` are `"Name: value"`
     /// replay lines (cookies/UA/referer) so authed streams keep working across
-    /// resume/restart; `format_id` pins the chosen quality.
-    pub fn start(&self, id: i64, url: String, format_id: Option<String>, headers: Vec<String>) {
+    /// resume/restart; `format_id` pins the chosen quality; `media_opts` carries
+    /// subtitle/audio-extract/thumbnail choices.
+    pub fn start(
+        &self,
+        id: i64,
+        url: String,
+        format_id: Option<String>,
+        headers: Vec<String>,
+        media_opts: Option<MediaOpts>,
+    ) {
         let Some(bin) = self.ytdlp.clone() else {
             let _ = self.db.set_error(id, None, Some("yt-dlp not available"));
             let _ = self.app.emit(EV_ERROR, json!({ "id": id, "message": "yt-dlp not available" }));
@@ -101,6 +149,7 @@ impl YtDlp {
         let dir = self.download_dir.clone();
         let ffmpeg = self.ffmpeg.clone();
         let running = self.running.clone();
+        let slots = self.slots.clone();
         // Hold the lock across abort-old + spawn + insert. This (a) aborts any
         // task already running for this id — double-clicking Resume must not
         // launch two yt-dlp/aria2c processes on the same output file — and (b)
@@ -111,7 +160,41 @@ impl YtDlp {
             old.abort();
         }
         let jh = tauri::async_runtime::spawn(async move {
-            run(app, db, running.clone(), bin, ffmpeg, dir, id, url, format_id, headers).await;
+            // Queue behind the concurrency cap. Aborting a waiting task (pause/
+            // cancel) simply drops the acquire future — no permit leaks.
+            if slots.available_permits() == 0 {
+                let _ = db.set_status(id, DownloadStatus::Waiting);
+                let _ = app.emit(EV_STATE, json!({ "id": id, "status": "waiting" }));
+            }
+            let _permit = match slots.acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => return, // semaphore closed = app shutting down
+            };
+            // The row may have been paused/scheduled/removed while this task
+            // queued on the semaphore. cancel() removes the handle before
+            // aborting, and abort only lands at an await point — so re-check
+            // both the handle map and the DB status before going Active.
+            if !running.lock().unwrap().contains_key(&id) {
+                return;
+            }
+            let startable = db
+                .get(id)
+                .ok()
+                .flatten()
+                .map(|d| {
+                    matches!(
+                        d.status,
+                        DownloadStatus::Active | DownloadStatus::Waiting | DownloadStatus::Queued
+                    )
+                })
+                .unwrap_or(false);
+            if !startable {
+                running.lock().unwrap().remove(&id);
+                return;
+            }
+            let _ = db.set_status(id, DownloadStatus::Active);
+            let _ = app.emit(EV_STATE, json!({ "id": id, "status": "active" }));
+            run(app, db, running.clone(), bin, ffmpeg, dir, id, url, format_id, headers, media_opts).await;
         });
         guard.insert(id, jh);
     }
@@ -148,10 +231,12 @@ async fn run(
     url: String,
     format_id: Option<String>,
     headers: Vec<String>,
+    media_opts: Option<MediaOpts>,
 ) {
     let name_file = std::env::temp_dir().join(format!("minidl-ytdlp-{id}.name"));
     let _ = std::fs::remove_file(&name_file);
     let out_tmpl = format!("{}/%(title)s.%(ext)s", dir.display());
+    let opts = media_opts.unwrap_or_default();
 
     let mut cmd = Command::new(&bin);
     cmd.arg("--newline")
@@ -162,9 +247,33 @@ async fn run(
         .arg("after_move:filepath")
         .arg(&name_file)
         .arg("-o")
-        .arg(&out_tmpl)
-        .arg("-f")
-        .arg(format_id.unwrap_or_else(|| "bv*+ba/b".into()));
+        .arg(&out_tmpl);
+    if opts.audio_only {
+        cmd.arg("-f").arg("ba/b");
+        // Extraction is an ffmpeg post-processing step — without ffmpeg fall
+        // back to downloading the native audio stream as-is.
+        if ffmpeg.is_some() {
+            cmd.arg("-x");
+            if !opts.audio_format.is_empty() {
+                cmd.arg("--audio-format").arg(&opts.audio_format);
+            }
+        }
+    } else {
+        cmd.arg("-f").arg(format_id.unwrap_or_else(|| "bv*+ba/b".into()));
+    }
+    if opts.write_subs || opts.embed_subs {
+        cmd.arg("--write-subs").arg("--sub-langs").arg(if opts.sub_langs.is_empty() {
+            "en"
+        } else {
+            &opts.sub_langs
+        });
+        if opts.embed_subs && ffmpeg.is_some() {
+            cmd.arg("--embed-subs");
+        }
+    }
+    if opts.embed_thumbnail && ffmpeg.is_some() {
+        cmd.arg("--embed-thumbnail");
+    }
     if let Some(ff) = &ffmpeg {
         cmd.arg("--ffmpeg-location").arg(ff);
     }

@@ -7,11 +7,14 @@ use std::time::Duration;
 
 use chrono::{Datelike, Timelike};
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use minidl_core::aria2::Engine;
 use minidl_core::db::Db;
 use minidl_core::model::Schedule;
+
+use crate::events::EV_STATE;
+use crate::state::AppState;
 
 pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
     tauri::async_runtime::spawn(async move {
@@ -59,6 +62,27 @@ pub fn spawn(app: AppHandle, engine: Arc<Engine>, db: Db) {
             fired.retain(|_, d| *d == epoch_day);
             last_min = now_min;
             last_day = epoch_day;
+
+            // Per-download scheduled starts: `start_at <= now` fires even after
+            // a long suspend. Clear start_at first so a failing resume doesn't
+            // re-fire every tick.
+            let due = db.due_scheduled(minidl_core::model::now()).unwrap_or_default();
+            if !due.is_empty() {
+                if let Some(state) = app.try_state::<AppState>() {
+                    for row in due {
+                        let _ = db.set_start_at(row.id, None);
+                        match crate::commands::resume_row(&state, row.id).await {
+                            Ok(()) => {
+                                let _ = app.emit(EV_STATE, json!({ "id": row.id, "status": "active" }));
+                            }
+                            Err(e) => {
+                                let _ = db.set_error(row.id, None, Some(&e.to_string()));
+                                let _ = app.emit(EV_STATE, json!({ "id": row.id, "status": "error" }));
+                            }
+                        }
+                    }
+                }
+            }
         }
     });
 }

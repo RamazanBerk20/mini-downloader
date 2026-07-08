@@ -87,6 +87,14 @@ pub struct CaptureJob {
     /// base64 payload for `.torrent` / `.meta4` kinds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub torrent_b64: Option<String>,
+    /// Bulk-capture grouping: jobs sharing a `batch_id` land in one package on
+    /// the app side. Optional and additive — absent for single captures and on
+    /// older extensions, so this is not a protocol break.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<String>,
+    /// Human-readable name for the batch's package (page title or host).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_name: Option<String>,
 }
 
 fn default_kind() -> DownloadKind {
@@ -154,6 +162,8 @@ impl BridgeRequest {
                 page_url: None,
                 cookie_store_id: None,
                 torrent_b64: None,
+                batch_id: None,
+                batch_name: None,
             },
         }
     }
@@ -249,6 +259,8 @@ mod tests {
             page_url: None,
             cookie_store_id: None,
             torrent_b64: None,
+            batch_id: None,
+            batch_name: None,
         };
         assert_eq!(
             job.header_lines(),

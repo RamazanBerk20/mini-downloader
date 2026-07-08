@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use crate::model::{now, Category, Download, DownloadStatus, NewDownload, Schedule};
+use crate::model::{now, Category, Download, DownloadStatus, NewDownload, Package, Schedule};
 
 #[derive(Clone)]
 pub struct Db {
@@ -97,6 +97,18 @@ ALTER TABLE downloads ADD COLUMN format_id     TEXT;
 ALTER TABLE downloads ADD COLUMN speed_limit   INTEGER;
 "#;
 
+/// v3: package grouping surfaced (index; the table itself is v1), category
+/// mime/host rules (`mime`), aria2 checksum verification (`checksum`, stored as
+/// `sha-256=<hex>`), per-download scheduling (`start_at`, unix secs), and yt-dlp
+/// media options (`media_opts`, JSON).
+const MIGRATION_3: &str = r#"
+ALTER TABLE downloads ADD COLUMN mime       TEXT;
+ALTER TABLE downloads ADD COLUMN checksum   TEXT;
+ALTER TABLE downloads ADD COLUMN start_at   INTEGER;
+ALTER TABLE downloads ADD COLUMN media_opts TEXT;
+CREATE INDEX idx_downloads_package ON downloads(package_id);
+"#;
+
 /// Default categories seeded on first run. Dirs are `~`-relative markers the app
 /// resolves at runtime.
 const DEFAULT_CATEGORIES: &[(&str, &str, &str)] = &[
@@ -111,7 +123,8 @@ const DEFAULT_CATEGORIES: &[(&str, &str, &str)] = &[
 const COLS: &str = "id, gid, url, filename, dir, status, kind, total_bytes, completed_bytes, \
     download_speed, upload_speed, connections, num_seeders, referrer, info_hash, \
     error_code, error_message, category_id, created_at, finished_at, \
-    user_agent, cookie, extra_headers, page_url, format_id, speed_limit";
+    user_agent, cookie, extra_headers, page_url, format_id, speed_limit, \
+    package_id, mime, checksum, start_at, media_opts";
 
 fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
     let status: String = row.get(5)?;
@@ -142,6 +155,11 @@ fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
         page_url: row.get(23)?,
         format_id: row.get(24)?,
         speed_limit: row.get(25)?,
+        package_id: row.get(26)?,
+        mime: row.get(27)?,
+        checksum: row.get(28)?,
+        start_at: row.get(29)?,
+        media_opts: row.get(30)?,
     })
 }
 
@@ -213,6 +231,12 @@ impl Db {
             tx.execute_batch("PRAGMA user_version=2;")?;
             tx.commit()?;
         }
+        if version < 3 {
+            let tx = conn.transaction()?;
+            tx.execute_batch(MIGRATION_3)?;
+            tx.execute_batch("PRAGMA user_version=3;")?;
+            tx.commit()?;
+        }
         Ok(())
     }
 
@@ -223,11 +247,13 @@ impl Db {
         conn.execute(
             "INSERT INTO downloads
                 (url, filename, dir, kind, referrer, category_id, status, created_at,
-                 user_agent, cookie, extra_headers, page_url, format_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?8, ?9, ?10, ?11, ?12)",
+                 user_agent, cookie, extra_headers, page_url, format_id,
+                 package_id, mime, checksum, media_opts)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'queued', ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 d.url, d.filename, d.dir, d.kind, d.referrer, d.category_id, now(),
-                d.user_agent, d.cookie, d.extra_headers, d.page_url, d.format_id
+                d.user_agent, d.cookie, d.extra_headers, d.page_url, d.format_id,
+                d.package_id, d.mime, d.checksum, d.media_opts
             ],
         )?;
         Ok(conn.last_insert_rowid())
@@ -393,6 +419,69 @@ impl Db {
     pub fn delete(&self, id: i64) -> Result<()> {
         let conn = self.lock();
         conn.execute("DELETE FROM downloads WHERE id=?1", params![id])?;
+        Ok(())
+    }
+
+    /// Set (or clear) a deferred start time. Status is managed by the caller.
+    pub fn set_start_at(&self, id: i64, start_at: Option<i64>) -> Result<()> {
+        let conn = self.lock();
+        conn.execute("UPDATE downloads SET start_at=?1 WHERE id=?2", params![start_at, id])?;
+        Ok(())
+    }
+
+    /// Scheduled rows whose start time has passed — the scheduler starts these.
+    pub fn due_scheduled(&self, now: i64) -> Result<Vec<Download>> {
+        let conn = self.lock();
+        let sql = format!(
+            "SELECT {COLS} FROM downloads WHERE status='scheduled' AND start_at IS NOT NULL AND start_at<=?1"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![now], row_to_download)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    // ---- packages ----
+
+    pub fn insert_package(&self, name: &str, category_id: Option<i64>, dir: Option<&str>) -> Result<i64> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO packages (name, category_id, dir, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![name, category_id, dir, now()],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn list_packages(&self) -> Result<Vec<Package>> {
+        let conn = self.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, category_id, dir, status, created_at FROM packages ORDER BY id DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Package {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    category_id: r.get(2)?,
+                    dir: r.get(3)?,
+                    status: r.get(4)?,
+                    created_at: r.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Drop a package once its last member is removed (keeps the list free of
+    /// empty group headers). No-op while any download still references it.
+    pub fn delete_package_if_empty(&self, package_id: i64) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "DELETE FROM packages WHERE id=?1
+             AND NOT EXISTS (SELECT 1 FROM downloads WHERE package_id=?1)",
+            params![package_id],
+        )?;
         Ok(())
     }
 
@@ -592,6 +681,45 @@ mod tests {
         let cat = db.list_categories().unwrap().into_iter().find(|c| c.name == "Custom").unwrap();
         assert_eq!(cat.id, id1);
         assert_eq!(cat.dir, "~/b");
+    }
+
+    #[test]
+    fn v3_columns_roundtrip() {
+        let db = Db::open_in_memory().unwrap();
+        let pkg = db.insert_package("My batch", None, Some("/dl")).unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://x/f.iso".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                package_id: Some(pkg),
+                mime: Some("application/x-iso9660-image".into()),
+                checksum: Some("sha-256=ab".into()),
+                media_opts: Some(r#"{"audio_only":true}"#.into()),
+                ..Default::default()
+            })
+            .unwrap();
+        db.set_start_at(id, Some(123)).unwrap();
+
+        let d = db.get(id).unwrap().unwrap();
+        assert_eq!(d.package_id, Some(pkg));
+        assert_eq!(d.mime.as_deref(), Some("application/x-iso9660-image"));
+        assert_eq!(d.checksum.as_deref(), Some("sha-256=ab"));
+        assert_eq!(d.start_at, Some(123));
+        assert_eq!(d.media_opts.as_deref(), Some(r#"{"audio_only":true}"#));
+
+        assert_eq!(db.list_packages().unwrap().len(), 1);
+
+        db.set_status(id, DownloadStatus::Scheduled).unwrap();
+        assert!(db.due_scheduled(122).unwrap().is_empty());
+        assert_eq!(db.due_scheduled(123).unwrap().len(), 1);
+
+        // Non-empty package survives; emptying it deletes it.
+        db.delete_package_if_empty(pkg).unwrap();
+        assert_eq!(db.list_packages().unwrap().len(), 1);
+        db.delete(id).unwrap();
+        db.delete_package_if_empty(pkg).unwrap();
+        assert!(db.list_packages().unwrap().is_empty());
     }
 
     #[test]

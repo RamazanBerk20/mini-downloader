@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from "./api";
   import Icon from "./lib/Icon.svelte";
-  import { t, type MsgKey } from "./lib/i18n.svelte";
+  import { currentLocale, t, type MsgKey } from "./lib/i18n.svelte";
   import type { IconName } from "./lib/icons";
   import type { Download } from "./types";
 
@@ -12,6 +12,7 @@
     complete: "statusCompleted",
     error: "statusFailed",
     queued: "statusQueued",
+    scheduled: "statusScheduled",
   };
 
   let {
@@ -22,6 +23,9 @@
     onselect,
     onmenu,
     onreorder,
+    grouped = false,
+    expanded = false,
+    ondetails,
   }: {
     d: Download;
     i: number;
@@ -30,6 +34,9 @@
     onselect?: (id: number, e: MouseEvent) => void;
     onmenu?: (d: Download, x: number, y: number) => void;
     onreorder?: (srcId: number, targetId: number) => void;
+    grouped?: boolean;
+    expanded?: boolean;
+    ondetails?: (id: number) => void;
   } = $props();
 
   // Per-download speed cap presets (bytes/sec; 0 = unlimited).
@@ -102,7 +109,7 @@
     if (e.key === " ") {
       e.preventDefault();
       if (isRunning) onact(() => api.pause(d.id));
-      else if (d.status === "paused") onact(() => api.resume(d.id));
+      else if (d.status === "paused" || d.status === "scheduled") onact(() => api.resume(d.id));
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
       onact(() => api.remove(d.id, false));
@@ -117,6 +124,7 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <li
   class="row {d.status}"
+  class:grouped
   style="--i:{i}"
   tabindex="0"
   aria-label="{name(d)}, {t(STATUS_KEY[d.status] ?? 'statusActive')}, {pct(d)}%"
@@ -171,6 +179,8 @@
         {#if isTorrent}· ↑{fmt(d.upload_speed)}/s{#if d.num_seeders > 0} · {d.num_seeders}⚲{/if}{/if}
       {/if}
       {#if d.status === "error" && d.error_message}· <span class="err-text">{d.error_message}</span>{/if}
+      {#if d.status === "scheduled" && d.start_at}· {new Date(d.start_at * 1000).toLocaleString(currentLocale())}{/if}
+      {#if d.checksum && d.status === "complete"}· <span class="verified-tag">{t("verifiedTag")}</span>{/if}
     </span>
 
     <span class="row-actions">
@@ -211,7 +221,7 @@
         <button class="icon-btn" title={t("pause")} aria-label="{t('pause')} {name(d)}" onclick={() => onact(() => api.pause(d.id))}>
           <Icon name="pause" size={16} />
         </button>
-      {:else if d.status === "paused"}
+      {:else if d.status === "paused" || d.status === "scheduled"}
         <button class="icon-btn" title={t("resume")} aria-label="{t('resume')} {name(d)}" onclick={() => onact(() => api.resume(d.id))}>
           <Icon name="play" size={16} />
         </button>
@@ -224,6 +234,17 @@
       {#if d.status === "error"}
         <button class="icon-btn" title={t("retry")} aria-label="{t('retry')} {name(d)}" onclick={() => onact(() => api.retry(d.id))}>
           <Icon name="retry" size={16} />
+        </button>
+      {/if}
+      {#if ondetails}
+        <button
+          class="icon-btn"
+          title={t("detailTitle")}
+          aria-label="{t('detailTitle')} {name(d)}"
+          aria-expanded={expanded}
+          onclick={() => ondetails?.(d.id)}
+        >
+          <Icon name={expanded ? "chevron-up" : "chevron-down"} size={16} />
         </button>
       {/if}
       <button class="icon-btn" title={t("copyUrl")} aria-label="{t('copyUrl')} {name(d)}" onclick={copyUrl}>

@@ -35,6 +35,20 @@ export interface Download {
   page_url?: string | null;
   format_id?: string | null;
   speed_limit?: number | null;
+  package_id?: number | null;
+  mime?: string | null;
+  checksum?: string | null;
+  start_at?: number | null;
+  media_opts?: string | null;
+}
+
+export interface Package {
+  id: number;
+  name: string;
+  category_id: number | null;
+  dir: string | null;
+  status: string;
+  created_at: number;
 }
 
 export interface Category {
@@ -73,9 +87,27 @@ export interface Format {
   height: number;
 }
 
+export interface PlaylistEntry {
+  id: string;
+  title: string;
+  url: string;
+  duration: number;
+}
+
 export interface MediaInfo {
   title: string;
   formats: Format[];
+  kind: "video" | "playlist";
+  entries: PlaylistEntry[];
+}
+
+export interface MediaOpts {
+  write_subs: boolean;
+  sub_langs: string;
+  embed_subs: boolean;
+  audio_only: boolean;
+  audio_format: string;
+  embed_thumbnail: boolean;
 }
 
 export interface UpdateInfo {
@@ -86,6 +118,35 @@ export interface UpdateInfo {
   asset_url: string | null;
   can_install: boolean;
   notes: string;
+}
+
+export interface DetailFile {
+  index: number;
+  path: string;
+  length: number;
+  completed_length: number;
+  selected: boolean;
+}
+
+export interface DetailPeer {
+  ip: string;
+  down_speed: number;
+  up_speed: number;
+  seeder: boolean;
+}
+
+export interface DownloadDetails {
+  id: number;
+  url: string;
+  dir: string;
+  kind: string;
+  error_message: string | null;
+  num_pieces: number;
+  piece_length: number;
+  verified_length: number;
+  files: DetailFile[];
+  peers: DetailPeer[];
+  live: boolean;
 }
 
 export interface Tick {

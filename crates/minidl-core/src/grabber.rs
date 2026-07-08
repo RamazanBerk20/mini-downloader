@@ -19,7 +19,9 @@ fn split_candidates(text: &str) -> impl Iterator<Item = &str> {
         .filter(|s| !s.is_empty())
 }
 
-fn host_of(url: &str) -> String {
+/// Host part of a URL (empty when there is none). Shared with category host
+/// rules and default package naming.
+pub fn host_of(url: &str) -> String {
     url.splitn(2, "://")
         .nth(1)
         .map(|rest| rest.split(['/', '?', '#']).next().unwrap_or("").to_string())

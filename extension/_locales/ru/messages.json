@@ -1,23 +1,92 @@
 {
-  "extName": { "message": "Коннектор Mini Downloader" },
-  "extDescription": { "message": "Перехватывайте загрузки в браузере и передавайте их в Mini Downloader." },
-  "actionTitle": { "message": "Скачать через Mini Downloader" },
-  "popupCatchDownloads": { "message": "Перехватывать загрузки" },
-  "popupOptions": { "message": "Настройки" },
-  "popupMediaOnPage": { "message": "Медиа на этой странице" },
-  "popupGrabPageVideo": { "message": "Захватить видео страницы" },
-  "popupNoMedia": { "message": "Медиа не обнаружено." },
-  "popupGrab": { "message": "Захватить" },
-  "popupSent": { "message": "Отправлено" },
-  "optionsTitle": { "message": "Настройки коннектора Mini Downloader" },
-  "optionsMinSize": { "message": "Минимальный размер файла для перехвата (байты)" },
-  "optionsMinSizeHint": { "message": "Загрузки меньше этого размера оставляются браузеру. По умолчанию 1048576 (1 МиБ)." },
-  "optionsDisabledHosts": { "message": "Отключённые сайты (по одному имени хоста в строке)" },
-  "optionsSave": { "message": "Сохранить" },
-  "optionsSaved": { "message": "Сохранено" },
-  "notifySentTitle": { "message": "Отправлено в Mini Downloader" },
-  "notifyRejectedTitle": { "message": "Mini Downloader отклонил загрузку" },
-  "notifyUnknownError": { "message": "неизвестная ошибка" },
-  "notifyNotReachableTitle": { "message": "Mini Downloader недоступен" },
-  "notifyNotReachableBody": { "message": "Откройте Mini Downloader и включите интеграцию с браузером." }
+  "extName": {
+    "message": "Коннектор Mini Downloader"
+  },
+  "extDescription": {
+    "message": "Перехватывайте загрузки в браузере и передавайте их в Mini Downloader."
+  },
+  "actionTitle": {
+    "message": "Скачать через Mini Downloader"
+  },
+  "popupCatchDownloads": {
+    "message": "Перехватывать загрузки"
+  },
+  "popupOptions": {
+    "message": "Настройки"
+  },
+  "popupMediaOnPage": {
+    "message": "Медиа на этой странице"
+  },
+  "popupGrabPageVideo": {
+    "message": "Захватить видео страницы"
+  },
+  "popupNoMedia": {
+    "message": "Медиа не обнаружено."
+  },
+  "popupGrab": {
+    "message": "Захватить"
+  },
+  "popupSent": {
+    "message": "Отправлено"
+  },
+  "optionsTitle": {
+    "message": "Настройки коннектора Mini Downloader"
+  },
+  "optionsMinSize": {
+    "message": "Минимальный размер файла для перехвата (байты)"
+  },
+  "optionsMinSizeHint": {
+    "message": "Загрузки меньше этого размера оставляются браузеру. По умолчанию 1048576 (1 МиБ)."
+  },
+  "optionsDisabledHosts": {
+    "message": "Отключённые сайты (по одному имени хоста в строке)"
+  },
+  "optionsSave": {
+    "message": "Сохранить"
+  },
+  "optionsSaved": {
+    "message": "Сохранено"
+  },
+  "optionsTestConnection": {
+    "message": "Проверить соединение с приложением"
+  },
+  "optionsTestOk": {
+    "message": "Подключено"
+  },
+  "optionsTestNoResponse": {
+    "message": "Нет ответа"
+  },
+  "optionsTestFail": {
+    "message": "Недоступно — установлен и запущен ли Mini Downloader?"
+  },
+  "notifySentTitle": {
+    "message": "Отправлено в Mini Downloader"
+  },
+  "notifyRejectedTitle": {
+    "message": "Mini Downloader отклонил загрузку"
+  },
+  "notifyUnknownError": {
+    "message": "неизвестная ошибка"
+  },
+  "notifyNotReachableTitle": {
+    "message": "Mini Downloader недоступен"
+  },
+  "notifyNotReachableBody": {
+    "message": "Откройте Mini Downloader и включите интеграцию с браузером."
+  },
+  "optionsLanguage": {
+    "message": "Язык"
+  },
+  "optionsLangBrowser": {
+    "message": "Как в браузере"
+  },
+  "optionsBlacklist": {
+    "message": "Игнорируемые типы файлов (через запятую)"
+  },
+  "optionsBlacklistHint": {
+    "message": "Загрузки этих типов остаются в браузере."
+  },
+  "optionsMagnetSkip": {
+    "message": "Оставлять magnet-ссылки системе"
+  }
 }

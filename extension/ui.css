@@ -1,0 +1,312 @@
+/* ============================================================================
+   Mini Downloader Connector — shared extension UI (popup + options).
+   Tokens mirror the desktop app design system (apps/desktop/src/app.css):
+   warm monochrome, flat components, muted pastel status.
+   System fonts only — the extension ships zero external assets (strict CSP).
+   ============================================================================ */
+
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Noto Sans Mono", monospace;
+
+  /* Warm monochrome — light (values mirror the desktop app) */
+  --canvas: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #f2f1ed;
+  --border: #eaeaea;
+  --border-strong: #dcdcd8;
+  --text: #2f3437;
+  --strong: #111111;
+  --muted: #787774;
+  --ink: #111111;
+  --ink-fg: #ffffff;
+  --ring: rgba(17, 17, 17, 0.5);
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.05);
+
+  /* Muted pastel status */
+  --active-bg: #e1f3fe;   --active-fg: #1f6c9f;
+  --complete-bg: #edf3ec; --complete-fg: #346538;
+  --error-bg: #fdebec;    --error-fg: #9f2f2d;
+  --paused-bg: #fbf3db;   --paused-fg: #956400;
+  --queued-bg: #efefee;   --queued-fg: #6b6b69;
+
+  color-scheme: light dark;
+  font-size: 14px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #191919;
+    --surface: #212121;
+    --surface-2: #262626;
+    --border: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --text: #e6e4e0;
+    --strong: #f5f4f2;
+    --muted: #9b9a97;
+    --ink: #f2f1ee;
+    --ink-fg: #191919;
+    --ring: rgba(240, 240, 240, 0.55);
+    --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.35);
+
+    --active-bg: rgba(96, 165, 250, 0.16);   --active-fg: #86bdec;
+    --complete-bg: rgba(74, 163, 86, 0.16);  --complete-fg: #84cb8e;
+    --error-bg: rgba(224, 90, 90, 0.16);     --error-fg: #ed9f9f;
+    --paused-bg: rgba(220, 170, 60, 0.16);   --paused-fg: #d9bd70;
+    --queued-bg: rgba(255, 255, 255, 0.06);  --queued-fg: #a6a5a2;
+  }
+}
+
+/* ---------- Base ---------- */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  text-align: start;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus — visible on keyboard nav only */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* Thin, quiet scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 6px; border: 3px solid var(--canvas); }
+
+/* ---------- Buttons ---------- */
+
+button { font-family: inherit; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.btn:hover:enabled { border-color: var(--border-strong); }
+.btn:active:enabled { transform: scale(0.98); }
+.btn:disabled { cursor: default; }
+
+.btn-primary {
+  background: var(--ink); color: var(--ink-fg); border-color: var(--ink);
+  font-weight: 500;
+}
+.btn-primary:hover:enabled { filter: brightness(1.12); border-color: var(--ink); }
+
+/* Sent-state of a per-item Grab button */
+.btn.sent {
+  background: var(--complete-bg); color: var(--complete-fg); border-color: transparent;
+}
+.btn.sent::after { content: "✓"; }
+
+/* ---------- Accessible switch ---------- */
+
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; flex: none; }
+.switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch .track {
+  position: absolute; inset: 0; border-radius: 9999px;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  transition: background 0.18s, border-color 0.18s;
+}
+.switch .track::after {
+  content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--muted); transition: transform 0.18s, background 0.18s;
+}
+.switch input:checked + .track { background: var(--ink); border-color: var(--ink); }
+.switch input:checked + .track::after { transform: translateX(18px); background: var(--ink-fg); }
+.switch input:focus-visible + .track { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* ---------- Type tag (HLS / DASH / FILE) ---------- */
+
+.tag {
+  flex: none;
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.14rem 0.5rem; border-radius: 9999px;
+  background: var(--queued-bg); color: var(--queued-fg);
+}
+.tag.hls  { background: var(--active-bg);   color: var(--active-fg); }
+.tag.dash { background: var(--paused-bg);   color: var(--paused-fg); }
+.tag.file { background: var(--queued-bg);   color: var(--queued-fg); }
+
+/* ---------- Media card ---------- */
+
+.card {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 0.55rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.6rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-hover); }
+.card .u {
+  min-width: 0;
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  unicode-bidi: plaintext; /* URLs stay a clean LTR run inside RTL layout */
+}
+.card .btn { padding: 0.25rem 0.6rem; font-size: 0.76rem; }
+
+/* ---------- Status text (save / connection test) ---------- */
+
+.status { font-size: 0.82rem; color: var(--muted); }
+.status-ok  { color: var(--complete-fg); }
+.status-err { color: var(--error-fg); }
+.status-busy { color: var(--muted); }
+.status-ok::before  { content: "✓"; margin-inline-end: 0.35em; }
+.status-err::before { content: "✕"; margin-inline-end: 0.35em; }
+.status-busy::before {
+  content: ""; display: inline-block; width: 0.75em; height: 0.75em;
+  border: 2px solid var(--border-strong); border-top-color: var(--muted);
+  border-radius: 50%; margin-inline-end: 0.4em; vertical-align: -0.1em;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- Form fields ---------- */
+
+input, textarea {
+  font-family: inherit; font-size: 0.9rem;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface); color: var(--text);
+  padding: 0.5rem 0.65rem;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offset: 0; border-color: var(--ring); }
+textarea { width: 100%; resize: vertical; line-height: 1.5; }
+select {
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+textarea.mono { font-family: var(--font-mono); font-size: 0.8rem; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.7; }
+
+.field { margin-block: 1.1rem; }
+.field > label {
+  display: block; margin-block-end: 0.35rem;
+  font-size: 0.85rem; font-weight: 500; color: var(--strong);
+}
+.field .hint { color: var(--muted); font-size: 0.78rem; margin: 0.35rem 0 0; }
+.field .input-row { display: flex; align-items: center; gap: 0.6rem; }
+.field .input-row input { width: 10rem; }
+.field .unit {
+  font-family: var(--font-mono); font-size: 0.78rem; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A label + switch on one line */
+.switch-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+}
+.switch-row > label { margin: 0; cursor: pointer; }
+
+/* ============================================================================
+   Popup
+   ============================================================================ */
+
+body.popup { width: 340px; }
+
+.pop-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.7rem; flex-wrap: wrap;
+  padding: 0.7rem 0.9rem;
+  border-block-end: 1px solid var(--border);
+}
+.wordmark {
+  font-size: 1.02rem; font-weight: 600; line-height: 1.2; letter-spacing: -0.02em;
+  color: var(--strong); margin: 0;
+}
+.catch {
+  display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer;
+  font-size: 0.8rem; color: var(--muted);
+}
+
+.pop-main { padding: 0.8rem 0.9rem; }
+
+.sec-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap;
+  margin-block-end: 0.6rem;
+}
+.sec-head h2 {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 500;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0;
+}
+.sec-head .btn { padding: 0.3rem 0.65rem; font-size: 0.78rem; }
+
+.media-list { display: flex; flex-direction: column; gap: 0.45rem; max-height: 320px; overflow-y: auto; }
+.media-list .empty {
+  margin: 0; padding: 1.3rem 0.6rem;
+  border: 1px dashed var(--border-strong); border-radius: 10px;
+  color: var(--muted); font-size: 0.82rem; text-align: center;
+}
+
+.pop-foot {
+  display: flex; justify-content: flex-end;
+  padding: 0.55rem 0.9rem;
+  border-block-start: 1px solid var(--border);
+}
+.pop-foot a {
+  color: var(--muted); font-size: 0.8rem; text-decoration: none;
+  transition: color 0.15s;
+}
+.pop-foot a:hover { color: var(--strong); text-decoration: underline; }
+
+/* ============================================================================
+   Options
+   ============================================================================ */
+
+body.options { padding: 2.5rem 1rem; }
+
+.panel {
+  max-width: 520px; margin-inline: auto;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 1.5rem 1.6rem;
+}
+.panel h1 {
+  font-size: 1.25rem; line-height: 1.25; letter-spacing: -0.02em;
+  color: var(--strong); margin: 0 0 0.25rem;
+}
+.panel .desc { color: var(--muted); font-size: 0.85rem; margin: 0 0 1.3rem; }
+
+.actions { display: flex; align-items: center; gap: 0.8rem; margin-block-start: 1.4rem; }
+
+.testrow {
+  display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+  margin-block-start: 1.3rem; padding-block-start: 1.3rem;
+  border-block-start: 1px solid var(--border);
+}
+
+/* ---------- RTL: flip the transform-based switch travel; everything else
+   follows `dir` + logical properties. ---------- */
+[dir="rtl"] .switch input:checked + .track::after { transform: translateX(-18px); }
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

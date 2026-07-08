@@ -44,6 +44,29 @@ pub const STATUS_KEYS: &[&str] = &[
     "infoHash",
 ];
 
+/// Fields for the download-detail panel: everything the UI shows on expand.
+/// Deliberately excludes `bitfield` — for a large torrent it is tens of KB per
+/// poll for a piece map the panel doesn't draw.
+pub const DETAIL_KEYS: &[&str] = &[
+    "gid",
+    "status",
+    "totalLength",
+    "completedLength",
+    "downloadSpeed",
+    "uploadSpeed",
+    "connections",
+    "numSeeders",
+    "numPieces",
+    "pieceLength",
+    "verifiedLength",
+    "errorCode",
+    "errorMessage",
+    "dir",
+    "files",
+    "bittorrent",
+    "infoHash",
+];
+
 /// Current connection target — swapped atomically when aria2 is restarted on a
 /// fresh port/secret, so every cloned `RpcClient` follows the new instance
 /// without any call site changing.
@@ -214,6 +237,12 @@ impl RpcClient {
     }
     pub async fn get_files(&self, gid: &str) -> Result<Vec<Value>> {
         let res = self.call("aria2.getFiles", vec![json!(gid)]).await?;
+        Ok(Self::as_array(res))
+    }
+
+    /// Connected peers of a BitTorrent download (empty for HTTP/FTP).
+    pub async fn get_peers(&self, gid: &str) -> Result<Vec<Value>> {
+        let res = self.call("aria2.getPeers", vec![json!(gid)]).await?;
         Ok(Self::as_array(res))
     }
 

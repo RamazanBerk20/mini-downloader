@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { Category, Download, MediaInfo, ParsedLink, Schedule, UpdateInfo } from "./types";
+import type { Category, Download, DownloadDetails, MediaInfo, MediaOpts, Package, ParsedLink, PlaylistEntry, Schedule, UpdateInfo } from "./types";
 
 export const api = {
-  add: (url: string) => invoke<Download>("add_download", { url }),
+  add: (url: string, checksum?: string) =>
+    invoke<Download>("add_download", { url, checksum: checksum ?? null }),
   addTorrentFile: (path: string) => invoke<Download>("add_torrent_file", { path }),
   addMetalinkFile: (path: string) => invoke<Download>("add_metalink_file", { path }),
   list: (status?: string) => invoke<Download[]>("list_downloads", { status: status ?? null }),
@@ -27,9 +28,22 @@ export const api = {
   setDownloadSpeed: (id: number, limit: number) =>
     invoke<void>("set_download_speed", { id, limit }),
   openFolder: (id: number) => invoke<void>("open_containing_folder", { id }),
-  probeMedia: (url: string) => invoke<MediaInfo>("probe_media", { url }),
-  addMedia: (url: string, formatId?: string) =>
-    invoke<Download>("add_media_download", { url, formatId: formatId ?? null }),
+  probeMedia: (url: string, playlist = false) =>
+    invoke<MediaInfo>("probe_media", { url, playlist }),
+  addMedia: (url: string, formatId?: string, opts?: MediaOpts) =>
+    invoke<Download>("add_media_download", { url, formatId: formatId ?? null, opts: opts ?? null }),
+  addPlaylistBatch: (
+    entries: Pick<PlaylistEntry, "url" | "title">[],
+    packageName: string,
+    quality?: string,
+    opts?: MediaOpts,
+  ) =>
+    invoke<number>("add_playlist_batch", {
+      entries,
+      packageName,
+      quality: quality ?? null,
+      opts: opts ?? null,
+    }),
   installBrowser: () => invoke<string>("install_browser_integration"),
   listCategories: () => invoke<Category[]>("list_categories"),
   saveCategory: (name: string, dir: string, rules: string, priority: number) =>
@@ -40,7 +54,15 @@ export const api = {
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
   setSetting: (key: string, value: string) => invoke<void>("set_setting", { key, value }),
   grabLinks: (text: string) => invoke<ParsedLink[]>("grab_links", { text }),
-  addLinksBatch: (urls: string[]) => invoke<number>("add_links_batch", { urls }),
+  addLinksBatch: (urls: string[], packageName?: string) =>
+    invoke<number>("add_links_batch", { urls, packageName: packageName ?? null }),
+  listPackages: () => invoke<Package[]>("list_packages"),
+  getDetails: (id: number) => invoke<DownloadDetails>("get_download_details", { id }),
+  setTorrentFiles: (id: number, indices: number[]) =>
+    invoke<void>("set_torrent_files", { id, indices }),
+  scheduleDownload: (id: number, startAt: number | null) =>
+    invoke<void>("schedule_download", { id, startAt }),
+  applyProxy: (value: string) => invoke<void>("apply_proxy", { value }),
   listSchedules: () => invoke<Schedule[]>("list_schedules"),
   saveSchedule: (s: Omit<Schedule, "id"> & { id?: number }) =>
     invoke<void>("save_schedule", {

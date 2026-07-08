@@ -11,12 +11,14 @@
   let links = $state<ParsedLink[]>([]);
   let checked = $state<Set<string>>(new Set());
   let error = $state("");
+  let packageName = $state("");
 
   async function parse() {
     error = "";
     try {
       links = await api.grabLinks(text);
       checked = new Set(links.map((l) => l.url));
+      if (!packageName && links.length) packageName = links[0].host;
     } catch (e) {
       error = errText(e);
     }
@@ -30,7 +32,7 @@
     const urls = links.filter((l) => checked.has(l.url)).map((l) => l.url);
     if (!urls.length) return;
     try {
-      await api.addLinksBatch(urls);
+      await api.addLinksBatch(urls, packageName.trim() || undefined);
       onclose();
     } catch (e) {
       error = errText(e);
@@ -51,6 +53,12 @@
   {#if error}<p class="hint" style="color:var(--error-fg)">{error}</p>{/if}
 
   {#if links.length}
+    {#if links.length >= 2}
+      <label class="pkg-name-field">
+        <span class="hint">{t("pkgName")}</span>
+        <input type="text" bind:value={packageName} placeholder={t("pkgName")} />
+      </label>
+    {/if}
     <p class="hint">{t("selectedCount", { n: checked.size, m: links.length })}</p>
     <div class="linklist">
       {#each links as l (l.url)}

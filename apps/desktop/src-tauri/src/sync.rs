@@ -180,6 +180,15 @@ async fn handle_transition(app: &AppHandle, engine: &Engine, db: &Db, gid: &str)
     if row.status == new_status {
         return; // already reflected
     }
+    // Scheduled is an app-only hold: schedule_download pauses the GID and then
+    // writes Scheduled, so aria2's resulting "paused" (or still-queued
+    // "waiting") must not overwrite it — the scheduler only starts rows whose
+    // status is still 'scheduled'.
+    if row.status == DownloadStatus::Scheduled
+        && matches!(new_status, DownloadStatus::Paused | DownloadStatus::Waiting)
+    {
+        return;
+    }
 
     match new_status {
         DownloadStatus::Error => {
@@ -331,7 +340,10 @@ fn organize(db: &Db, row: &minidl_core::model::Download, filename: &str) -> Stri
         return row.dir.clone();
     }
     let cats = db.list_categories().unwrap_or_default();
-    let Some(cat) = minidl_core::categories::classify(filename, &cats) else {
+    let host = minidl_core::grabber::host_of(&row.url);
+    let host = if host.is_empty() { None } else { Some(host.as_str()) };
+    let Some(cat) = minidl_core::categories::classify(filename, row.mime.as_deref(), host, &cats)
+    else {
         return row.dir.clone();
     };
     let target = minidl_core::categories::expand(&cat.dir);

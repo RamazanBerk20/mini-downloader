@@ -46,6 +46,14 @@
   let ncName = $state("");
   let ncDir = $state("");
   let ncRules = $state("");
+  let ncMime = $state("");
+  let ncHost = $state("");
+  let proxy = $state("");
+  let handleMagnets = $state(true);
+  let dhtEnabled = $state(true);
+  let sandboxChildren = $state(false);
+  let blockPrivateIps = $state(false);
+  let ocCustomCmd = $state("");
   let updateStatus = $state("");
   let update = $state<UpdateInfo | null>(null);
   let langChoice = $state("system");
@@ -56,6 +64,7 @@
     ["quit", "ocQuit"],
     ["sleep", "ocSleep"],
     ["shutdown", "ocShutdown"],
+    ["custom", "ocCustom"],
   ];
 
   onMount(async () => {
@@ -64,6 +73,16 @@
     closeToTray = (await api.getSetting("close_to_tray")) !== "false";
     theme = (await api.getSetting("theme")) || "system";
     onComplete = (await api.getSetting("on_complete_action")) || "none";
+    // A stored `run:<cmd>` value means the custom action is selected.
+    if (onComplete.startsWith("run:")) {
+      ocCustomCmd = onComplete.slice(4);
+      onComplete = "custom";
+    }
+    proxy = (await api.getSetting("proxy")) || "";
+    handleMagnets = (await api.getSetting("handle_magnets")) !== "false";
+    dhtEnabled = (await api.getSetting("dht_enabled")) !== "false";
+    sandboxChildren = (await api.getSetting("sandbox_children")) === "true";
+    blockPrivateIps = (await api.getSetting("block_private_ips")) === "true";
     const savedLoc = await api.getSetting("locale");
     langChoice = savedLoc && savedLoc !== "system" ? savedLoc : "system";
     const dsl = await api.getSetting("default_speed_limit");
@@ -85,6 +104,10 @@
     const root = document.documentElement;
     if (v === "light" || v === "dark") root.dataset.theme = v;
     else delete root.dataset.theme;
+    // Mirror for the synchronous first-paint apply in main.ts.
+    try {
+      localStorage.setItem("theme", v);
+    } catch {}
   }
   async function onThemeChange(e: Event) {
     theme = (e.target as HTMLSelectElement).value;
@@ -93,7 +116,20 @@
   }
   async function onCompleteChange(e: Event) {
     onComplete = (e.target as HTMLSelectElement).value;
-    await api.setSetting("on_complete_action", onComplete);
+    await saveOnComplete();
+  }
+  async function saveOnComplete() {
+    const value = onComplete === "custom" ? `run:${ocCustomCmd.trim()}` : onComplete;
+    await api.setSetting("on_complete_action", value);
+  }
+  let proxyStatus = $state("");
+  async function saveProxy() {
+    try {
+      await api.applyProxy(proxy.trim());
+      proxyStatus = "";
+    } catch (e) {
+      proxyStatus = errText(e);
+    }
   }
   async function onMaxConcurrent(e: Event) {
     maxConcurrent = parseInt((e.target as HTMLInputElement).value, 10);
@@ -101,13 +137,34 @@
   }
   async function addCategory() {
     if (!ncName.trim() || !ncDir.trim()) return;
-    const rules = JSON.stringify(
-      ncRules.split(",").map((s) => s.trim()).filter(Boolean),
-    );
+    const split = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+    const exts = split(ncRules);
+    const mimes = split(ncMime);
+    const hosts = split(ncHost);
+    // Ext-only categories keep the legacy flat-array shape; mime/host rules use
+    // the object list the classifier also understands.
+    const rules =
+      mimes.length || hosts.length
+        ? JSON.stringify(
+            [
+              exts.length ? { match: "ext", values: exts } : null,
+              mimes.length ? { match: "mime", values: mimes } : null,
+              hosts.length ? { match: "host", values: hosts } : null,
+            ].filter(Boolean),
+          )
+        : JSON.stringify(exts);
     await api.saveCategory(ncName.trim(), ncDir.trim(), rules, 0);
     ncName = "";
     ncDir = "";
     ncRules = "";
+    ncMime = "";
+    ncHost = "";
+    categories = await api.listCategories();
+  }
+  async function savePriority(c: Category, e: Event) {
+    const p = parseInt((e.target as HTMLInputElement).value, 10);
+    if (Number.isNaN(p)) return;
+    await api.saveCategory(c.name, c.dir, c.rules, p);
     categories = await api.listCategories();
   }
   async function removeCategory(id: number) {
@@ -314,6 +371,50 @@
         {#each OC_ACTIONS as [v, l]}<option value={v}>{t(l)}</option>{/each}
       </select>
     </div>
+    {#if onComplete === "custom"}
+      <input
+        type="text"
+        bind:value={ocCustomCmd}
+        onchange={saveOnComplete}
+        placeholder={t("ocCustomPlaceholder")}
+        aria-label={t("ocCustom")}
+        style="font-family:var(--font-mono); font-size:0.8rem"
+      />
+    {/if}
+  </section>
+
+  <section class="section">
+    <h3>{t("sectNetwork")}</h3>
+    <div class="srow">
+      <span>{t("optProxy")}</span>
+      <input
+        type="text"
+        bind:value={proxy}
+        onchange={saveProxy}
+        placeholder={t("proxyPlaceholder")}
+        aria-label={t("optProxy")}
+        style="width:220px; font-family:var(--font-mono); font-size:0.8rem"
+      />
+    </div>
+    {#if proxyStatus}<p class="hint" style="color:var(--error-fg)">{proxyStatus}</p>{/if}
+    <div class="srow">
+      <span>{t("optHandleMagnets")}</span>
+      <label class="switch"><input type="checkbox" checked={handleMagnets} onchange={(e) => { handleMagnets = (e.target as HTMLInputElement).checked; setBool("handle_magnets", handleMagnets); }} aria-label={t("optHandleMagnets")} /><span class="track"></span></label>
+    </div>
+    <p class="hint">{t("optHandleMagnetsHint")}</p>
+    <div class="srow">
+      <span>{t("optDht")}</span>
+      <label class="switch"><input type="checkbox" checked={dhtEnabled} onchange={(e) => { dhtEnabled = (e.target as HTMLInputElement).checked; setBool("dht_enabled", dhtEnabled); }} aria-label={t("optDht")} /><span class="track"></span></label>
+    </div>
+    <div class="srow">
+      <span>{t("optSandbox")}</span>
+      <label class="switch"><input type="checkbox" checked={sandboxChildren} onchange={(e) => { sandboxChildren = (e.target as HTMLInputElement).checked; setBool("sandbox_children", sandboxChildren); }} aria-label={t("optSandbox")} /><span class="track"></span></label>
+    </div>
+    <div class="srow">
+      <span>{t("optBlockPrivate")}</span>
+      <label class="switch"><input type="checkbox" checked={blockPrivateIps} onchange={(e) => { blockPrivateIps = (e.target as HTMLInputElement).checked; setBool("block_private_ips", blockPrivateIps); }} aria-label={t("optBlockPrivate")} /><span class="track"></span></label>
+    </div>
+    <p class="hint">{t("restartHint")}</p>
   </section>
 
   <section class="section">
@@ -359,8 +460,10 @@
         {#if STORE_URLS.chrome}<button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.chrome)}>{t("getForChrome")}</button>{/if}
       </div>
     {/if}
-    <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
-    <button class="btn" onclick={installExtension}><Icon name="download" size={16} /> {t("installExtension")}</button>
+    <div class="btn-row">
+      <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
+      <button class="btn" onclick={installExtension}><Icon name="download" size={16} /> {t("installExtension")}</button>
+    </div>
     {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
     <p class="hint">{t("browserHint")}</p>
     <button class="btn btn-ghost" onclick={() => openUrl(RELEASE_URL)}>{t("installGuide")}</button>
@@ -406,19 +509,34 @@
       <div class="cat">
         <strong>{c.name}</strong>
         <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
+        <input
+          class="cat-prio"
+          type="number"
+          value={c.priority}
+          onchange={(e) => savePriority(c, e)}
+          title={t("catPriority")}
+          aria-label="{t('catPriority')} {c.name}"
+        />
         <button class="icon-btn" title={t("browseFolder")} aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
         <button class="icon-btn" title={t("resetFolder")} aria-label="{t('resetFolder')} {c.name}" onclick={() => resetFolder(c.id)}><Icon name="retry" size={16} /></button>
         <button class="icon-btn danger" aria-label="Delete {c.name}" onclick={() => removeCategory(c.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
-    <div class="schedform">
-      <input bind:value={ncName} placeholder={t("catName")} aria-label={t("catName")} style="width:110px" />
-      <input bind:value={ncDir} placeholder={t("catFolder")} aria-label={t("catFolder")} />
-      <button class="icon-btn" title={t("browseFolder")} aria-label={t("browseFolder")} onclick={browseNewDir}><Icon name="folder" size={16} /></button>
+    <div class="cat-form">
+      <p class="hint cat-form-title">{t("addCategory")}</p>
+      <div class="cat-form-row">
+        <input bind:value={ncName} placeholder={t("catName")} aria-label={t("catName")} style="width:130px" />
+        <input bind:value={ncDir} placeholder={t("catFolder")} aria-label={t("catFolder")} style="flex:1" />
+        <button class="icon-btn" title={t("browseFolder")} aria-label={t("browseFolder")} onclick={browseNewDir}><Icon name="folder" size={16} /></button>
+      </div>
       <input bind:value={ncRules} placeholder={t("catRules")} aria-label={t("catRules")} />
-      <button class="btn" onclick={addCategory}><Icon name="add" size={16} /> {t("addCategory")}</button>
+      <input bind:value={ncMime} placeholder={t("catMimeRules")} aria-label={t("catMimeRules")} />
+      <input bind:value={ncHost} placeholder={t("catHostRules")} aria-label={t("catHostRules")} />
+      <div class="btn-row">
+        <button class="btn" onclick={addCategory}><Icon name="add" size={16} /> {t("addCategory")}</button>
+        <button class="btn btn-ghost" onclick={restoreDefaults}><Icon name="retry" size={16} /> {t("restoreDefaults")}</button>
+      </div>
     </div>
-    <button class="btn btn-ghost" onclick={restoreDefaults}><Icon name="retry" size={16} /> {t("restoreDefaults")}</button>
   </section>
 
   <section class="section">

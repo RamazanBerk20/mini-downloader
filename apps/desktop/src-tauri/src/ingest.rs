@@ -121,11 +121,15 @@ pub fn job_from_row(d: &Download) -> CaptureJob {
         page_url: d.page_url.clone(),
         cookie_store_id: None,
         torrent_b64: None,
+        batch_id: None,
+        batch_name: None,
     }
 }
 
 /// Add a captured job. Returns the stable DB id on success. aria2 handles
-/// http/magnet/torrent/metalink; yt-dlp handles HLS/DASH.
+/// http/magnet/torrent/metalink; yt-dlp handles HLS/DASH. `checksum` is a
+/// pre-normalized aria2 checksum value (`sha-256=<hex>`), honored for HTTP only.
+#[allow(clippy::too_many_arguments)]
 pub async fn ingest(
     engine: &Engine,
     db: &Db,
@@ -134,6 +138,8 @@ pub async fn ingest(
     defaults: EngineDefaults,
     job: CaptureJob,
     category_id: Option<i64>,
+    package_id: Option<i64>,
+    checksum: Option<String>,
 ) -> Result<i64, String> {
     let dir = download_dir.to_string_lossy().to_string();
     // For streaming media the "url" we track/resume from is the page URL.
@@ -184,6 +190,7 @@ pub async fn ingest(
         }
     }
 
+    let checksum = checksum.filter(|_| matches!(job.kind, DownloadKind::Http));
     let id = db
         .insert_download(&NewDownload {
             url: target.clone(),
@@ -197,12 +204,16 @@ pub async fn ingest(
             extra_headers: extra_headers_json(&job),
             page_url: job.page_url.clone(),
             format_id: None,
+            package_id,
+            mime: job.mime.clone(),
+            checksum: checksum.clone(),
+            media_opts: None,
         })
         .map_err(|e| e.to_string())?;
 
     if is_stream {
         db.set_status(id, DownloadStatus::Active).map_err(|e| e.to_string())?;
-        ytdlp.start(id, target, None, job.header_lines());
+        ytdlp.start(id, target, None, job.header_lines(), None);
         return Ok(id);
     }
 
@@ -216,6 +227,11 @@ pub async fn ingest(
         .filter(|n| *n > 0)
     {
         opts_map.insert("max-download-limit".into(), Value::String(limit.to_string()));
+    }
+    // aria2 verifies the finished file against this and fails the download
+    // (error 32) on mismatch.
+    if let Some(sum) = &checksum {
+        opts_map.insert("checksum".into(), Value::String(sum.clone()));
     }
     let opts = Value::Object(opts_map);
     let result: anyhow::Result<Vec<String>> = match job.kind {
@@ -254,6 +270,7 @@ pub async fn ingest(
                     kind: kind_str(job.kind).into(),
                     referrer: job.referrer.clone(),
                     category_id,
+                    package_id,
                     ..Default::default()
                 }) {
                     let _ = db.set_gid(child_id, g);
@@ -283,7 +300,11 @@ pub async fn reissue(
     if !matches!(job.kind, DownloadKind::Http | DownloadKind::Magnet) {
         return Err("cannot reissue this download type".to_string());
     }
-    let opts = Value::Object(build_add_options(&job, &row.dir, &defaults));
+    let mut opts_map = build_add_options(&job, &row.dir, &defaults);
+    if let (Some(sum), DownloadKind::Http) = (&row.checksum, job.kind) {
+        opts_map.insert("checksum".into(), Value::String(sum.clone()));
+    }
+    let opts = Value::Object(opts_map);
     let gid = engine
         .rpc
         .add_uri(&[job.url.clone()], opts)
@@ -313,5 +334,7 @@ pub fn job_from_url(url: String) -> CaptureJob {
         page_url: None,
         cookie_store_id: None,
         torrent_b64: None,
+        batch_id: None,
+        batch_name: None,
     }
 }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 fn is_link(t: &str) -> bool {
@@ -36,6 +36,22 @@ pub fn spawn(app: AppHandle, on: Arc<AtomicBool>) {
             }
             last = t.clone();
             if is_link(&t) {
+                // Magnet handling off → don't even offer clipboard magnets.
+                if t.to_ascii_lowercase().starts_with("magnet:") {
+                    let skip = app
+                        .try_state::<crate::state::AppState>()
+                        .map(|s| {
+                            s.db.get_setting("handle_magnets")
+                                .ok()
+                                .flatten()
+                                .map(|v| v == "false")
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+                    if skip {
+                        continue;
+                    }
+                }
                 let _ = app.emit("clipboard:detected", json!({ "url": t }));
             }
         }

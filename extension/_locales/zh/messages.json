@@ -1,23 +1,92 @@
 {
-  "extName": { "message": "Mini Downloader 连接器" },
-  "extDescription": { "message": "在浏览器中捕获下载并交给 Mini Downloader。" },
-  "actionTitle": { "message": "使用 Mini Downloader 下载" },
-  "popupCatchDownloads": { "message": "捕获下载" },
-  "popupOptions": { "message": "选项" },
-  "popupMediaOnPage": { "message": "此页面上的媒体" },
-  "popupGrabPageVideo": { "message": "抓取页面视频" },
-  "popupNoMedia": { "message": "未检测到媒体。" },
-  "popupGrab": { "message": "抓取" },
-  "popupSent": { "message": "已发送" },
-  "optionsTitle": { "message": "Mini Downloader 连接器选项" },
-  "optionsMinSize": { "message": "捕获的最小文件大小（字节）" },
-  "optionsMinSizeHint": { "message": "小于此大小的下载将交给浏览器处理。默认 1048576（1 MiB）。" },
-  "optionsDisabledHosts": { "message": "禁用的网站（每行一个主机名）" },
-  "optionsSave": { "message": "保存" },
-  "optionsSaved": { "message": "已保存" },
-  "notifySentTitle": { "message": "已发送到 Mini Downloader" },
-  "notifyRejectedTitle": { "message": "Mini Downloader 拒绝了此下载" },
-  "notifyUnknownError": { "message": "未知错误" },
-  "notifyNotReachableTitle": { "message": "无法连接 Mini Downloader" },
-  "notifyNotReachableBody": { "message": "请打开 Mini Downloader 并启用浏览器集成。" }
+  "extName": {
+    "message": "Mini Downloader 连接器"
+  },
+  "extDescription": {
+    "message": "在浏览器中捕获下载并交给 Mini Downloader。"
+  },
+  "actionTitle": {
+    "message": "使用 Mini Downloader 下载"
+  },
+  "popupCatchDownloads": {
+    "message": "捕获下载"
+  },
+  "popupOptions": {
+    "message": "选项"
+  },
+  "popupMediaOnPage": {
+    "message": "此页面上的媒体"
+  },
+  "popupGrabPageVideo": {
+    "message": "抓取页面视频"
+  },
+  "popupNoMedia": {
+    "message": "未检测到媒体。"
+  },
+  "popupGrab": {
+    "message": "抓取"
+  },
+  "popupSent": {
+    "message": "已发送"
+  },
+  "optionsTitle": {
+    "message": "Mini Downloader 连接器选项"
+  },
+  "optionsMinSize": {
+    "message": "捕获的最小文件大小（字节）"
+  },
+  "optionsMinSizeHint": {
+    "message": "小于此大小的下载将交给浏览器处理。默认 1048576（1 MiB）。"
+  },
+  "optionsDisabledHosts": {
+    "message": "禁用的网站（每行一个主机名）"
+  },
+  "optionsSave": {
+    "message": "保存"
+  },
+  "optionsSaved": {
+    "message": "已保存"
+  },
+  "optionsTestConnection": {
+    "message": "测试与应用的连接"
+  },
+  "optionsTestOk": {
+    "message": "已连接"
+  },
+  "optionsTestNoResponse": {
+    "message": "无响应"
+  },
+  "optionsTestFail": {
+    "message": "无法连接——Mini Downloader 是否已安装并正在运行？"
+  },
+  "notifySentTitle": {
+    "message": "已发送到 Mini Downloader"
+  },
+  "notifyRejectedTitle": {
+    "message": "Mini Downloader 拒绝了此下载"
+  },
+  "notifyUnknownError": {
+    "message": "未知错误"
+  },
+  "notifyNotReachableTitle": {
+    "message": "无法连接 Mini Downloader"
+  },
+  "notifyNotReachableBody": {
+    "message": "请打开 Mini Downloader 并启用浏览器集成。"
+  },
+  "optionsLanguage": {
+    "message": "语言"
+  },
+  "optionsLangBrowser": {
+    "message": "浏览器默认"
+  },
+  "optionsBlacklist": {
+    "message": "忽略的文件类型（逗号分隔）"
+  },
+  "optionsBlacklistHint": {
+    "message": "这些类型的下载留在浏览器中。"
+  },
+  "optionsMagnetSkip": {
+    "message": "将磁力链接交给系统处理"
+  }
 }

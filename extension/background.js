@@ -16,6 +16,8 @@ const DEFAULTS = {
   enabled: true,
   minSize: 1048576, // 1 MiB floor: ignore tiny/inline files
   disabledHosts: [],
+  blacklistExts: [], // file types the browser keeps (lowercase, no dot)
+  blacklistMagnet: false, // leave magnet: links to the system handler
 };
 let settings = { ...DEFAULTS };
 
@@ -193,6 +195,24 @@ function filenameFromCD(cd, url) {
   return undefined;
 }
 
+// Lowercased trailing extension of a filename or URL path ("" when none).
+function extOf(name) {
+  const m = /\.([a-z0-9]{1,8})$/i.exec((name || "").split(/[?#]/)[0]);
+  return m ? m[1].toLowerCase() : "";
+}
+
+// User blacklist: these file types stay with the browser's own download flow.
+function isBlacklisted(url, filename) {
+  const list = settings.blacklistExts || [];
+  if (!list.length) return false;
+  let fromUrl = "";
+  try {
+    fromUrl = extOf(new URL(url).pathname);
+  } catch {}
+  const fromName = extOf(filename);
+  return (fromName && list.includes(fromName)) || (fromUrl && list.includes(fromUrl));
+}
+
 function shouldHijack(cd, ct, len, url) {
   if (/^blob:|^data:/i.test(url)) return false;
   if (cd && /attachment/i.test(cd)) return true;
@@ -241,6 +261,7 @@ b.webRequest.onHeadersReceived.addListener(
     const lenRaw = parseInt(h["content-length"] || "-1", 10);
     const len = Number.isNaN(lenRaw) ? -1 : lenRaw;
     if (!shouldHijack(cd, ct, len, d.url)) return {};
+    if (isBlacklisted(d.url, filenameFromCD(cd, d.url))) return {};
     if (seen(d.url)) return { cancel: true };
 
     const job = jobFromRequest(
@@ -267,6 +288,8 @@ b.downloads.onCreated.addListener(async (item) => {
     if (/^blob:|^data:/i.test(item.url)) return;
     await settingsReady;
     if (!enabledForUrl(item.url)) return;
+    if (item.url.startsWith("magnet:") && settings.blacklistMagnet) return;
+    if (isBlacklisted(item.url, item.filename ? item.filename.split("/").pop() : "")) return;
     if (item.totalBytes > -1 && item.totalBytes < settings.minSize) return;
     if (seen(item.url)) return;
 
@@ -339,6 +362,17 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
       const cs = await b.cookies.getAll({ url: tab.url });
       cookie = cs.map((c) => `${c.name}=${c.value}`).join("; ");
     } catch {}
+    // Group the whole harvest into one package on the app side. Only batches of
+    // 2+ get a batch id — a single hit lands ungrouped like a normal capture.
+    const batchId = urls.length >= 2 && crypto.randomUUID ? crypto.randomUUID() : undefined;
+    let batchName;
+    if (batchId) {
+      try {
+        batchName = (tab.title || "").trim() || new URL(tab.url).hostname;
+      } catch {
+        batchName = undefined;
+      }
+    }
     let sent = 0;
     for (const u of urls) {
       const reply = await sendJob({
@@ -347,6 +381,8 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
         cookie: cookie || undefined,
         extra_headers: [],
         kind: "http",
+        batch_id: batchId,
+        batch_name: batchName,
       });
       if (reply && reply.ok) sent++;
     }

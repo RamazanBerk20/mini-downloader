@@ -122,6 +122,8 @@ mod tests {
             page_url: None,
             cookie_store_id: None,
             torrent_b64: None,
+            batch_id: None,
+            batch_name: None,
         }
     }
 

@@ -3,7 +3,7 @@
 //! The browser launches this per captured job (via `sendNativeMessage`), owns
 //! its stdio, and kills it after one reply. The real work runs in the
 //! long-lived Tauri app, which this process reaches over a local socket (Unix
-//! domain socket on Linux/macOS, named pipe on Windows) — launching the app
+//! domain socket on Linux, named pipe on Windows) — launching the app
 //! first if it is not already running.
 //!
 //! Framing:

@@ -118,6 +118,17 @@ pub struct Download {
     pub format_id: Option<String>,
     /// Per-download speed cap in bytes/sec (aria2 `max-download-limit`).
     pub speed_limit: Option<i64>,
+    /// Grouping handle into `packages` (batch adds, playlists).
+    pub package_id: Option<i64>,
+    /// Content-Type captured at ingest — category mime rules match on it.
+    pub mime: Option<String>,
+    /// aria2 checksum option value (`sha-256=<hex>`), verified on completion.
+    pub checksum: Option<String>,
+    /// Deferred start time (unix secs) while status is `Scheduled`.
+    pub start_at: Option<i64>,
+    /// JSON-encoded yt-dlp media options (subs/audio-extract/thumbnail),
+    /// replayed on resume/retry.
+    pub media_opts: Option<String>,
 }
 
 impl Download {
@@ -143,6 +154,22 @@ pub struct NewDownload {
     pub extra_headers: Option<String>,
     pub page_url: Option<String>,
     pub format_id: Option<String>,
+    pub package_id: Option<i64>,
+    pub mime: Option<String>,
+    pub checksum: Option<String>,
+    pub media_opts: Option<String>,
+}
+
+/// A group of downloads added together (batch paste, playlist, bulk capture).
+/// Pure grouping — status/progress are derived from members in the UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Package {
+    pub id: i64,
+    pub name: String,
+    pub category_id: Option<i64>,
+    pub dir: Option<String>,
+    pub status: String,
+    pub created_at: i64,
 }
 
 /// A category: a destination folder + match rules for auto-organize.

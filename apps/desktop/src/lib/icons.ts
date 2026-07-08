@@ -27,6 +27,7 @@ export const ICONS = {
   heart: `<path d="M12 20s-7-4.6-9.2-9A4.6 4.6 0 0 1 12 6.5 4.6 4.6 0 0 1 21.2 11C19 15.4 12 20 12 20z"/>`,
   "chevron-up": `<path d="M6 15l6-6 6 6"/>`,
   "chevron-down": `<path d="M6 9l6 6 6-6"/>`,
+  "chevron-right": `<path d="M9 6l6 6-6 6"/>`,
 } as const;
 
 export type IconName = keyof typeof ICONS;

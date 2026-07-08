@@ -3,16 +3,20 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, on, errText } from "./api";
   import { announce, trapFocus } from "./lib/a11y";
-  import type { Category, Download, Tick, UpdateInfo } from "./types";
+  import type { Category, Download, Package, Tick, UpdateInfo } from "./types";
   import Sidebar from "./Sidebar.svelte";
   import DownloadRow from "./DownloadRow.svelte";
+  import PackageGroup from "./PackageGroup.svelte";
   import Icon from "./lib/Icon.svelte";
   import Settings from "./Settings.svelte";
   import MediaGrab from "./MediaGrab.svelte";
   import LinkGrabber from "./LinkGrabber.svelte";
+  import DetailPanel from "./DetailPanel.svelte";
   import { t } from "./lib/i18n.svelte";
 
   let all = $state<Download[]>([]);
+  let packages = $state<Package[]>([]);
+  let collapsedPkgs = $state<Set<number>>(new Set());
   let categories = $state<Category[]>([]);
   let statusFilter = $state("all");
   let categoryId = $state<number | null>(null);
@@ -27,6 +31,31 @@
   let showHelp = $state(false);
   let selected = $state<Set<number>>(new Set());
   let updateInfo = $state<UpdateInfo | null>(null);
+  let expandedId = $state<number | null>(null);
+  let scheduleFor = $state<Download | null>(null);
+  let scheduleAt = $state("");
+  let showAddOpts = $state(false);
+  let addChecksum = $state("");
+
+  function toggleDetails(id: number) {
+    expandedId = expandedId === id ? null : id;
+  }
+
+  function openSchedule(d: Download) {
+    // Default to one hour from now, in the datetime-local format.
+    const dt = new Date(Date.now() + 3600_000);
+    dt.setSeconds(0, 0);
+    scheduleAt = new Date(dt.getTime() - dt.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+    scheduleFor = d;
+  }
+  async function saveScheduleAt() {
+    if (!scheduleFor) return;
+    const ts = Math.floor(new Date(scheduleAt).getTime() / 1000);
+    if (Number.isNaN(ts)) return;
+    const id = scheduleFor.id;
+    scheduleFor = null;
+    await act(() => api.scheduleDownload(id, ts));
+  }
 
   let addEl: HTMLInputElement;
   let searchEl: HTMLInputElement;
@@ -59,15 +88,56 @@
           paused: t("titlePaused"),
           complete: t("titleCompleted"),
           error: t("titleFailed"),
+          scheduled: t("titleScheduled"),
         }[statusFilter] ?? "Downloads"),
   );
 
   async function refresh() {
     try {
       all = await api.list();
+      packages = await api.listPackages();
     } catch (e) {
       error = errText(e);
     }
+  }
+
+  // The flat filtered list regrouped for rendering: a package's first visible
+  // member pulls the whole (visible) group in at that position; everything
+  // else renders as a plain row.
+  type ListItem =
+    | { kind: "row"; d: Download }
+    | { kind: "pkg"; pkg: Package; items: Download[] };
+  const listItems = $derived.by(() => {
+    const byPkg = new Map<number, Download[]>();
+    for (const d of filtered) {
+      if (d.package_id != null) {
+        const arr = byPkg.get(d.package_id);
+        if (arr) arr.push(d);
+        else byPkg.set(d.package_id, [d]);
+      }
+    }
+    const out: ListItem[] = [];
+    const seen = new Set<number>();
+    for (const d of filtered) {
+      if (d.package_id == null) {
+        out.push({ kind: "row", d });
+        continue;
+      }
+      if (seen.has(d.package_id)) continue;
+      seen.add(d.package_id);
+      const pkg = packages.find((p) => p.id === d.package_id);
+      const items = byPkg.get(d.package_id)!;
+      if (pkg) out.push({ kind: "pkg", pkg, items });
+      else for (const m of items) out.push({ kind: "row", d: m });
+    }
+    return out;
+  });
+
+  function togglePkg(id: number) {
+    const s = new Set(collapsedPkgs);
+    if (s.has(id)) s.delete(id);
+    else s.add(id);
+    collapsedPkgs = s;
   }
 
   // Patch a single row in place. Returns false if the id isn't loaded yet (a
@@ -142,7 +212,7 @@
           // Ignore stale ticks for rows the client no longer considers running
           // (e.g. a tick emitted just before a pause that lands after it) — don't
           // resurrect a paused/finished row to "active".
-          if (d.status === "paused" || d.status === "complete" || d.status === "error" || d.status === "removed") continue;
+          if (d.status === "paused" || d.status === "scheduled" || d.status === "complete" || d.status === "error" || d.status === "removed") continue;
           d.completed_bytes = u.completed;
           d.total_bytes = u.total;
           d.download_speed = u.dl_speed;
@@ -221,8 +291,8 @@
     if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); selected = new Set(filtered.map((d) => d.id)); return; }
     if (e.key === "/") { e.preventDefault(); searchEl?.focus(); return; }
     if (e.key === "?") { e.preventDefault(); showHelp = !showHelp; return; }
-    if (e.key >= "1" && e.key <= "5") {
-      setStatus(["all", "active", "paused", "complete", "error"][+e.key - 1]);
+    if (e.key >= "1" && e.key <= "6") {
+      setStatus(["all", "active", "paused", "scheduled", "complete", "error"][+e.key - 1]);
     }
   }
 
@@ -232,8 +302,10 @@
     const u = url.trim();
     if (!u) return;
     try {
-      await api.add(u);
+      await api.add(u, addChecksum.trim() || undefined);
       url = "";
+      addChecksum = "";
+      showAddOpts = false;
       announce(t("announceAdded"));
       await refresh();
     } catch (err) {
@@ -320,12 +392,12 @@
       </div>
       <div class="head-actions">
         {#if completedCount > 0}
-          <button class="btn btn-ghost" title="Remove completed downloads from the list" onclick={() => act(api.removeCompleted)}>
+          <button class="btn btn-ghost" title={t("clearCompleted")} onclick={() => act(api.removeCompleted)}>
             <Icon name="check" size={15} /> {t("clearCompleted")}
           </button>
         {/if}
         {#if errorCount > 0}
-          <button class="btn btn-ghost" title="Remove failed downloads from the list" onclick={() => act(api.removeFailed)}>
+          <button class="btn btn-ghost" title={t("clearFailed")} onclick={() => act(api.removeFailed)}>
             <Icon name="warning" size={15} /> {t("clearFailed")}
           </button>
         {/if}
@@ -346,8 +418,30 @@
 
     <form class="addbar" onsubmit={add}>
       <input placeholder={t("addPlaceholder")} bind:value={url} bind:this={addEl} aria-label="Add download URL" />
+      <button
+        class="icon-btn"
+        type="button"
+        title={t("checksumLabel")}
+        aria-label={t("checksumLabel")}
+        aria-expanded={showAddOpts}
+        onclick={() => (showAddOpts = !showAddOpts)}
+      >
+        <Icon name={showAddOpts ? "chevron-up" : "chevron-down"} size={16} />
+      </button>
       <button class="btn btn-primary" type="submit"><Icon name="add" size={16} /> {t("add")}</button>
     </form>
+    {#if showAddOpts}
+      <div class="add-opts">
+        <label class="hint" for="add-checksum">{t("checksumLabel")}</label>
+        <input
+          id="add-checksum"
+          type="text"
+          bind:value={addChecksum}
+          spellcheck="false"
+          style="font-family:var(--font-mono); font-size:0.78rem; flex:1"
+        />
+      </div>
+    {/if}
 
     {#if error}
       <div class="banner" role="alert">
@@ -387,8 +481,23 @@
         </div>
       {:else}
         <ul class="dl-list" role="list">
-          {#each filtered as d, i (d.id)}
-            <DownloadRow {d} {i} onact={act} selected={selected.has(d.id)} onselect={toggleSelect} onmenu={openMenu} onreorder={reorder} />
+          {#each listItems as item, i (item.kind === "pkg" ? `p${item.pkg.id}` : `d${item.d.id}`)}
+            {#if item.kind === "pkg"}
+              <PackageGroup pkg={item.pkg} items={item.items} collapsed={collapsedPkgs.has(item.pkg.id)} ontoggle={togglePkg} onact={act} />
+              {#if !collapsedPkgs.has(item.pkg.id)}
+                {#each item.items as d, j (d.id)}
+                  <DownloadRow {d} i={i + j} grouped onact={act} selected={selected.has(d.id)} onselect={toggleSelect} onmenu={openMenu} onreorder={reorder} expanded={expandedId === d.id} ondetails={toggleDetails} />
+                  {#if expandedId === d.id}
+                    <DetailPanel {d} onact={act} />
+                  {/if}
+                {/each}
+              {/if}
+            {:else}
+              <DownloadRow d={item.d} {i} onact={act} selected={selected.has(item.d.id)} onselect={toggleSelect} onmenu={openMenu} onreorder={reorder} expanded={expandedId === item.d.id} ondetails={toggleDetails} />
+              {#if expandedId === item.d.id}
+                <DetailPanel d={item.d} onact={act} />
+              {/if}
+            {/if}
           {/each}
         </ul>
       {/if}
@@ -416,7 +525,7 @@
     <div class="shortcuts">
       <span class="k"><kbd>Ctrl</kbd><kbd>N</kbd></span><span class="d">{t("scFocusAdd")}</span>
       <span class="k"><kbd>/</kbd></span><span class="d">{t("scSearch")}</span>
-      <span class="k"><kbd>1</kbd>–<kbd>5</kbd></span><span class="d">{t("scFilter")}</span>
+      <span class="k"><kbd>1</kbd>–<kbd>6</kbd></span><span class="d">{t("scFilter")}</span>
       <span class="k"><kbd>Ctrl</kbd><kbd>A</kbd></span><span class="d">{t("scSelectAll")}</span>
       <span class="k"><kbd>Ctrl</kbd><kbd>,</kbd></span><span class="d">{t("scSettings")}</span>
       <span class="k"><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>P</kbd></span><span class="d">{t("scPauseAll")}</span>
@@ -426,6 +535,24 @@
       <span class="k"><kbd>Enter</kbd></span><span class="d">{t("scOpen")}</span>
       <span class="k"><kbd>Esc</kbd></span><span class="d">{t("scClose")}</span>
     </div>
+  </div>
+{/if}
+
+{#if scheduleFor}
+  <div class="overlay" onclick={() => (scheduleFor = null)} role="presentation"></div>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sched-h" tabindex="-1" use:trapFocus={{ onEscape: () => (scheduleFor = null) }}>
+    <div class="dhead">
+      <h2 id="sched-h">{t("scheduleAction")}</h2>
+      <button class="icon-btn" aria-label={t("close")} onclick={() => (scheduleFor = null)}><Icon name="close" size={18} /></button>
+    </div>
+    <p class="hint" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{scheduleFor.filename || scheduleFor.url}</p>
+    <div class="srow" style="margin-top:0.4rem">
+      <span>{t("scheduleAt")}</span>
+      <input type="datetime-local" bind:value={scheduleAt} aria-label={t("scheduleAt")} />
+    </div>
+    <button class="btn btn-primary" style="margin-top:0.8rem" onclick={saveScheduleAt}>
+      <Icon name="clock" size={16} /> {t("scheduleAction")}
+    </button>
   </div>
 {/if}
 
@@ -450,12 +577,18 @@
 {#if menu}
   <div class="ctx-backdrop" onclick={() => (menu = null)} oncontextmenu={(e) => { e.preventDefault(); menu = null; }} role="presentation"></div>
   <div class="ctx-menu" style="left:{menu.x}px; top:{menu.y}px" role="menu">
+    <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; toggleDetails(id); }}>{t("detailTitle")}</button>
     <button role="menuitem" onclick={() => { navigator.clipboard.writeText(menu!.d.url).catch(() => {}); menu = null; }}>{t("copyUrl")}</button>
     {#if menu.d.status === "complete"}
       <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.openFolder(id)); }}>{t("openFolder")}</button>
     {/if}
     {#if menu.d.status === "error"}
       <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.retry(id)); }}>{t("retry")}</button>
+    {/if}
+    {#if menu.d.status === "scheduled"}
+      <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.scheduleDownload(id, null)); }}>{t("scheduleCancel")}</button>
+    {:else if menu.d.status !== "complete"}
+      <button role="menuitem" onclick={() => { const d = menu!.d; menu = null; openSchedule(d); }}>{t("scheduleAction")}</button>
     {/if}
     <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.remove(id, false)); }}>{t("remove")}</button>
     <button role="menuitem" class="danger" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.remove(id, true)); }}>{t("removeDelete")}</button>

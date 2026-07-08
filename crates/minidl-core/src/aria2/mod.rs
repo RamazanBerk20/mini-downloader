@@ -12,7 +12,7 @@ pub(crate) mod sandbox;
 pub use event::{Aria2Event, Aria2Status};
 pub use options::{build_add_options, EngineDefaults};
 pub use process::{Aria2Process, LaunchOptions};
-pub use rpc::{RpcClient, POLL_KEYS, STATUS_KEYS};
+pub use rpc::{RpcClient, DETAIL_KEYS, POLL_KEYS, STATUS_KEYS};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};

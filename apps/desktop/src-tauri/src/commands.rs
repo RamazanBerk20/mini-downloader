@@ -8,7 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use minidl_core::grabber::ParsedLink;
 use minidl_core::ipc::{CaptureJob, DownloadKind};
-use minidl_core::model::{Category, Download, DownloadStatus, NewDownload, Schedule};
+use minidl_core::model::{Category, Download, DownloadStatus, NewDownload, Package, Schedule};
 use minidl_core::ytdlp::MediaInfo;
 
 use crate::errors::CommandError;
@@ -28,12 +28,29 @@ fn base_name(path: &str) -> String {
         .to_string()
 }
 
+/// Normalize an optional user-supplied SHA-256 hex digest into aria2's
+/// `checksum` option value, rejecting malformed input early.
+fn normalize_checksum(checksum: Option<String>) -> Result<Option<String>, CommandError> {
+    match checksum.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()) {
+        Some(s) if s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Ok(Some(format!("sha-256={s}")))
+        }
+        Some(_) => Err("invalid SHA-256 checksum (expected 64 hex characters)".into()),
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
-pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Download, CommandError> {
+pub async fn add_download(
+    url: String,
+    checksum: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Download, CommandError> {
     let url = url.trim().to_string();
     if url.is_empty() {
         return Err("empty URL".into());
     }
+    let checksum = normalize_checksum(checksum)?;
     let defaults = state.defaults.lock().unwrap().clone();
     let id = ingest(
         &state.engine,
@@ -43,6 +60,8 @@ pub async fn add_download(url: String, state: State<'_, AppState>) -> Result<Dow
         defaults,
         job_from_url(url),
         None,
+        None,
+        checksum,
     )
     .await?;
     state
@@ -74,14 +93,21 @@ pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), C
     Ok(())
 }
 
-#[tauri::command]
-pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+/// Shared resume logic (command + per-download scheduler): restart yt-dlp with
+/// replayed auth/format/options, or unpause the GID with a reissue fallback.
+pub(crate) async fn resume_row(state: &AppState, id: i64) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         if d.is_ytdlp() {
-            // Replay auth + the originally chosen format so quality is stable.
+            // Flip to Active BEFORE start(): the driver task re-checks the DB
+            // status after acquiring its semaphore slot and would self-cancel
+            // on a still-Scheduled/Paused row.
+            state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+            // Replay auth + the originally chosen format + media options so
+            // quality and post-processing are stable across kill+restart.
             let job = crate::ingest::job_from_row(&d);
             let url = d.page_url.clone().unwrap_or_else(|| d.url.clone());
-            state.ytdlp.start(id, url, d.format_id.clone(), job.header_lines());
+            let opts = crate::ytdlp::MediaOpts::from_row(d.media_opts.as_deref());
+            state.ytdlp.start(id, url, d.format_id.clone(), job.header_lines(), opts);
         } else if let Some(gid) = &d.gid {
             // Fast path: unpause. If aria2 has forgotten the GID (reconcile
             // orphan after a crash), re-issue the request with the original auth
@@ -90,9 +116,70 @@ pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), 
                 let defaults = state.defaults.lock().unwrap().clone();
                 crate::ingest::reissue(&state.engine, &state.db, defaults, &d).await?;
             }
+        } else {
+            // Never handed to aria2 (e.g. scheduled straight from queued) —
+            // issue it now.
+            let defaults = state.defaults.lock().unwrap().clone();
+            crate::ingest::reissue(&state.engine, &state.db, defaults, &d).await?;
         }
         state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+        // A directly-resumed scheduled row must not fire again later.
+        if d.start_at.is_some() {
+            let _ = state.db.set_start_at(id, None);
+        }
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resume_download(id: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+    resume_row(&state, id).await
+}
+
+/// Defer (or un-defer with `None`) a download to start at `start_at` (unix
+/// seconds). A live transfer is stopped first; the 20 s scheduler tick starts
+/// due rows.
+#[tauri::command]
+pub async fn schedule_download(
+    id: i64,
+    start_at: Option<i64>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let d = state.db.get(id).map_err(err)?.ok_or("download not found")?;
+    match start_at {
+        Some(ts) => {
+            if matches!(d.status, DownloadStatus::Active | DownloadStatus::Waiting) {
+                if d.is_ytdlp() {
+                    state.ytdlp.cancel(id);
+                } else if let Some(gid) = &d.gid {
+                    let _ = state.engine.rpc.pause(gid).await;
+                }
+            }
+            state.db.set_start_at(id, Some(ts)).map_err(err)?;
+            state.db.set_status(id, DownloadStatus::Scheduled).map_err(err)?;
+        }
+        None => {
+            state.db.set_start_at(id, None).map_err(err)?;
+            if d.status == DownloadStatus::Scheduled {
+                state.db.set_status(id, DownloadStatus::Paused).map_err(err)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Persist + live-apply the HTTP/SOCKS proxy (`all-proxy`; empty clears). New
+/// aria2 downloads pick it up immediately; yt-dlp reads the setting per run.
+#[tauri::command]
+pub async fn apply_proxy(value: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+    let v = value.trim().to_string();
+    state.db.set_setting("proxy", &v).map_err(err)?;
+    state
+        .engine
+        .rpc
+        .change_global_option(json!({ "all-proxy": v }))
+        .await
+        .map_err(err)?;
     Ok(())
 }
 
@@ -109,7 +196,8 @@ pub async fn retry_download(id: i64, state: State<'_, AppState>) -> Result<Downl
         let job = crate::ingest::job_from_row(&row);
         let url = row.page_url.clone().unwrap_or_else(|| row.url.clone());
         state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
-        state.ytdlp.start(id, url, row.format_id.clone(), job.header_lines());
+        let opts = crate::ytdlp::MediaOpts::from_row(row.media_opts.as_deref());
+        state.ytdlp.start(id, url, row.format_id.clone(), job.header_lines(), opts);
     } else {
         let defaults = state.defaults.lock().unwrap().clone();
         crate::ingest::reissue(&state.engine, &state.db, defaults, &row).await?;
@@ -167,6 +255,9 @@ pub async fn remove_download(
             }
         }
         state.db.delete(id).map_err(err)?;
+        if let Some(pkg) = d.package_id {
+            let _ = state.db.delete_package_if_empty(pkg);
+        }
     }
     Ok(())
 }
@@ -192,6 +283,9 @@ async fn remove_by_status(state: &State<'_, AppState>, status: &str) -> Result<u
         }
         if state.db.delete(d.id).is_ok() {
             removed += 1;
+            if let Some(pkg) = d.package_id {
+                let _ = state.db.delete_package_if_empty(pkg);
+            }
         }
     }
     Ok(removed)
@@ -326,6 +420,8 @@ async fn add_file_job(
         page_url: None,
         cookie_store_id: None,
         torrent_b64: Some(b64),
+        batch_id: None,
+        batch_name: None,
     };
     let defaults = state.defaults.lock().unwrap().clone();
     let id = ingest(
@@ -336,23 +432,31 @@ async fn add_file_job(
         defaults,
         job,
         None,
+        None,
+        None,
     )
     .await?;
     state.db.get(id).map_err(err)?.ok_or_else(|| err("download vanished"))
 }
 
-/// Probe a page/URL for downloadable video formats (yt-dlp).
+/// Probe a page/URL for downloadable video formats (yt-dlp). With `playlist`
+/// the URL is probed as a flat playlist (entry list instead of formats).
 #[tauri::command]
-pub async fn probe_media(url: String, state: State<'_, AppState>) -> Result<MediaInfo, CommandError> {
-    state.ytdlp.probe(&url, &[]).await.map_err(err)
+pub async fn probe_media(
+    url: String,
+    playlist: bool,
+    state: State<'_, AppState>,
+) -> Result<MediaInfo, CommandError> {
+    state.ytdlp.probe(&url, &[], playlist).await.map_err(err)
 }
 
 /// Start a yt-dlp download of a chosen format (or best when None). Persists the
-/// format so resume keeps the same quality.
+/// format + media options so resume keeps the same quality and post-processing.
 #[tauri::command]
 pub async fn add_media_download(
     url: String,
     format_id: Option<String>,
+    opts: Option<crate::ytdlp::MediaOpts>,
     state: State<'_, AppState>,
 ) -> Result<Download, CommandError> {
     let dir = state.download_dir.to_string_lossy().to_string();
@@ -363,12 +467,69 @@ pub async fn add_media_download(
             dir,
             kind: "video".into(),
             format_id: format_id.clone(),
+            media_opts: opts.as_ref().and_then(|o| o.to_json()),
             ..Default::default()
         })
         .map_err(err)?;
     state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
-    state.ytdlp.start(id, url, format_id, vec![]);
+    state.ytdlp.start(id, url, format_id, vec![], opts);
     state.db.get(id).map_err(err)?.ok_or_else(|| err("download vanished"))
+}
+
+#[derive(serde::Deserialize)]
+pub struct PlaylistEntryIn {
+    pub url: String,
+    pub title: Option<String>,
+}
+
+/// Add the selected playlist entries as one package: one yt-dlp row per entry,
+/// all with the same quality preset + media options. The yt-dlp driver's
+/// internal semaphore keeps the process count bounded.
+#[tauri::command]
+pub async fn add_playlist_batch(
+    entries: Vec<PlaylistEntryIn>,
+    package_name: String,
+    quality: Option<String>,
+    opts: Option<crate::ytdlp::MediaOpts>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, CommandError> {
+    if entries.is_empty() {
+        return Ok(0);
+    }
+    let package_id = if entries.len() >= 2 {
+        let name = {
+            let n = package_name.trim();
+            if n.is_empty() { "Playlist" } else { n }
+        };
+        state.db.insert_package(name, None, None).ok()
+    } else {
+        None
+    };
+    let dir = state.download_dir.to_string_lossy().to_string();
+    let opts_json = opts.as_ref().and_then(|o| o.to_json());
+    let mut added = 0;
+    for e in entries {
+        let id = state
+            .db
+            .insert_download(&NewDownload {
+                url: e.url.clone(),
+                // Display name until yt-dlp reports the real file on completion.
+                filename: e.title.clone(),
+                dir: dir.clone(),
+                kind: "video".into(),
+                format_id: quality.clone(),
+                package_id,
+                media_opts: opts_json.clone(),
+                ..Default::default()
+            })
+            .map_err(err)?;
+        state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+        state.ytdlp.start(id, e.url, quality.clone(), vec![], opts.clone());
+        added += 1;
+    }
+    let _ = app.emit(EV_STATE, json!({ "batch": added }));
+    Ok(added)
 }
 
 #[tauri::command]
@@ -425,6 +586,147 @@ pub async fn set_setting(key: String, value: String, state: State<'_, AppState>)
     state.db.set_setting(&key, &value).map_err(err)
 }
 
+// ---- download details (expandable panel) ----
+
+#[derive(serde::Serialize)]
+pub struct DetailFile {
+    pub index: i64,
+    pub path: String,
+    pub length: i64,
+    pub completed_length: i64,
+    pub selected: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct DetailPeer {
+    pub ip: String,
+    pub down_speed: i64,
+    pub up_speed: i64,
+    pub seeder: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct DownloadDetails {
+    pub id: i64,
+    pub url: String,
+    pub dir: String,
+    pub kind: String,
+    pub error_message: Option<String>,
+    pub num_pieces: i64,
+    pub piece_length: i64,
+    pub verified_length: i64,
+    pub files: Vec<DetailFile>,
+    pub peers: Vec<DetailPeer>,
+    /// False when aria2 no longer knows the GID (or the row is yt-dlp) — the
+    /// DB-only fields above are still valid.
+    pub live: bool,
+}
+
+fn v_str(v: &serde_json::Value, k: &str) -> String {
+    v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
+}
+/// aria2 serializes numbers as strings — parse defensively.
+fn v_i64(v: &serde_json::Value, k: &str) -> i64 {
+    v.get(k)
+        .and_then(|x| x.as_str().map(String::from).or_else(|| x.as_i64().map(|n| n.to_string())))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Everything the expandable row panel shows: per-file progress + selection,
+/// peers (torrents), piece info. yt-dlp rows and forgotten GIDs degrade to the
+/// DB-only subset.
+#[tauri::command]
+pub async fn get_download_details(
+    id: i64,
+    state: State<'_, AppState>,
+) -> Result<DownloadDetails, CommandError> {
+    let d = state.db.get(id).map_err(err)?.ok_or("download not found")?;
+    let mut det = DownloadDetails {
+        id: d.id,
+        url: d.url.clone(),
+        dir: d.dir.clone(),
+        kind: d.kind.clone(),
+        error_message: d.error_message.clone(),
+        num_pieces: 0,
+        piece_length: 0,
+        verified_length: 0,
+        files: Vec::new(),
+        peers: Vec::new(),
+        live: false,
+    };
+    if d.is_ytdlp() {
+        return Ok(det);
+    }
+    let Some(gid) = &d.gid else { return Ok(det) };
+    let Ok(st) = state.engine.rpc.tell_status(gid, minidl_core::aria2::DETAIL_KEYS).await else {
+        return Ok(det);
+    };
+    det.live = true;
+    det.num_pieces = v_i64(&st, "numPieces");
+    det.piece_length = v_i64(&st, "pieceLength");
+    det.verified_length = v_i64(&st, "verifiedLength");
+    if let Some(files) = st.get("files").and_then(|f| f.as_array()) {
+        det.files = files
+            .iter()
+            .map(|f| DetailFile {
+                index: v_i64(f, "index"),
+                path: v_str(f, "path"),
+                length: v_i64(f, "length"),
+                completed_length: v_i64(f, "completedLength"),
+                selected: v_str(f, "selected") != "false",
+            })
+            .collect();
+    }
+    if matches!(d.kind.as_str(), "torrent" | "magnet") {
+        det.peers = state
+            .engine
+            .rpc
+            .get_peers(gid)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .map(|p| DetailPeer {
+                ip: v_str(p, "ip"),
+                down_speed: v_i64(p, "downloadSpeed"),
+                up_speed: v_i64(p, "uploadSpeed"),
+                seeder: v_str(p, "seeder") == "true",
+            })
+            .collect();
+    }
+    Ok(det)
+}
+
+/// Restrict a torrent to the given file indices (1-based, aria2 `select-file`).
+/// aria2 only honors the option for waiting/paused GIDs, so an active download
+/// is paused around the change.
+#[tauri::command]
+pub async fn set_torrent_files(
+    id: i64,
+    indices: Vec<u32>,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    if indices.is_empty() {
+        return Err("select at least one file".into());
+    }
+    let d = state.db.get(id).map_err(err)?.ok_or("download not found")?;
+    if !matches!(d.kind.as_str(), "torrent" | "magnet") {
+        return Err("file selection only applies to torrents".into());
+    }
+    let gid = d.gid.as_deref().ok_or("download has no engine handle yet")?;
+    let sel = indices.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    let opts = json!({ "select-file": sel });
+    if d.status == DownloadStatus::Active {
+        let _ = state.engine.rpc.pause(gid).await;
+        let res = state.engine.rpc.change_option(gid, opts).await;
+        let _ = state.engine.rpc.unpause(gid).await;
+        res.map_err(err)?;
+    } else {
+        state.engine.rpc.change_option(gid, opts).await.map_err(err)?;
+    }
+    Ok(())
+}
+
 // ---- link grabber ----
 
 #[tauri::command]
@@ -435,16 +737,31 @@ pub async fn grab_links(text: String) -> Result<Vec<ParsedLink>, CommandError> {
 #[tauri::command]
 pub async fn add_links_batch(
     urls: Vec<String>,
+    package_name: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<usize, CommandError> {
+    let urls: Vec<String> = urls
+        .into_iter()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .collect();
+    // Group multi-link batches into a package; a single link stays ungrouped.
+    let package_id = if urls.len() >= 2 {
+        let name = package_name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| {
+                let host = minidl_core::grabber::host_of(&urls[0]);
+                if host.is_empty() { "Batch".to_string() } else { host }
+            });
+        state.db.insert_package(&name, None, None).ok()
+    } else {
+        None
+    };
     let mut added = 0;
     let defaults = state.defaults.lock().unwrap().clone();
     for u in urls {
-        let u = u.trim().to_string();
-        if u.is_empty() {
-            continue;
-        }
         if ingest(
             &state.engine,
             &state.db,
@@ -453,6 +770,8 @@ pub async fn add_links_batch(
             defaults.clone(),
             job_from_url(u),
             None,
+            package_id,
+            None,
         )
         .await
         .is_ok()
@@ -460,8 +779,17 @@ pub async fn add_links_batch(
             added += 1;
         }
     }
+    // An all-failed batch would otherwise leave an empty group header behind.
+    if let Some(pkg) = package_id {
+        let _ = state.db.delete_package_if_empty(pkg);
+    }
     let _ = app.emit(EV_STATE, json!({ "batch": added }));
     Ok(added)
+}
+
+#[tauri::command]
+pub async fn list_packages(state: State<'_, AppState>) -> Result<Vec<Package>, CommandError> {
+    state.db.list_packages().map_err(err)
 }
 
 // ---- scheduler ----

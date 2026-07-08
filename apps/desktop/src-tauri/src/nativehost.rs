@@ -1,12 +1,14 @@
 //! App-side of the browser bridge: a local-socket listener (Unix domain socket
-//! on Linux/macOS, named pipe on Windows) the native host forwards captured
+//! on Linux, named pipe on Windows) the native host forwards captured
 //! jobs to, plus native-messaging manifest installation (files on Unix,
 //! registry keys on Windows).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use interprocess::local_socket::tokio::{prelude::*, Stream};
 use interprocess::local_socket::ListenerOptions;
@@ -31,6 +33,36 @@ struct Ctx {
     ytdlp: Arc<crate::ytdlp::YtDlp>,
     download_dir: PathBuf,
     defaults: Arc<Mutex<EngineDefaults>>,
+    /// Bulk-capture grouping: `batch_id` → package id. Jobs arrive one per
+    /// connection, so the mapping lives across connections; entries expire so
+    /// a re-used id from a crashed browser session can't join a stale group.
+    batches: Arc<Mutex<HashMap<String, (i64, Instant)>>>,
+}
+
+const BATCH_TTL: Duration = Duration::from_secs(600);
+
+/// Resolve the package for a job's `batch_id`: first job of a batch creates the
+/// package (named from `batch_name`, falling back to the URL host), the rest
+/// reuse it. Returns `(package_id, created_now)` so a rejected first job can
+/// clean up the package it just created.
+fn batch_package(ctx: &Ctx, job: &minidl_core::ipc::CaptureJob) -> Option<(i64, bool)> {
+    let bid = job.batch_id.as_deref()?;
+    let mut map = ctx.batches.lock().unwrap_or_else(|e| e.into_inner());
+    map.retain(|_, (_, at)| at.elapsed() < BATCH_TTL);
+    if let Some((pkg, _)) = map.get(bid) {
+        return Some((*pkg, false));
+    }
+    let name = job
+        .batch_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| minidl_core::grabber::host_of(&job.url));
+    let name = if name.is_empty() { "Batch".to_string() } else { name };
+    let pkg = ctx.db.insert_package(&name, None, None).ok()?;
+    map.insert(bid.to_string(), (pkg, Instant::now()));
+    Some((pkg, true))
 }
 
 /// Bind the bridge socket and serve forwarded jobs. Also records this app's
@@ -52,6 +84,7 @@ pub fn spawn_listener(
         ytdlp,
         download_dir,
         defaults,
+        batches: Arc::new(Mutex::new(HashMap::new())),
     };
 
     tauri::async_runtime::spawn(async move {
@@ -130,6 +163,8 @@ async fn handle_conn(mut conn: Stream, ctx: Ctx) {
         }
         Ok(req) if req.protocol_version == ipc::PROTOCOL_VERSION => {
             let defaults = ctx.defaults.lock().unwrap().clone();
+            let batch_id = req.job.batch_id.clone();
+            let batch = batch_package(&ctx, &req.job);
             match ingest(
                 &ctx.engine,
                 &ctx.db,
@@ -137,6 +172,8 @@ async fn handle_conn(mut conn: Stream, ctx: Ctx) {
                 &ctx.download_dir,
                 defaults,
                 req.job,
+                None,
+                batch.map(|(pkg, _)| pkg),
                 None,
             )
             .await
@@ -146,7 +183,16 @@ async fn handle_conn(mut conn: Stream, ctx: Ctx) {
                     focus_window(&ctx.app);
                     BridgeReply::accepted(id)
                 }
-                Err(e) => BridgeReply::rejected(e),
+                Err(e) => {
+                    // A batch's first job created the package just above — if
+                    // that job is rejected, drop the empty package (and the
+                    // mapping) so an all-rejected harvest leaves no dead row.
+                    if let (Some((pkg, true)), Some(bid)) = (batch, batch_id) {
+                        let _ = ctx.db.delete_package_if_empty(pkg);
+                        ctx.batches.lock().unwrap_or_else(|p| p.into_inner()).remove(&bid);
+                    }
+                    BridgeReply::rejected(e)
+                }
             }
         }
         Ok(_) => BridgeReply::rejected("unsupported protocol version"),

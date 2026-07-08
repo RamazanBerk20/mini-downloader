@@ -35,6 +35,21 @@ fn ingest_url(app: &tauri::AppHandle, url: String) {
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let state = app.state::<AppState>();
+        // "Handle magnet links" off: passive magnet arrivals (deep link, argv,
+        // second instance) are ignored so the user's torrent app keeps them.
+        // Explicit in-app adds go through commands and are unaffected.
+        if url.starts_with("magnet:") {
+            let handle = state
+                .db
+                .get_setting("handle_magnets")
+                .ok()
+                .flatten()
+                .map(|v| v != "false")
+                .unwrap_or(true);
+            if !handle {
+                return;
+            }
+        }
         let defaults = state.defaults.lock().unwrap().clone();
         let _ = ingest::ingest(
             &state.engine,
@@ -43,6 +58,8 @@ fn ingest_url(app: &tauri::AppHandle, url: String) {
             &state.download_dir,
             defaults,
             ingest::job_from_url(url),
+            None,
+            None,
             None,
         )
         .await;
@@ -196,7 +213,19 @@ pub fn run() {
                         ingest_url(&h, url.to_string());
                     }
                 });
-                let _ = app.deep_link().register_all();
+                // With magnet handling off, only claim our own scheme so the
+                // OS routes magnet: to the user's torrent app instead.
+                let handle_magnets = db
+                    .get_setting("handle_magnets")
+                    .ok()
+                    .flatten()
+                    .map(|v| v != "false")
+                    .unwrap_or(true);
+                if handle_magnets {
+                    let _ = app.deep_link().register_all();
+                } else {
+                    let _ = app.deep_link().register("minidownloader");
+                }
             }
 
             // Close-to-tray: hide instead of quitting (unless disabled).
@@ -267,8 +296,14 @@ pub fn run() {
             commands::set_setting,
             commands::probe_media,
             commands::add_media_download,
+            commands::add_playlist_batch,
             commands::grab_links,
             commands::add_links_batch,
+            commands::list_packages,
+            commands::get_download_details,
+            commands::set_torrent_files,
+            commands::schedule_download,
+            commands::apply_proxy,
             commands::list_schedules,
             commands::save_schedule,
             commands::delete_schedule,

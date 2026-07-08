@@ -30,6 +30,7 @@
     { key: "all", label: "statusAll", icon: "list" },
     { key: "active", label: "statusActive", icon: "download" },
     { key: "paused", label: "statusPaused", icon: "pause" },
+    { key: "scheduled", label: "statusScheduled", icon: "clock" },
     { key: "complete", label: "statusCompleted", icon: "check" },
     { key: "error", label: "statusFailed", icon: "warning" },
   ];
@@ -45,6 +46,7 @@
     all: all.length,
     active: all.filter((d) => d.status === "active" || d.status === "waiting").length,
     paused: all.filter((d) => d.status === "paused").length,
+    scheduled: all.filter((d) => d.status === "scheduled").length,
     complete: all.filter((d) => d.status === "complete").length,
     error: all.filter((d) => d.status === "error").length,
   } as Record<string, number>);

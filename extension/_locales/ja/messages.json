@@ -1,23 +1,92 @@
 {
-  "extName": { "message": "Mini Downloader コネクター" },
-  "extDescription": { "message": "ブラウザーのダウンロードを捕捉して Mini Downloader に渡します。" },
-  "actionTitle": { "message": "Mini Downloader でダウンロード" },
-  "popupCatchDownloads": { "message": "ダウンロードを捕捉" },
-  "popupOptions": { "message": "オプション" },
-  "popupMediaOnPage": { "message": "このページのメディア" },
-  "popupGrabPageVideo": { "message": "ページの動画を取得" },
-  "popupNoMedia": { "message": "メディアは検出されませんでした。" },
-  "popupGrab": { "message": "取得" },
-  "popupSent": { "message": "送信済み" },
-  "optionsTitle": { "message": "Mini Downloader コネクターのオプション" },
-  "optionsMinSize": { "message": "捕捉する最小ファイルサイズ（バイト）" },
-  "optionsMinSizeHint": { "message": "これより小さいダウンロードはブラウザーに任せます。既定値 1048576（1 MiB）。" },
-  "optionsDisabledHosts": { "message": "無効なサイト（1 行に 1 つのホスト名）" },
-  "optionsSave": { "message": "保存" },
-  "optionsSaved": { "message": "保存しました" },
-  "notifySentTitle": { "message": "Mini Downloader に送信しました" },
-  "notifyRejectedTitle": { "message": "Mini Downloader がダウンロードを拒否しました" },
-  "notifyUnknownError": { "message": "不明なエラー" },
-  "notifyNotReachableTitle": { "message": "Mini Downloader に接続できません" },
-  "notifyNotReachableBody": { "message": "Mini Downloader を開き、ブラウザー連携を有効にしてください。" }
+  "extName": {
+    "message": "Mini Downloader コネクター"
+  },
+  "extDescription": {
+    "message": "ブラウザーのダウンロードを捕捉して Mini Downloader に渡します。"
+  },
+  "actionTitle": {
+    "message": "Mini Downloader でダウンロード"
+  },
+  "popupCatchDownloads": {
+    "message": "ダウンロードを捕捉"
+  },
+  "popupOptions": {
+    "message": "オプション"
+  },
+  "popupMediaOnPage": {
+    "message": "このページのメディア"
+  },
+  "popupGrabPageVideo": {
+    "message": "ページの動画を取得"
+  },
+  "popupNoMedia": {
+    "message": "メディアは検出されませんでした。"
+  },
+  "popupGrab": {
+    "message": "取得"
+  },
+  "popupSent": {
+    "message": "送信済み"
+  },
+  "optionsTitle": {
+    "message": "Mini Downloader コネクターのオプション"
+  },
+  "optionsMinSize": {
+    "message": "捕捉する最小ファイルサイズ（バイト）"
+  },
+  "optionsMinSizeHint": {
+    "message": "これより小さいダウンロードはブラウザーに任せます。既定値 1048576（1 MiB）。"
+  },
+  "optionsDisabledHosts": {
+    "message": "無効なサイト（1 行に 1 つのホスト名）"
+  },
+  "optionsSave": {
+    "message": "保存"
+  },
+  "optionsSaved": {
+    "message": "保存しました"
+  },
+  "optionsTestConnection": {
+    "message": "アプリとの接続をテスト"
+  },
+  "optionsTestOk": {
+    "message": "接続済み"
+  },
+  "optionsTestNoResponse": {
+    "message": "応答がありません"
+  },
+  "optionsTestFail": {
+    "message": "接続できません — Mini Downloader はインストールされ起動していますか？"
+  },
+  "notifySentTitle": {
+    "message": "Mini Downloader に送信しました"
+  },
+  "notifyRejectedTitle": {
+    "message": "Mini Downloader がダウンロードを拒否しました"
+  },
+  "notifyUnknownError": {
+    "message": "不明なエラー"
+  },
+  "notifyNotReachableTitle": {
+    "message": "Mini Downloader に接続できません"
+  },
+  "notifyNotReachableBody": {
+    "message": "Mini Downloader を開き、ブラウザー連携を有効にしてください。"
+  },
+  "optionsLanguage": {
+    "message": "言語"
+  },
+  "optionsLangBrowser": {
+    "message": "ブラウザーの既定"
+  },
+  "optionsBlacklist": {
+    "message": "無視するファイル形式（カンマ区切り）"
+  },
+  "optionsBlacklistHint": {
+    "message": "これらの形式のダウンロードはブラウザーに残ります。"
+  },
+  "optionsMagnetSkip": {
+    "message": "マグネットリンクをシステムに任せる"
+  }
 }
