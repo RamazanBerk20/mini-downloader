@@ -11,7 +11,7 @@ downloads, torrents, metalinks), yt-dlp grabs video (HLS/DASH, YouTube and
 friends), and a browser extension captures downloads straight from Firefox and
 Chromium — cookies, referer and all.
 
-![Mini Downloader](docs/screenshot.png)
+![Mini Downloader](docs/screenshot-3.png)
 
 ## Features
 
