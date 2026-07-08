@@ -16,19 +16,34 @@ Chromium — cookies, referer and all.
 ## Features
 
 - **Multi-connection downloads** — up to 16 segments / 16 connections per
-  server via aria2, with per-download pause/resume and global speed limits
+  server via aria2, with pause/resume, per-download and global speed limits,
+  and optional SHA-256 verification on completion
 - **Browser capture** — Firefox & Chromium extension hands downloads (with
-  cookies/referer/user-agent) to the app through native messaging
+  cookies/referer/user-agent) to the app through native messaging, with a
+  file-type blacklist and a "leave magnets to the system" mode for handing
+  types back to the browser or your torrent client
 - **Video grabbing** — yt-dlp integration: probe formats, pick quality, mux
-  with ffmpeg; in-page media sniffing (HLS/DASH)
-- **Torrents & magnets** — aria2's BitTorrent engine + magnet deep links
-- **Link grabber** — paste text/HTML, extract and batch-add links
-- **Scheduler** — pause/resume-all or speed-limit rules per weekday/time
+  with ffmpeg; **playlists** with an entry picker, subtitles, audio extraction
+  (mp3/m4a/opus), thumbnail embedding; in-page media sniffing (HLS/DASH)
+- **Torrents & magnets** — aria2's BitTorrent engine + magnet deep links,
+  per-torrent **file selection**, and a detail panel with per-file progress,
+  peers and pieces
+- **Packages** — batch adds, playlists and bulk browser captures group into
+  collapsible packages with aggregate progress and group actions
+- **Link grabber** — paste text/HTML, extract and batch-add links (with
+  numeric-range expansion like `file[001-050].jpg`)
+- **Scheduling** — pause/resume-all or speed-limit rules per weekday/time,
+  plus "start this download at…" for individual downloads
 - **Categories** — auto-organize finished files (Archives, Audio, Video, …)
-  into localized user folders
-- **Clipboard watcher**, system tray, autostart, desktop notifications
+  into localized user folders by extension, MIME type or source host, with
+  per-category priority
+- **Network controls** — proxy (HTTP/SOCKS), BitTorrent DHT toggle, optional
+  Landlock sandboxing of helper processes, private-address blocking
+- **Clipboard watcher**, system tray, autostart, desktop notifications,
+  on-complete actions (quit/sleep/shutdown/custom command)
 - **10 languages** — English, Türkçe, Español, Français, Deutsch, Русский,
-  العربية (RTL), 中文, 日本語, 한국어
+  العربية (RTL), 中文, 日本語, 한국어 — in the app *and* the extension
+  (which can also override the browser language)
 - Warm-monochrome minimal UI with full keyboard navigation and screen-reader
   support
 
