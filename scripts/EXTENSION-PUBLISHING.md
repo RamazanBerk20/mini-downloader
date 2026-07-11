@@ -1,12 +1,13 @@
-# Publishing the browser extension (one-click install)
+# Publishing the browser extension
 
-Manually side-loading is a pain: Firefox's `about:debugging` add-on is
-**temporary** (wiped on restart). A permanent, one-click install needs the
-extension published to the stores. The release workflow already has the signing/
-publish steps wired — they stay dormant until you add the secrets below (like
-Windows code signing, this needs *your* accounts). Once published, paste the
-store URLs into `STORE_URLS` in `apps/desktop/src/Settings.svelte` so the app
-shows "Get for Firefox / Chrome" buttons.
+The extension is available from the public stores:
+
+- Firefox: https://addons.mozilla.org/firefox/addon/mini-downloader-connector/
+- Chrome: https://chromewebstore.google.com/detail/mini-downloader-connector/hhaobmkdgijodfieadeeanjmnneckafj
+
+The desktop app links to those listings from Settings → Browser integration.
+No runtime key, AMO token, Chrome OAuth token, or extension private key is
+needed for users to install the published extension.
 
 ## Firefox — addons.mozilla.org (AMO)
 
@@ -19,8 +20,8 @@ shows "Get for Firefox / Chrome" buttons.
    - `unlisted` — signs a self-distributable `.xpi` that the workflow attaches to
      the release; users install it permanently by opening the file. No review,
      no store page. Good as an immediate stopgap.
-5. Cut a release — the **Sign Firefox add-on (AMO)** step runs `web-ext sign`.
-6. Fill `STORE_URLS.firefox` with the AMO listing URL once approved.
+5. Cut a release whose tag matches the extension manifest version — the
+   **Sign Firefox add-on (AMO)** step runs `web-ext sign`.
 
 ## Chromium — Chrome Web Store (CWS)
 
@@ -31,25 +32,25 @@ shows "Get for Firefox / Chrome" buttons.
 3. Create OAuth creds + a refresh token (see chrome-webstore-upload-cli docs).
 4. Add repo secrets: `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`,
    `CWS_ITEM_ID`.
-5. Cut a release — the **Publish Chrome extension (Web Store)** step uploads +
-   auto-publishes.
-6. Fill `STORE_URLS.chrome` with the Web Store URL.
+5. Cut a release whose tag matches the extension manifest version — the
+   **Publish Chrome extension (Web Store)** step uploads + auto-publishes.
 
-## Activate IDM-style auto-install
+## Installation behavior
 
-Once published, the app can auto-install the extension into every browser (no
-about:debugging, no store visit) — set the constants in
-`apps/desktop/src-tauri/src/extinstall.rs`:
+There is no credential that enables a public desktop app to silently install
+extensions in consumer browsers. Firefox requires an explicit user install for
+desktop companion apps. Chrome's external-install flow still requires user
+confirmation on Windows and macOS. Do not ship publisher credentials in the
+app or ask users for them.
 
-- `AMO_XPI_URL` → the AMO "latest signed .xpi" link, e.g.
-  `https://addons.mozilla.org/firefox/downloads/latest/<slug>/latest.xpi`.
-  The app drops it into every Firefox profile's `extensions/` dir (all OSes, no
-  root) — works even without a Chrome account.
-- `CWS_EXT_ID` → the Chrome Web Store id (needs the CWS listing). The app writes
-  the Web Store external-install pointer (Linux JSON / Windows registry).
+Fully unattended installation is available only for managed enterprise
+deployments. Administrators can deploy the existing public artifacts through
+their browser policies:
 
-Bump to **1.2.5** when these are set (per the release plan). Firefox users then
-get the add-on automatically on next launch; Chromium needs the CWS listing.
+- Firefox add-on ID: `minidownloader@ramazan.dev`; AMO XPI URL:
+  `https://addons.mozilla.org/firefox/downloads/latest/minidownloader@ramazan.dev/latest.xpi`
+- Chrome extension ID: `hhaobmkdgijodfieadeeanjmnneckafj`; update URL:
+  `https://clients2.google.com/service/update2/crx`
 
 ## Notes
 

@@ -11,9 +11,12 @@
   import type { Category, Schedule, UpdateInfo } from "./types";
   import { t, LOCALES, setLocale, normalizeLocale, type LocaleCode, type MsgKey } from "./lib/i18n.svelte";
 
-  // Store listing URLs — filled by the maintainer after publishing to AMO /
-  // Chrome Web Store (buttons only render when set). See scripts/EXTENSION-PUBLISHING.md.
-  const STORE_URLS = { firefox: "", chrome: "" };
+  // Locale-neutral public store listings. Browser extensions must be installed
+  // with the browser's own consent UI; see scripts/EXTENSION-PUBLISHING.md.
+  const STORE_URLS = {
+    firefox: "https://addons.mozilla.org/firefox/addon/mini-downloader-connector/",
+    chrome: "https://chromewebstore.google.com/detail/mini-downloader-connector/hhaobmkdgijodfieadeeanjmnneckafj",
+  };
   const RELEASE_URL = "https://github.com/RamazanBerk20/mini-downloader/releases/latest";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -267,14 +270,6 @@
       browserStatus = "Error: " + errText(e);
     }
   }
-  async function installExtension() {
-    try {
-      browserStatus = await api.autoInstallExtension();
-    } catch (e) {
-      browserStatus = errText(e);
-    }
-  }
-
   const fmtTime = (m: number) =>
     `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
   const daysLabel = (mask: number) => DAYS.filter((_, i) => mask & (1 << i)).map((k) => t(k)).join(" ");
@@ -462,10 +457,11 @@
     {/if}
     <div class="btn-row">
       <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
-      <button class="btn" onclick={installExtension}><Icon name="download" size={16} /> {t("installExtension")}</button>
     </div>
     {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
-    <p class="hint">{t("browserHint")}</p>
+    {#if !STORE_URLS.firefox && !STORE_URLS.chrome}
+      <p class="hint">{t("browserHint")}</p>
+    {/if}
     <button class="btn btn-ghost" onclick={() => openUrl(RELEASE_URL)}>{t("installGuide")}</button>
   </section>
 

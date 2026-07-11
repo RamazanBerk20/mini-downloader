@@ -89,10 +89,9 @@ jobs:
   extension:
     needs: build # the draft release must exist before uploading to it
     runs-on: ubuntu-22.04
-    # Store-publish secrets (mapped to env so the step `if:` can test them). All
-    # optional — the job packages + attaches the zips regardless; signing/publish
-    # only run when the maintainer has added the secrets. See
-    # scripts/EXTENSION-PUBLISHING.md.
+    # Store-publish secrets (mapped to env so the step `if:` can test them). The
+    # job always attaches the current extension zips, but submits them to stores
+    # only when the app release tag matches the extension manifest version.
     env:
       AMO_API_KEY: ${{ secrets.AMO_API_KEY }}
       AMO_API_SECRET: ${{ secrets.AMO_API_SECRET }}
@@ -103,26 +102,30 @@ jobs:
       CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
     steps:
       - uses: actions/checkout@v4
+      - id: extension_version
+        name: Read extension version
+        run: echo "version=$(node -p 'require(\"./extension/manifest.json\").version')" >> "$GITHUB_OUTPUT"
       - name: Package browser extensions
         run: |
           ./scripts/build-extension.sh
           cd dist-ext
-          (cd firefox && zip -qr ../mini-downloader-firefox-${{ github.ref_name }}.zip .)
-          (cd chrome && zip -qr ../mini-downloader-chrome-${{ github.ref_name }}.zip .)
+          (cd firefox && zip -qr ../mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip .)
+          (cd chrome && zip -qr ../mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip .)
       - name: Attach extension packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${{ github.ref_name }}" \
-            dist-ext/mini-downloader-firefox-${{ github.ref_name }}.zip \
-            dist-ext/mini-downloader-chrome-${{ github.ref_name }}.zip \
+            dist-ext/mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip \
+            dist-ext/mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip \
             --repo "${{ github.repository }}" --clobber
 
       # Sign / submit the Firefox add-on to AMO. Channel `listed` submits for
       # store review; `unlisted` returns a self-installable signed .xpi which is
-      # then attached to the release. Skipped entirely without AMO secrets.
+      # then attached to the release. A desktop-only release never re-submits an
+      # unchanged extension.
       - name: Sign Firefox add-on (AMO)
-        if: ${{ env.AMO_API_KEY != '' }}
+        if: ${{ env.AMO_API_KEY != '' && github.ref_name == format('v{0}', steps.extension_version.outputs.version) }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -138,9 +141,9 @@ jobs:
           fi
 
       # Upload + publish the Chromium build to the Chrome Web Store. Skipped
-      # without CWS secrets.
+      # without CWS secrets or when this is a desktop-only release.
       - name: Publish Chrome extension (Web Store)
-        if: ${{ env.CWS_CLIENT_ID != '' }}
+        if: ${{ env.CWS_CLIENT_ID != '' && github.ref_name == format('v{0}', steps.extension_version.outputs.version) }}
         run: |
           # CWS rejects the `key` field (it assigns the id itself) — strip it.
           node -e "const f='dist-ext/chrome/manifest.json',m=require('./'+f);delete m.key;require('fs').writeFileSync(f,JSON.stringify(m,null,2))"

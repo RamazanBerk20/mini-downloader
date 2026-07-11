@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Single-source version bump across every file that hard-codes it, so an
-# extension manifest can't silently drift from the app version (which would
-# break native-messaging version checks). Run: ./scripts/bump-version.sh 1.2.3
+# Bump the desktop app's version only. The browser extension has an independent
+# store version and must be bumped/released separately. Run:
+# ./scripts/bump-version.sh 1.2.3
 set -euo pipefail
 
 V="${1:?usage: bump-version.sh X.Y.Z}"
@@ -15,15 +15,11 @@ cd "$root"
 sed -i -E 's/^version = "[0-9]+\.[0-9]+\.[0-9]+"/version = "'"$V"'"/' Cargo.toml
 sed -i -E 's/("version": ")[0-9]+\.[0-9]+\.[0-9]+"/\1'"$V"'"/' \
   apps/desktop/package.json \
-  apps/desktop/src-tauri/tauri.conf.json \
-  extension/manifest.json \
-  extension/manifest.chrome.json
-sed -i -E 's/^pkgver=[0-9]+\.[0-9]+\.[0-9]+/pkgver='"$V"'/' packaging/aur/*/PKGBUILD
-sed -i -E 's/^pkgrel=[0-9]+/pkgrel=1/' packaging/aur/*/PKGBUILD
+  apps/desktop/src-tauri/tauri.conf.json
 
 # Keep Cargo.lock in sync.
-cargo update -w >/dev/null 2>&1 || cargo check --workspace >/dev/null 2>&1 || true
+cargo check --workspace >/dev/null
 
 echo "Bumped to $V."
-echo "Next: after the GitHub release builds, run updpkgsums + 'makepkg --printsrcinfo > .SRCINFO'"
-echo "in each packaging/aur/* dir and push to the AUR."
+echo "Next: after the GitHub release builds, update the stable AUR packages"
+echo "with real checksums and regenerated .SRCINFO files."

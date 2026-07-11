@@ -2,7 +2,6 @@ mod clipboard;
 mod commands;
 mod errors;
 mod events;
-mod extinstall;
 mod ingest;
 mod nativehost;
 mod scheduler;
@@ -194,13 +193,6 @@ pub fn run() {
                 Ok(paths) => eprintln!("browser integration: {} manifest(s) installed", paths.len()),
                 Err(e) => eprintln!("browser integration not installed: {e}"),
             }
-            // IDM-style extension auto-install (no-op until the extension is
-            // published + the store URLs are set). Non-blocking: it may hit the
-            // network to fetch the signed .xpi.
-            tauri::async_runtime::spawn(async {
-                let _ = extinstall::auto_install().await;
-            });
-
             // System tray.
             tray::build(app.handle())?;
 
@@ -312,7 +304,6 @@ pub fn run() {
             commands::set_engine_defaults,
             updater::check_update,
             updater::install_update,
-            extinstall::auto_install_extension,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
