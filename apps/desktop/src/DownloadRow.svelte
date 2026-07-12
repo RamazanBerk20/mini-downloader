@@ -103,6 +103,9 @@
   const isAria2 = $derived(!(d.kind === "video" || d.kind === "hls" || d.kind === "dash"));
   // No known total while active → show an indeterminate bar, not a dead 0%.
   const indeterminate = $derived(d.status === "active" && d.total_bytes <= 0);
+  const completedWithoutSize = $derived(
+    d.status === "complete" && d.total_bytes <= 0 && d.completed_bytes <= 0,
+  );
 
   function onKey(e: KeyboardEvent) {
     if (e.target !== e.currentTarget) return;
@@ -116,6 +119,10 @@
     } else if (e.key === "Enter" && d.status === "complete") {
       e.preventDefault();
       onact(() => api.openFolder(d.id));
+    } else if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) {
+      e.preventDefault();
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      onmenu?.(d, rect.left + Math.min(40, rect.width / 2), rect.top + Math.min(36, rect.height / 2));
     }
   }
 </script>
@@ -127,7 +134,7 @@
   class:grouped
   style="--i:{i}"
   tabindex="0"
-  aria-label="{name(d)}, {t(STATUS_KEY[d.status] ?? 'statusActive')}, {pct(d)}%"
+  aria-label={t("downloadRowLabel", { name: name(d), status: t(STATUS_KEY[d.status] ?? "statusActive"), pct: pct(d) })}
   onkeydown={onKey}
   oncontextmenu={(e) => { e.preventDefault(); onmenu?.(d, e.clientX, e.clientY); }}
   draggable={d.status === "waiting"}
@@ -145,7 +152,7 @@
         type="checkbox"
         class="row-check"
         checked={selected}
-        aria-label="Select {name(d)}"
+        aria-label={t("selectDownload", { name: name(d) })}
         onclick={(e) => onselect?.(d.id, e)}
       />
     {/if}
@@ -160,9 +167,9 @@
     role="progressbar"
     aria-valuemin="0"
     aria-valuemax="100"
-    aria-valuenow={pct(d)}
-    aria-valuetext="{pct(d)}%"
-    aria-label="Download progress"
+    aria-valuenow={indeterminate ? undefined : pct(d)}
+    aria-valuetext={indeterminate ? t("fetchingMeta") : `${pct(d)}%`}
+    aria-label={t("downloadProgress")}
   >
     <span style="width:{indeterminate ? 30 : pct(d)}%"></span>
   </div>
@@ -171,6 +178,8 @@
     <span class="row-meta">
       {#if indeterminate}
         {t("fetchingMeta")}
+      {:else if completedWithoutSize}
+        {t("statusCompleted")}
       {:else}
         {fmt(d.completed_bytes)} / {d.total_bytes > 0 ? fmt(d.total_bytes) : "—"} · {pct(d)}%
       {/if}

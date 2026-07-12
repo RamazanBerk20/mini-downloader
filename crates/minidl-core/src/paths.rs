@@ -11,7 +11,8 @@ fn home() -> PathBuf {
 }
 
 /// Per-user data dir + our folder: `~/.local/share/minidownloader` on Linux,
-/// `%APPDATA%\minidownloader` on Windows. Holds the DB, aria2 session, logs.
+/// `%APPDATA%\minidownloader` on Windows. Holds the DB, sanitized aria2
+/// session state, logs.
 /// Must stay in sync with `minidl_ipc::data_dir()` (the native host reads the
 /// app-exec-path file from there).
 pub fn data_dir() -> PathBuf {

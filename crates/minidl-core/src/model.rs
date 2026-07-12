@@ -87,7 +87,13 @@ impl DownloadStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Download {
     pub id: i64,
+    /// The aria2 GID currently used for live control and progress. Metadata
+    /// downloads can replace this with a followed-by child GID.
     pub gid: Option<String>,
+    /// The durable GID written by aria2's session file. For magnets and remote
+    /// torrent/metalink URLs this remains the metadata-parent GID even when the
+    /// live `gid` has moved to a child transfer.
+    pub session_gid: Option<String>,
     pub url: String,
     pub filename: Option<String>,
     pub dir: String,

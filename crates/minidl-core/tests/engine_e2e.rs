@@ -85,3 +85,66 @@ async fn download_completes_with_notification() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Requires `aria2c` on PATH. A saved session must be inert at cold startup,
+/// then resume normally when the user explicitly asks it to. This protects the
+/// app-opening path without sacrificing aria2's partial-file continuation.
+#[tokio::test]
+#[ignore]
+async fn restored_session_stays_paused_until_explicit_resume() {
+    let dir = std::env::temp_dir().join(format!("ldm-paused-session-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("aria2.session"),
+        concat!(
+            "https://speed.cloudflare.com/__down?bytes=1048576\n",
+            " gid=0000000000000001\n",
+            " out=must-not-exist\n",
+        ),
+    )
+    .unwrap();
+
+    let engine = Engine::launch(LaunchOptions {
+        aria2c_path: None,
+        download_dir: dir.clone(),
+        data_dir: dir.clone(),
+        max_concurrent: 5,
+        ..Default::default()
+    })
+    .await
+    .expect("engine launch");
+
+    tokio::time::sleep(Duration::from_millis(750)).await;
+    assert!(!dir.join("must-not-exist").exists());
+    assert!(!dir.join("must-not-exist.aria2").exists());
+
+    engine
+        .rpc
+        .unpause("0000000000000001")
+        .await
+        .expect("explicit resume");
+    let completed = tokio::time::timeout(Duration::from_secs(45), async {
+        loop {
+            let status = engine
+                .rpc
+                .tell_status("0000000000000001", STATUS_KEYS)
+                .await
+                .unwrap_or_default();
+            if status.get("status").and_then(|value| value.as_str()) == Some("complete") {
+                break true;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .unwrap_or(false);
+    assert!(completed, "explicitly resumed session did not complete in time");
+    assert_eq!(
+        std::fs::metadata(dir.join("must-not-exist")).unwrap().len(),
+        1_048_576
+    );
+
+    engine.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -127,6 +127,16 @@ pub fn run() {
             }))
             .map_err(|e| e.to_string())?;
             let engine = Arc::new(engine);
+
+            // Restore saved jobs only while they are force-paused, match them
+            // to durable DB ownership, and purge invisible leftovers before the
+            // app exposes Resume or Resume All. This preserves the same aria2
+            // GID and partial state for a later explicit Resume.
+            tauri::async_runtime::block_on(async {
+                sync::restore_startup_session(&engine, &db).await;
+                sync::reconcile(&engine, &db).await;
+            });
+
             let split = db
                 .get_setting("split")
                 .ok()
@@ -170,14 +180,7 @@ pub fn run() {
                 data_dir,
             });
 
-            // Reconcile against the restored aria2 session, then start live sync.
-            let handle = app.handle().clone();
-            let eng = engine.clone();
-            let db_recon = db.clone();
-            tauri::async_runtime::spawn(async move {
-                sync::reconcile(&eng, &db_recon).await;
-                let _ = handle.emit(events::EV_RECONCILED, ());
-            });
+            let _ = app.handle().emit(events::EV_RECONCILED, ());
             sync::spawn(app.handle().clone(), engine.clone(), db.clone());
             scheduler::spawn(app.handle().clone(), engine.clone(), db.clone());
             clipboard::spawn(app.handle().clone(), clipboard_on);
@@ -288,6 +291,7 @@ pub fn run() {
             commands::restore_default_categories,
             commands::reset_category_dir,
             commands::get_setting,
+            commands::get_system_locale,
             commands::set_setting,
             commands::probe_media,
             commands::add_media_download,

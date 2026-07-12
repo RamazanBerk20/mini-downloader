@@ -66,6 +66,7 @@ export const api = {
   restoreDefaultCategories: () => invoke<Category[]>("restore_default_categories"),
   resetCategoryDir: (id: number) => invoke<void>("reset_category_dir", { id }),
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
+  getSystemLocale: () => invoke<string | null>("get_system_locale"),
   setSetting: (key: string, value: string) => invoke<void>("set_setting", { key, value }),
   grabLinks: (text: string) => invoke<ParsedLink[]>("grab_links", { text }),
   addLinksBatch: (urls: string[], packageName?: string) =>

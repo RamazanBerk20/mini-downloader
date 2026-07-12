@@ -28,6 +28,34 @@
     connectorStatus?: ConnectorStatus | null;
   } = $props();
 
+  type SettingsSection =
+    | "general"
+    | "network"
+    | "language"
+    | "connections"
+    | "extensions"
+    | "scheduler"
+    | "categories"
+    | "updates";
+  type BrowserFamily = "firefox" | "chromium";
+  type BrowserState =
+    | "browserStateChecking"
+    | "browserStateConnected"
+    | "browserStateInstalled"
+    | "browserStateNeedsExtension"
+    | "browserStateNotFound";
+
+  const SECTION_LINKS: Array<[SettingsSection, MsgKey]> = [
+    ["general", "sectGeneral"],
+    ["network", "sectNetwork"],
+    ["language", "sectLanguage"],
+    ["connections", "sectConnections"],
+    ["extensions", "sectExtensions"],
+    ["scheduler", "sectScheduler"],
+    ["categories", "sectCategories"],
+    ["updates", "sectUpdates"],
+  ];
+
   let autoOrganize = $state(true);
   let clipboardWatch = $state(false);
   let closeToTray = $state(true);
@@ -36,6 +64,8 @@
   let schedules = $state<Schedule[]>([]);
   let settingsStatus = $state("");
   let extensionsSection = $state<HTMLElement | null>(null);
+  let drawer = $state<HTMLElement | null>(null);
+  let activeSection = $state<SettingsSection>("general");
   let split = $state(16);
   let connections = $state(16);
 
@@ -52,6 +82,19 @@
       connectorStatus.chromiumProfileDetected ||
       !connectorStatus.firefoxProfileDetected,
   );
+
+  function browserState(family: BrowserFamily): BrowserState {
+    if (!connectorStatus) return "browserStateChecking";
+    const connected = family === "firefox" ? connectorStatus.firefoxDetected : connectorStatus.chromiumDetected;
+    const installed = family === "firefox" ? connectorStatus.firefoxConnectorInstalled : connectorStatus.chromiumConnectorInstalled;
+    const profile = family === "firefox" ? connectorStatus.firefoxProfileDetected : connectorStatus.chromiumProfileDetected;
+    if (connected) return "browserStateConnected";
+    if (installed) return "browserStateInstalled";
+    if (profile) return "browserStateNeedsExtension";
+    return "browserStateNotFound";
+  }
+  const firefoxState = $derived(browserState("firefox"));
+  const chromiumState = $derived(browserState("chromium"));
 
   const DAYS = ["dayMon", "dayTue", "dayWed", "dayThu", "dayFri", "daySat", "daySun"] as const;
   const ACTIONS: [string, MsgKey][] = [
@@ -79,6 +122,12 @@
   let sandboxChildren = $state(false);
   let blockPrivateIps = $state(false);
   let ocCustomCmd = $state("");
+  let ocCustomConfirmed = $state(false);
+  let customCommandRevision = 0;
+  // Persist consent updates in input order. Without this queue, a slow write
+  // of `false` from an edited command could land after a newer confirmation
+  // and silently disable (or, worse, preserve) the wrong command state.
+  let customConfirmationWrite: Promise<void> = Promise.resolve();
   let updateStatus = $state("");
   let update = $state<UpdateInfo | null>(null);
   let langChoice = $state("system");
@@ -102,6 +151,7 @@
     if (onComplete.startsWith("run:")) {
       ocCustomCmd = onComplete.slice(4);
       onComplete = "custom";
+      ocCustomConfirmed = (await api.getSetting("on_complete_command_confirmed")) === "true";
     }
     proxy = (await api.getSetting("proxy")) || "";
     handleMagnets = (await api.getSetting("handle_magnets")) !== "false";
@@ -128,8 +178,7 @@
   async function focusExtensions() {
     await tick();
     if (initialSection !== "extensions" || !extensionsSection) return;
-    extensionsSection.scrollIntoView({ block: "start", behavior: "smooth" });
-    extensionsSection.focus({ preventScroll: true });
+    goToSection("extensions", true);
   }
 
   $effect(() => {
@@ -152,11 +201,39 @@
   }
   async function onCompleteChange(e: Event) {
     onComplete = (e.target as HTMLSelectElement).value;
+    // Selecting a command never enables it by itself. The explicit check below
+    // is required after each command change.
+    if (onComplete === "custom") {
+      await invalidateCustomCommand();
+      return;
+    }
     await saveOnComplete();
   }
   async function saveOnComplete() {
-    const value = onComplete === "custom" ? `run:${ocCustomCmd.trim()}` : onComplete;
-    await api.setSetting("on_complete_action", value);
+    const revision = customCommandRevision;
+    const command = ocCustomCmd.trim();
+    if (onComplete === "custom") {
+      if (!command) {
+        settingsStatus = t("ocCustomRequired");
+        return;
+      }
+      if (!ocCustomConfirmed) {
+        settingsStatus = t("ocCustomConfirmRequired");
+        return;
+      }
+    }
+    try {
+      const value = onComplete === "custom" ? `run:${command}` : onComplete;
+      await api.setSetting("on_complete_action", value);
+      // If the command changed while its action value was being saved, leave
+      // it explicitly disabled. The queued write preserves event ordering.
+      const enableCustomCommand =
+        onComplete === "custom" && ocCustomConfirmed && revision === customCommandRevision;
+      await persistCustomConfirmation(enableCustomCommand);
+      settingsStatus = "";
+    } catch (e) {
+      settingsStatus = t("settingsSaveError", { msg: errText(e) });
+    }
   }
   let proxyStatus = $state("");
   async function saveProxy() {
@@ -235,7 +312,7 @@
     try {
       await api.setEngineDefaults(split, connections);
     } catch (e) {
-      settingsStatus = "Engine error: " + errText(e);
+      settingsStatus = t("settingsEngineError", { msg: errText(e) });
     }
   }
 
@@ -259,14 +336,17 @@
       if (autostart) await enable();
       else await disable();
     } catch (err) {
-      settingsStatus = "Autostart error: " + errText(err);
+      settingsStatus = t("settingsAutostartError", { msg: errText(err) });
     }
   }
   async function onLocaleChange(e: Event) {
     const val = (e.target as HTMLSelectElement).value;
     langChoice = val;
     if (val === "system") {
-      setLocale(normalizeLocale(navigator.language));
+      // Prefer the desktop's locale over the embedded WebView locale. On some
+      // Linux systems WebKit reports English although the session is Turkish.
+      const systemLocale = await api.getSystemLocale().catch(() => null);
+      setLocale(normalizeLocale(systemLocale ?? navigator.language));
       await api.setSetting("locale", "system");
     } else {
       setLocale(val as LocaleCode);
@@ -351,18 +431,68 @@
     });
     schedules = await api.listSchedules();
   }
+
+  function goToSection(section: SettingsSection, focus = false) {
+    activeSection = section;
+    void tick().then(() => {
+      const target = drawer?.querySelector<HTMLElement>(`#settings-${section}`);
+      if (!target) return;
+      target.scrollIntoView({ block: "start", behavior: "smooth" });
+      if (focus) target.focus({ preventScroll: true });
+    });
+  }
+
+  function persistCustomConfirmation(enabled: boolean): Promise<void> {
+    const write = customConfirmationWrite
+      .catch(() => {})
+      .then(() => api.setSetting("on_complete_command_confirmed", enabled ? "true" : "false"));
+    customConfirmationWrite = write.catch(() => {});
+    return write;
+  }
+
+  async function invalidateCustomCommand() {
+    customCommandRevision += 1;
+    ocCustomConfirmed = false;
+    settingsStatus = "";
+    // Disable the stored command immediately: changing a command should never
+    // leave the previous one eligible to run while it awaits reconfirmation.
+    try {
+      await persistCustomConfirmation(false);
+    } catch (e) {
+      settingsStatus = t("settingsSaveError", { msg: errText(e) });
+    }
+  }
+
+  async function onCustomConfirmationChange() {
+    if (!ocCustomConfirmed) {
+      await invalidateCustomCommand();
+      return;
+    }
+    await saveOnComplete();
+  }
 </script>
 
 <div class="overlay" onclick={onclose} role="presentation"></div>
-<div class="drawer" role="dialog" aria-modal="true" aria-labelledby="set-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
+<div class="drawer" bind:this={drawer} role="dialog" aria-modal="true" aria-labelledby="set-h" tabindex="-1" use:trapFocus={{ onEscape: onclose }}>
   <div class="dhead">
     <h2 id="set-h">{t("settings")}</h2>
     <button class="icon-btn" aria-label={t("close")} onclick={onclose}><Icon name="close" size={18} /></button>
   </div>
   {#if settingsStatus}<p class="hint settings-status" role="status">{settingsStatus}</p>{/if}
 
-  <section class="section">
-    <h3>{t("sectGeneral")}</h3>
+  <nav class="settings-nav" aria-label={t("settingsNavigation")}>
+    {#each SECTION_LINKS as [section, label]}
+      <button
+        type="button"
+        class:active={activeSection === section}
+        aria-current={activeSection === section ? "page" : undefined}
+        onclick={() => goToSection(section)}
+      >{t(label)}</button>
+    {/each}
+  </nav>
+
+  <section class="section" id="settings-general" tabindex="-1" onfocusin={() => (activeSection = "general")}>
+    <h3 id="settings-general-heading">{t("sectGeneral")}</h3>
     <div class="srow">
       <span>{t("optAutoOrganize")}</span>
       <label class="switch"><input type="checkbox" checked={autoOrganize} onchange={toggleOrganize} aria-label={t("optAutoOrganize")} /><span class="track"></span></label>
@@ -394,19 +524,26 @@
       </select>
     </div>
     {#if onComplete === "custom"}
-      <input
-        type="text"
-        bind:value={ocCustomCmd}
-        onchange={saveOnComplete}
-        placeholder={t("ocCustomPlaceholder")}
-        aria-label={t("ocCustom")}
-        style="font-family:var(--font-mono); font-size:0.8rem"
-      />
+      <div class="custom-command">
+        <input
+          type="text"
+          bind:value={ocCustomCmd}
+          oninput={invalidateCustomCommand}
+          placeholder={t("ocCustomPlaceholder")}
+          aria-label={t("ocCustom")}
+          style="font-family:var(--font-mono); font-size:0.8rem"
+        />
+        <p class="hint custom-command-warning">{t("ocCustomWarning")}</p>
+        <label class="custom-command-confirm">
+          <input type="checkbox" bind:checked={ocCustomConfirmed} onchange={onCustomConfirmationChange} />
+          <span>{t("ocCustomConfirm")}</span>
+        </label>
+      </div>
     {/if}
   </section>
 
-  <section class="section">
-    <h3>{t("sectNetwork")}</h3>
+  <section class="section" id="settings-network" tabindex="-1" onfocusin={() => (activeSection = "network")}>
+    <h3 id="settings-network-heading">{t("sectNetwork")}</h3>
     <div class="srow">
       <span>{t("optProxy")}</span>
       <input
@@ -439,8 +576,8 @@
     <p class="hint">{t("restartHint")}</p>
   </section>
 
-  <section class="section">
-    <h3>{t("sectLanguage")}</h3>
+  <section class="section" id="settings-language" tabindex="-1" onfocusin={() => (activeSection = "language")}>
+    <h3 id="settings-language-heading">{t("sectLanguage")}</h3>
     <div class="srow">
       <span>{t("sectLanguage")}</span>
       <select value={langChoice} onchange={onLocaleChange} aria-label={t("sectLanguage")}>
@@ -450,8 +587,8 @@
     </div>
   </section>
 
-  <section class="section">
-    <h3>{t("sectConnections")}</h3>
+  <section class="section" id="settings-connections" tabindex="-1" onfocusin={() => (activeSection = "connections")}>
+    <h3 id="settings-connections-heading">{t("sectConnections")}</h3>
     <div class="srow">
       <span>{t("optConnPerServer")}</span>
       <span class="fmt-mono" style="color:var(--muted)">{connections}</span>
@@ -474,14 +611,22 @@
     <p class="hint">{t("connHint")}</p>
   </section>
 
-  <section class="section extensions-section" id="extensions" bind:this={extensionsSection} tabindex="-1">
-    <h3>{t("sectExtensions")}</h3>
+  <section class="section extensions-section" id="settings-extensions" bind:this={extensionsSection} tabindex="-1" onfocusin={() => (activeSection = "extensions")}>
+    <h3 id="settings-extensions-heading">{t("sectExtensions")}</h3>
     <p class="hint">{t("extensionStoreHint")}</p>
     <div class="extension-store-list">
       {#if showFirefoxStore}
         <div class="extension-store">
           <div>
-            <strong>Firefox</strong>
+            <div class="extension-store-heading">
+              <strong>Firefox</strong>
+              <span
+                class="browser-status"
+                class:connected={firefoxState === "browserStateConnected"}
+                class:installed={firefoxState === "browserStateInstalled"}
+                class:attention={firefoxState === "browserStateNeedsExtension"}
+              >{t(firefoxState)}</span>
+            </div>
             <p class="hint">{t("firefoxFamilyHint")}</p>
           </div>
           <button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.firefox)}>
@@ -492,7 +637,15 @@
       {#if showChromiumStore}
         <div class="extension-store">
           <div>
-            <strong>Chrome</strong>
+            <div class="extension-store-heading">
+              <strong>Chrome</strong>
+              <span
+                class="browser-status"
+                class:connected={chromiumState === "browserStateConnected"}
+                class:installed={chromiumState === "browserStateInstalled"}
+                class:attention={chromiumState === "browserStateNeedsExtension"}
+              >{t(chromiumState)}</span>
+            </div>
             <p class="hint">{t("chromiumFamilyHint")}</p>
           </div>
           <button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.chrome)}>
@@ -504,8 +657,8 @@
     <p class="hint">{t("extensionStoreOpenNote")}</p>
   </section>
 
-  <section class="section">
-    <h3>{t("sectScheduler")}</h3>
+  <section class="section" id="settings-scheduler" tabindex="-1" onfocusin={() => (activeSection = "scheduler")}>
+    <h3 id="settings-scheduler-heading">{t("sectScheduler")}</h3>
     {#each schedules as s (s.id)}
       <div class="cat">
         <Icon name="clock" size={16} />
@@ -513,22 +666,22 @@
           {actionLabel(s.action)}{#if s.action === "set_speed" && s.speed_limit} · {Math.round(s.speed_limit / 1024)} KB/s{/if}
           · {fmtTime(s.at_minute)} · {daysLabel(s.days_mask)}
         </span>
-        <label class="switch" title={s.enabled ? "Enabled" : "Disabled"}>
-          <input type="checkbox" checked={s.enabled} onchange={() => toggleSchedule(s)} aria-label="Enable this schedule" />
+        <label class="switch" title={s.enabled ? t("enabled") : t("disabled")}>
+          <input type="checkbox" checked={s.enabled} onchange={() => toggleSchedule(s)} aria-label={t("enableSchedule")} />
           <span class="track"></span>
         </label>
-        <button class="icon-btn danger" aria-label="Delete schedule" onclick={() => removeSchedule(s.id)}><Icon name="trash" size={16} /></button>
+        <button class="icon-btn danger" aria-label={t("deleteSchedule")} onclick={() => removeSchedule(s.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
     <div class="schedform">
-      <select bind:value={nAction} aria-label="Schedule action">
+      <select bind:value={nAction} aria-label={t("scheduleActionLabel")}>
         {#each ACTIONS as [v, l]}<option value={v}>{t(l)}</option>{/each}
       </select>
-      <input type="time" bind:value={nTime} aria-label="Schedule time" />
+      <input type="time" bind:value={nTime} aria-label={t("scheduleTimeLabel")} />
       {#if nAction === "set_speed"}
-        <input type="number" bind:value={nSpeed} aria-label="Speed limit in bytes per second" style="width:110px" />
+        <input type="number" bind:value={nSpeed} aria-label={t("scheduleSpeedLabel")} style="width:110px" />
       {/if}
-      <div class="days" role="group" aria-label="Days">
+      <div class="days" role="group" aria-label={t("scheduleDaysLabel")}>
         {#each DAYS as d, i}
           <button type="button" class="tag day" class:on={nDays.has(i)} aria-pressed={nDays.has(i)} onclick={() => toggleDay(i)}>{t(d)}</button>
         {/each}
@@ -538,12 +691,12 @@
     {#if schedError}<p class="sched-error" role="alert">{schedError}</p>{/if}
   </section>
 
-  <section class="section">
-    <h3>{t("sectCategories")}</h3>
+  <section class="section" id="settings-categories" tabindex="-1" onfocusin={() => (activeSection = "categories")}>
+    <h3 id="settings-categories-heading">{t("sectCategories")}</h3>
     {#each categories as c (c.id)}
       <div class="cat">
         <strong>{c.name}</strong>
-        <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label="{c.name} folder" />
+        <input value={c.dir} onchange={(e) => saveDir(c, e)} aria-label={t("categoryFolderFor", { name: c.name })} />
         <input
           class="cat-prio"
           type="number"
@@ -552,9 +705,9 @@
           title={t("catPriority")}
           aria-label="{t('catPriority')} {c.name}"
         />
-        <button class="icon-btn" title={t("browseFolder")} aria-label="Choose folder for {c.name}" onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
+        <button class="icon-btn" title={t("browseFolder")} aria-label={t("chooseFolderFor", { name: c.name })} onclick={() => browseDir(c)}><Icon name="folder" size={16} /></button>
         <button class="icon-btn" title={t("resetFolder")} aria-label="{t('resetFolder')} {c.name}" onclick={() => resetFolder(c.id)}><Icon name="retry" size={16} /></button>
-        <button class="icon-btn danger" aria-label="Delete {c.name}" onclick={() => removeCategory(c.id)}><Icon name="trash" size={16} /></button>
+        <button class="icon-btn danger" aria-label={t("deleteCategoryFor", { name: c.name })} onclick={() => removeCategory(c.id)}><Icon name="trash" size={16} /></button>
       </div>
     {/each}
     <div class="cat-form">
@@ -574,8 +727,8 @@
     </div>
   </section>
 
-  <section class="section">
-    <h3>{t("sectUpdates")}</h3>
+  <section class="section" id="settings-updates" tabindex="-1" onfocusin={() => (activeSection = "updates")}>
+    <h3 id="settings-updates-heading">{t("sectUpdates")}</h3>
     <button class="btn" onclick={checkForUpdates}><Icon name="download" size={16} /> {t("updateCheck")}</button>
     {#if updateStatus}<p class="hint">{updateStatus}</p>{/if}
     {#if update?.newer}

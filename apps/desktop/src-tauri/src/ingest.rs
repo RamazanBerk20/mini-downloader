@@ -261,7 +261,7 @@ pub async fn ingest(
                 let _ = db.set_error(id, None, Some("engine returned no download id"));
                 return Err("engine returned no download id".into());
             };
-            db.set_gid(id, first).map_err(|e| e.to_string())?;
+            db.bind_aria2_job(id, first).map_err(|e| e.to_string())?;
             db.set_status(id, DownloadStatus::Active).map_err(|e| e.to_string())?;
             for g in rest {
                 if let Ok(child_id) = db.insert_download(&NewDownload {
@@ -273,7 +273,7 @@ pub async fn ingest(
                     package_id,
                     ..Default::default()
                 }) {
-                    let _ = db.set_gid(child_id, g);
+                    let _ = db.bind_aria2_job(child_id, g);
                     let _ = db.set_status(child_id, DownloadStatus::Active);
                 }
             }
@@ -310,7 +310,7 @@ pub async fn reissue(
         .add_uri(&[job.url.clone()], opts)
         .await
         .map_err(|e| e.to_string())?;
-    db.set_gid(row.id, &gid).map_err(|e| e.to_string())?;
+    db.bind_aria2_job(row.id, &gid).map_err(|e| e.to_string())?;
     Ok(())
 }
 

@@ -2314,7 +2314,7 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minidl-core"
-version = "2.0.2"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -2333,7 +2333,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-desktop"
-version = "2.0.2"
+version = "2.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2345,6 +2345,8 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2",
+ "sys-locale",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -2354,6 +2356,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
  "winreg 0.55.0",
  "xattr",
@@ -2361,7 +2364,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-ipc"
-version = "2.0.2"
+version = "2.1.0"
 dependencies = [
  "dirs 5.0.1",
  "interprocess",
@@ -2370,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-native-host"
-version = "2.0.2"
+version = "2.1.0"
 dependencies = [
  "interprocess",
  "minidl-ipc",
@@ -4031,6 +4034,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

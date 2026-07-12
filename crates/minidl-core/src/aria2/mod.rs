@@ -50,10 +50,11 @@ impl Engine {
         let shutting_down = Arc::new(AtomicBool::new(false));
 
         // If aria2c is OOM-killed or crashes, respawn it and retarget the RPC
-        // client + notification listener at the new port. aria2 restores GIDs
-        // from `--input-file`, so in-flight downloads resume and the poller
-        // self-heals. Only an *unexpected* exit triggers this — `shutdown()`
-        // sets the flag first so a graceful stop isn't fought.
+        // client + notification listener at the new port. Cold startup pauses
+        // and cleans its session before exposing controls; in-process recovery
+        // keeps that already-clean session so an explicit transfer can recover.
+        // Only an *unexpected* exit triggers this — `shutdown()` sets the flag
+        // first so a graceful stop isn't fought.
         let watchdog = {
             let process = process.clone();
             let notify_task = notify_task.clone();
@@ -117,7 +118,7 @@ impl Engine {
     async fn respawn(opts: &LaunchOptions, rpc: &RpcClient) -> Result<Aria2Process> {
         let mut last_err = None;
         for _ in 0..3 {
-            let proc = Aria2Process::spawn(opts)?;
+            let proc = Aria2Process::respawn(opts)?;
             rpc.retarget(proc.port, proc.secret.clone());
             match rpc.wait_ready(50, Duration::from_millis(100)).await {
                 Ok(()) => return Ok(proc),

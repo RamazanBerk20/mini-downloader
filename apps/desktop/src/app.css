@@ -331,9 +331,9 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
 .drawer {
-  position: fixed; top: 0; inset-inline-end: 0; bottom: 0; width: min(440px, 92vw);
+  position: fixed; top: 0; inset-inline-end: 0; bottom: 0; width: min(600px, 96vw);
   background: var(--canvas); border-inline-start: 1px solid var(--border);
-  z-index: 41; padding: 1.2rem 1.3rem; overflow-y: auto;
+  z-index: 41; padding: 1.2rem 1.3rem; overflow-x: hidden; overflow-y: auto;
   box-shadow: var(--shadow-float);
   animation: slidein 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -354,10 +354,32 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 .section { padding: 1.1rem 0; border-bottom: 1px solid var(--border); }
 .section:last-child { border-bottom: none; }
 .section h3 { font-size: 0.8rem; letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.7rem; font-family: var(--font-mono); }
+.section { scroll-margin-top: 3.3rem; }
 .srow { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.35rem 0; }
 .srow span { font-size: 0.9rem; }
 .hint { color: var(--muted); font-size: 0.8rem; margin: 0.35rem 0 0; }
 .settings-status { color: var(--error-fg); margin: -0.1rem 0 0.75rem; }
+
+/* A compact, scrollable index turns the long settings drawer into a set of
+   reachable sections without hiding any controls behind another dialog. */
+.settings-nav {
+  position: sticky; top: -1.2rem; z-index: 2;
+  display: flex; align-items: flex-start; gap: 0.3rem; overflow-x: auto;
+  margin: 0 -0.1rem; padding: 0.55rem 0.1rem 1.15rem;
+  background: var(--canvas); border-bottom: 1px solid var(--border);
+  scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
+  scrollbar-gutter: stable;
+}
+.settings-nav button {
+  flex: 0 0 auto; padding: 0.32rem 0.55rem; border: 1px solid transparent;
+  border-radius: 999px; background: transparent; color: var(--muted);
+  font: 500 0.73rem var(--font-sans); cursor: pointer;
+}
+.settings-nav button:hover { color: var(--text); background: var(--surface-2); }
+.settings-nav button.active { color: var(--ink-fg); background: var(--ink); border-color: var(--ink); }
+.settings-nav::-webkit-scrollbar { height: 0.55rem; }
+.settings-nav::-webkit-scrollbar-track { margin-inline: 0.15rem; background: transparent; }
+.settings-nav::-webkit-scrollbar-thumb { background: var(--border-strong); border: 0.16rem solid var(--canvas); border-radius: 999px; }
 
 /* Store links are deliberately a compact list rather than install controls:
    each browser still owns its own consent and installation flow. */
@@ -368,8 +390,22 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
   padding: 0.7rem 0; border-top: 1px solid var(--border);
 }
 .extension-store strong { display: block; font-size: 0.9rem; font-weight: 600; color: var(--text); }
+.extension-store-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; }
 .extension-store .hint { max-width: 30ch; }
 .extension-store .btn { white-space: nowrap; }
+.browser-status {
+  display: inline-flex; align-items: center; min-height: 1.35rem;
+  padding: 0.08rem 0.42rem; border: 1px solid var(--border); border-radius: 999px;
+  color: var(--muted); background: var(--surface-2); font-size: 0.69rem; line-height: 1.1;
+}
+.browser-status.connected { color: var(--complete-fg); background: var(--complete-bg); border-color: color-mix(in srgb, var(--complete-fg) 30%, var(--border)); }
+.browser-status.installed { color: var(--active-fg); background: var(--active-bg); border-color: color-mix(in srgb, var(--active-fg) 30%, var(--border)); }
+.browser-status.attention { color: var(--paused-fg); background: var(--paused-bg); border-color: color-mix(in srgb, var(--paused-fg) 30%, var(--border)); }
+
+.custom-command { display: grid; gap: 0.45rem; margin-top: 0.15rem; }
+.custom-command-warning { color: var(--paused-fg); }
+.custom-command-confirm { display: flex; align-items: flex-start; gap: 0.5rem; color: var(--text); font-size: 0.82rem; line-height: 1.35; cursor: pointer; }
+.custom-command-confirm input { margin-top: 0.15rem; accent-color: var(--ink); }
 
 /* Accessible switch */
 .switch { position: relative; width: 40px; height: 22px; flex: none; }
@@ -404,6 +440,13 @@ input[type="range"] { width: 100%; accent-color: var(--ink); cursor: pointer; pa
 .cat { display: flex; align-items: center; gap: 0.6rem; margin: 0.55rem 0; }
 .cat strong { flex: 0 0 90px; font-weight: 500; }
 .cat input { flex: 1; }
+#settings-categories .cat {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.45fr) minmax(0, 1fr) 3.4rem repeat(3, auto);
+  gap: 0.45rem;
+}
+#settings-categories .cat strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-categories .cat input { min-width: 0; }
 .schedform { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.7rem; }
 .days { display: flex; gap: 0.2rem; flex-wrap: wrap; }
 .tag {

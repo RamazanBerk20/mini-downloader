@@ -1,5 +1,6 @@
 //! Tauri command surface. Thin wrappers delegating to the engine + DB.
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use base64::Engine;
@@ -28,10 +29,54 @@ fn base_name(path: &str) -> String {
         .to_string()
 }
 
+/// `C` and `POSIX` are technical fallback locales, not a user-facing language.
+/// Ignore them so a real preference lower in the OS locale list (for example
+/// `LANG=tr_TR.UTF-8`) can still be used by the UI.
+fn is_generic_locale(locale: &str) -> bool {
+    matches!(
+        locale.trim().to_ascii_lowercase().as_str(),
+        "" | "c" | "posix" | "und"
+    )
+}
+
+/// Resolve a deletion candidate beneath `dir` without following a raw filename
+/// (or aria2-reported path) out of that directory.  A lexical `starts_with`
+/// check is not enough: `Downloads/../outside` still starts with `Downloads`
+/// before the OS resolves it.  Canonicalizing the parent also rejects a
+/// symlinked subdirectory that points elsewhere.  The final path component is
+/// intentionally not canonicalized, so deleting a symlink removes the link,
+/// never its target.
+fn deletion_target_in_dir(dir: &Path, candidate: &Path) -> Option<PathBuf> {
+    let root = dir.canonicalize().ok()?;
+    let candidate = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        dir.join(candidate)
+    };
+    let name = candidate.file_name()?;
+    if name == "." || name == ".." {
+        return None;
+    }
+    let parent = candidate.parent()?.canonicalize().ok()?;
+    if !parent.starts_with(&root) {
+        return None;
+    }
+    Some(parent.join(name))
+}
+
+fn aria2_sidecar(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".aria2");
+    PathBuf::from(name)
+}
+
 /// Normalize an optional user-supplied SHA-256 hex digest into aria2's
 /// `checksum` option value, rejecting malformed input early.
 fn normalize_checksum(checksum: Option<String>) -> Result<Option<String>, CommandError> {
-    match checksum.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty()) {
+    match checksum
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+    {
         Some(s) if s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()) => {
             Ok(Some(format!("sha-256={s}")))
         }
@@ -88,7 +133,10 @@ pub async fn pause_download(id: i64, state: State<'_, AppState>) -> Result<(), C
         } else if let Some(gid) = &d.gid {
             let _ = state.engine.rpc.pause(gid).await;
         }
-        state.db.set_status(id, DownloadStatus::Paused).map_err(err)?;
+        state
+            .db
+            .set_status(id, DownloadStatus::Paused)
+            .map_err(err)?;
     }
     Ok(())
 }
@@ -101,13 +149,18 @@ pub(crate) async fn resume_row(state: &AppState, id: i64) -> Result<(), CommandE
             // Flip to Active BEFORE start(): the driver task re-checks the DB
             // status after acquiring its semaphore slot and would self-cancel
             // on a still-Scheduled/Paused row.
-            state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+            state
+                .db
+                .set_status(id, DownloadStatus::Active)
+                .map_err(err)?;
             // Replay auth + the originally chosen format + media options so
             // quality and post-processing are stable across kill+restart.
             let job = crate::ingest::job_from_row(&d);
             let url = d.page_url.clone().unwrap_or_else(|| d.url.clone());
             let opts = crate::ytdlp::MediaOpts::from_row(d.media_opts.as_deref());
-            state.ytdlp.start(id, url, d.format_id.clone(), job.header_lines(), opts);
+            state
+                .ytdlp
+                .start(id, url, d.format_id.clone(), job.header_lines(), opts);
         } else if let Some(gid) = &d.gid {
             // Fast path: unpause. If aria2 has forgotten the GID (reconcile
             // orphan after a crash), re-issue the request with the original auth
@@ -122,7 +175,10 @@ pub(crate) async fn resume_row(state: &AppState, id: i64) -> Result<(), CommandE
             let defaults = state.defaults.lock().unwrap().clone();
             crate::ingest::reissue(&state.engine, &state.db, defaults, &d).await?;
         }
-        state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+        state
+            .db
+            .set_status(id, DownloadStatus::Active)
+            .map_err(err)?;
         // A directly-resumed scheduled row must not fire again later.
         if d.start_at.is_some() {
             let _ = state.db.set_start_at(id, None);
@@ -156,12 +212,18 @@ pub async fn schedule_download(
                 }
             }
             state.db.set_start_at(id, Some(ts)).map_err(err)?;
-            state.db.set_status(id, DownloadStatus::Scheduled).map_err(err)?;
+            state
+                .db
+                .set_status(id, DownloadStatus::Scheduled)
+                .map_err(err)?;
         }
         None => {
             state.db.set_start_at(id, None).map_err(err)?;
             if d.status == DownloadStatus::Scheduled {
-                state.db.set_status(id, DownloadStatus::Paused).map_err(err)?;
+                state
+                    .db
+                    .set_status(id, DownloadStatus::Paused)
+                    .map_err(err)?;
             }
         }
     }
@@ -195,15 +257,27 @@ pub async fn retry_download(id: i64, state: State<'_, AppState>) -> Result<Downl
     if row.is_ytdlp() {
         let job = crate::ingest::job_from_row(&row);
         let url = row.page_url.clone().unwrap_or_else(|| row.url.clone());
-        state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+        state
+            .db
+            .set_status(id, DownloadStatus::Active)
+            .map_err(err)?;
         let opts = crate::ytdlp::MediaOpts::from_row(row.media_opts.as_deref());
-        state.ytdlp.start(id, url, row.format_id.clone(), job.header_lines(), opts);
+        state
+            .ytdlp
+            .start(id, url, row.format_id.clone(), job.header_lines(), opts);
     } else {
         let defaults = state.defaults.lock().unwrap().clone();
         crate::ingest::reissue(&state.engine, &state.db, defaults, &row).await?;
-        state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+        state
+            .db
+            .set_status(id, DownloadStatus::Active)
+            .map_err(err)?;
     }
-    state.db.get(id).map_err(err)?.ok_or_else(|| "download vanished".into())
+    state
+        .db
+        .get(id)
+        .map_err(err)?
+        .ok_or_else(|| "download vanished".into())
 }
 
 #[tauri::command]
@@ -248,9 +322,9 @@ pub async fn remove_download(
                 targets.push(dir.join(name));
             }
             for t in targets {
-                if t.starts_with(dir) {
+                if let Some(t) = deletion_target_in_dir(dir, &t) {
                     let _ = std::fs::remove_file(&t);
-                    let _ = std::fs::remove_file(std::path::PathBuf::from(format!("{}.aria2", t.display())));
+                    let _ = std::fs::remove_file(aria2_sidecar(&t));
                 }
             }
         }
@@ -274,7 +348,10 @@ pub async fn remove_failed(state: State<'_, AppState>) -> Result<usize, CommandE
     remove_by_status(&state, "error").await
 }
 
-async fn remove_by_status(state: &State<'_, AppState>, status: &str) -> Result<usize, CommandError> {
+async fn remove_by_status(
+    state: &State<'_, AppState>,
+    status: &str,
+) -> Result<usize, CommandError> {
     let rows = state.db.list(Some(status)).map_err(err)?;
     let mut removed = 0;
     for d in rows {
@@ -298,27 +375,55 @@ pub async fn pause_all(state: State<'_, AppState>) -> Result<(), CommandError> {
 
 #[tauri::command]
 pub async fn resume_all(state: State<'_, AppState>) -> Result<(), CommandError> {
-    state.engine.rpc.unpause_all().await.map_err(err).map(|_| ())
+    state
+        .engine
+        .rpc
+        .unpause_all()
+        .await
+        .map_err(err)
+        .map(|_| ())
 }
 
 /// Global speed caps in bytes/sec (0 = unlimited).
 #[tauri::command]
-pub async fn set_global_speed(down: i64, up: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub async fn set_global_speed(
+    down: i64,
+    up: i64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     let opts = json!({
         "max-overall-download-limit": down.to_string(),
         "max-overall-upload-limit": up.to_string(),
     });
-    state.engine.rpc.change_global_option(opts).await.map_err(err).map(|_| ())
+    state
+        .engine
+        .rpc
+        .change_global_option(opts)
+        .await
+        .map_err(err)
+        .map(|_| ())
 }
 
 #[tauri::command]
-pub async fn set_download_speed(id: i64, limit: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub async fn set_download_speed(
+    id: i64,
+    limit: i64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     // Persist so the cap is re-applied on resume/reissue, then apply live.
-    state.db.set_speed_limit(id, if limit > 0 { Some(limit) } else { None }).map_err(err)?;
+    state
+        .db
+        .set_speed_limit(id, if limit > 0 { Some(limit) } else { None })
+        .map_err(err)?;
     if let Some(d) = state.db.get(id).map_err(err)? {
         if let Some(gid) = d.gid {
             let opts = json!({ "max-download-limit": limit.to_string() });
-            state.engine.rpc.change_option(&gid, opts).await.map_err(err)?;
+            state
+                .engine
+                .rpc
+                .change_option(&gid, opts)
+                .await
+                .map_err(err)?;
         }
     }
     Ok(())
@@ -326,7 +431,11 @@ pub async fn set_download_speed(id: i64, limit: i64, state: State<'_, AppState>)
 
 /// Reorder a waiting download in the aria2 queue: "top" | "up" | "down" | "bottom".
 #[tauri::command]
-pub async fn move_in_queue(id: i64, direction: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub async fn move_in_queue(
+    id: i64,
+    direction: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         if let Some(gid) = d.gid {
             let (pos, how) = match direction.as_str() {
@@ -345,10 +454,18 @@ pub async fn move_in_queue(id: i64, direction: String, state: State<'_, AppState
 /// Move a download to an absolute queue position (drag-reorder). aria2 clamps
 /// and only reorders items still in its waiting queue.
 #[tauri::command]
-pub async fn set_queue_position(id: i64, pos: i64, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub async fn set_queue_position(
+    id: i64,
+    pos: i64,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     if let Some(d) = state.db.get(id).map_err(err)? {
         if let Some(gid) = d.gid {
-            let _ = state.engine.rpc.change_position(&gid, pos.max(0), "POS_SET").await;
+            let _ = state
+                .engine
+                .rpc
+                .change_position(&gid, pos.max(0), "POS_SET")
+                .await;
         }
     }
     Ok(())
@@ -358,7 +475,10 @@ pub async fn set_queue_position(id: i64, pos: i64, state: State<'_, AppState>) -
 #[tauri::command]
 pub async fn set_max_concurrent(n: u32, state: State<'_, AppState>) -> Result<(), CommandError> {
     let n = n.clamp(1, 20);
-    state.db.set_setting("max_concurrent", &n.to_string()).map_err(err)?;
+    state
+        .db
+        .set_setting("max_concurrent", &n.to_string())
+        .map_err(err)?;
     let _ = state
         .engine
         .rpc
@@ -396,7 +516,9 @@ pub async fn open_containing_folder(
 pub async fn get_connector_status(
     state: State<'_, AppState>,
 ) -> Result<crate::nativehost::ConnectorStatus, CommandError> {
-    Ok(crate::nativehost::connector_status(&state.connector_presence))
+    Ok(crate::nativehost::connector_status(
+        &state.connector_presence,
+    ))
 }
 
 async fn add_file_job(
@@ -436,7 +558,11 @@ async fn add_file_job(
         None,
     )
     .await?;
-    state.db.get(id).map_err(err)?.ok_or_else(|| err("download vanished"))
+    state
+        .db
+        .get(id)
+        .map_err(err)?
+        .ok_or_else(|| err("download vanished"))
 }
 
 /// Probe a page/URL for downloadable video formats (yt-dlp). With `playlist`
@@ -471,9 +597,16 @@ pub async fn add_media_download(
             ..Default::default()
         })
         .map_err(err)?;
-    state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
+    state
+        .db
+        .set_status(id, DownloadStatus::Active)
+        .map_err(err)?;
     state.ytdlp.start(id, url, format_id, vec![], opts);
-    state.db.get(id).map_err(err)?.ok_or_else(|| err("download vanished"))
+    state
+        .db
+        .get(id)
+        .map_err(err)?
+        .ok_or_else(|| err("download vanished"))
 }
 
 #[derive(serde::Deserialize)]
@@ -500,7 +633,11 @@ pub async fn add_playlist_batch(
     let package_id = if entries.len() >= 2 {
         let name = {
             let n = package_name.trim();
-            if n.is_empty() { "Playlist" } else { n }
+            if n.is_empty() {
+                "Playlist"
+            } else {
+                n
+            }
         };
         state.db.insert_package(name, None, None).ok()
     } else {
@@ -524,8 +661,13 @@ pub async fn add_playlist_batch(
                 ..Default::default()
             })
             .map_err(err)?;
-        state.db.set_status(id, DownloadStatus::Active).map_err(err)?;
-        state.ytdlp.start(id, e.url, quality.clone(), vec![], opts.clone());
+        state
+            .db
+            .set_status(id, DownloadStatus::Active)
+            .map_err(err)?;
+        state
+            .ytdlp
+            .start(id, e.url, quality.clone(), vec![], opts.clone());
         added += 1;
     }
     let _ = app.emit(EV_STATE, json!({ "batch": added }));
@@ -533,12 +675,18 @@ pub async fn add_playlist_batch(
 }
 
 #[tauri::command]
-pub async fn add_torrent_file(path: String, state: State<'_, AppState>) -> Result<Download, CommandError> {
+pub async fn add_torrent_file(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Download, CommandError> {
     add_file_job(path, DownloadKind::Torrent, &state).await
 }
 
 #[tauri::command]
-pub async fn add_metalink_file(path: String, state: State<'_, AppState>) -> Result<Download, CommandError> {
+pub async fn add_metalink_file(
+    path: String,
+    state: State<'_, AppState>,
+) -> Result<Download, CommandError> {
     add_file_job(path, DownloadKind::Metalink, &state).await
 }
 
@@ -555,7 +703,11 @@ pub async fn save_category(
     priority: i64,
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
-    state.db.upsert_category(&name, &dir, &rules, priority).map_err(err).map(|_| ())
+    state
+        .db
+        .upsert_category(&name, &dir, &rules, priority)
+        .map_err(err)
+        .map(|_| ())
 }
 
 #[tauri::command]
@@ -565,7 +717,9 @@ pub async fn delete_category(id: i64, state: State<'_, AppState>) -> Result<(), 
 
 /// Re-add the built-in default categories (restore after edits/deletes).
 #[tauri::command]
-pub async fn restore_default_categories(state: State<'_, AppState>) -> Result<Vec<Category>, CommandError> {
+pub async fn restore_default_categories(
+    state: State<'_, AppState>,
+) -> Result<Vec<Category>, CommandError> {
     state.db.seed_default_categories().map_err(err)?;
     state.db.list_categories().map_err(err)
 }
@@ -577,12 +731,26 @@ pub async fn reset_category_dir(id: i64, state: State<'_, AppState>) -> Result<(
 }
 
 #[tauri::command]
-pub async fn get_setting(key: String, state: State<'_, AppState>) -> Result<Option<String>, CommandError> {
+pub async fn get_setting(
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
     state.db.get_setting(&key).map_err(err)
 }
 
+/// Preferred OS UI locale, independent from the embedded WebView's locale.
+/// Some Linux WebViews report English even when the desktop session is Turkish.
 #[tauri::command]
-pub async fn set_setting(key: String, value: String, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub fn get_system_locale() -> Option<String> {
+    sys_locale::get_locales().find(|locale| !is_generic_locale(locale))
+}
+
+#[tauri::command]
+pub async fn set_setting(
+    key: String,
+    value: String,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     state.db.set_setting(&key, &value).map_err(err)
 }
 
@@ -628,7 +796,11 @@ fn v_str(v: &serde_json::Value, k: &str) -> String {
 /// aria2 serializes numbers as strings — parse defensively.
 fn v_i64(v: &serde_json::Value, k: &str) -> i64 {
     v.get(k)
-        .and_then(|x| x.as_str().map(String::from).or_else(|| x.as_i64().map(|n| n.to_string())))
+        .and_then(|x| {
+            x.as_str()
+                .map(String::from)
+                .or_else(|| x.as_i64().map(|n| n.to_string()))
+        })
         .and_then(|s| s.parse().ok())
         .unwrap_or(0)
 }
@@ -659,7 +831,12 @@ pub async fn get_download_details(
         return Ok(det);
     }
     let Some(gid) = &d.gid else { return Ok(det) };
-    let Ok(st) = state.engine.rpc.tell_status(gid, minidl_core::aria2::DETAIL_KEYS).await else {
+    let Ok(st) = state
+        .engine
+        .rpc
+        .tell_status(gid, minidl_core::aria2::DETAIL_KEYS)
+        .await
+    else {
         return Ok(det);
     };
     det.live = true;
@@ -713,8 +890,15 @@ pub async fn set_torrent_files(
     if !matches!(d.kind.as_str(), "torrent" | "magnet") {
         return Err("file selection only applies to torrents".into());
     }
-    let gid = d.gid.as_deref().ok_or("download has no engine handle yet")?;
-    let sel = indices.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    let gid = d
+        .gid
+        .as_deref()
+        .ok_or("download has no engine handle yet")?;
+    let sel = indices
+        .iter()
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let opts = json!({ "select-file": sel });
     if d.status == DownloadStatus::Active {
         let _ = state.engine.rpc.pause(gid).await;
@@ -722,7 +906,12 @@ pub async fn set_torrent_files(
         let _ = state.engine.rpc.unpause(gid).await;
         res.map_err(err)?;
     } else {
-        state.engine.rpc.change_option(gid, opts).await.map_err(err)?;
+        state
+            .engine
+            .rpc
+            .change_option(gid, opts)
+            .await
+            .map_err(err)?;
     }
     Ok(())
 }
@@ -753,7 +942,11 @@ pub async fn add_links_batch(
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| {
                 let host = minidl_core::grabber::host_of(&urls[0]);
-                if host.is_empty() { "Batch".to_string() } else { host }
+                if host.is_empty() {
+                    "Batch".to_string()
+                } else {
+                    host
+                }
             });
         state.db.insert_package(&name, None, None).ok()
     } else {
@@ -813,7 +1006,15 @@ pub async fn save_schedule(
 ) -> Result<(), CommandError> {
     state
         .db
-        .save_schedule(id, name.as_deref(), &action, days_mask, at_minute, speed_limit, enabled)
+        .save_schedule(
+            id,
+            name.as_deref(),
+            &action,
+            days_mask,
+            at_minute,
+            speed_limit,
+            enabled,
+        )
         .map_err(err)
         .map(|_| ())
 }
@@ -826,7 +1027,10 @@ pub async fn delete_schedule(id: i64, state: State<'_, AppState>) -> Result<(), 
 // ---- clipboard ----
 
 #[tauri::command]
-pub async fn set_clipboard_watch(enabled: bool, state: State<'_, AppState>) -> Result<(), CommandError> {
+pub async fn set_clipboard_watch(
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
     state.clipboard_on.store(enabled, Ordering::Relaxed);
     state
         .db
@@ -856,7 +1060,73 @@ pub async fn set_engine_defaults(
         d.split = split;
         d.max_connection_per_server = connections;
     }
-    state.db.set_setting("split", &split.to_string()).map_err(err)?;
-    state.db.set_setting("max_conn", &connections.to_string()).map_err(err)?;
+    state
+        .db
+        .set_setting("split", &split.to_string())
+        .map_err(err)?;
+    state
+        .db
+        .set_setting("max_conn", &connections.to_string())
+        .map_err(err)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("minidl-{label}-{}-{stamp}", std::process::id()))
+    }
+
+    #[test]
+    fn deletion_target_rejects_parent_traversal_and_keeps_nested_files() {
+        let root = temp_dir("delete-target");
+        let downloads = root.join("downloads");
+        let nested = downloads.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let outside = root.join("outside-file");
+        std::fs::write(&outside, b"do not delete").unwrap();
+
+        assert!(deletion_target_in_dir(&downloads, &downloads.join("../outside-file")).is_none());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"do not delete");
+
+        let valid = nested.join("inside-file");
+        assert_eq!(
+            deletion_target_in_dir(&downloads, &valid).as_deref(),
+            Some(valid.as_path())
+        );
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn generic_posix_locales_are_not_treated_as_a_language_preference() {
+        assert!(is_generic_locale("C"));
+        assert!(is_generic_locale(" POSIX "));
+        assert!(is_generic_locale("und"));
+        assert!(!is_generic_locale("tr-TR"));
+        assert!(!is_generic_locale("en-US"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletion_target_rejects_symlinked_parent_outside_download_dir() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_dir("delete-symlink");
+        let downloads = root.join("downloads");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        symlink(&outside, downloads.join("linked")).unwrap();
+
+        assert!(deletion_target_in_dir(&downloads, &downloads.join("linked/file")).is_none());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

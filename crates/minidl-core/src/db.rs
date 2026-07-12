@@ -109,57 +109,91 @@ ALTER TABLE downloads ADD COLUMN media_opts TEXT;
 CREATE INDEX idx_downloads_package ON downloads(package_id);
 "#;
 
+/// v4: aria2 serializes the metadata-parent GID for magnets and remote
+/// torrent/metalink URLs, while the live row follows its child GID. Keep both
+/// identities so a paused startup session can resume the same partial job.
+const MIGRATION_4: &str = r#"
+ALTER TABLE downloads ADD COLUMN session_gid TEXT;
+CREATE INDEX idx_downloads_session_gid ON downloads(session_gid);
+"#;
+
 /// Default categories seeded on first run. Dirs are `~`-relative markers the app
 /// resolves at runtime.
 const DEFAULT_CATEGORIES: &[(&str, &str, &str)] = &[
-    ("Video", "~/Videos", r#"["mkv","mp4","webm","avi","mov","m4v","flv","ts"]"#),
-    ("Audio", "~/Music", r#"["mp3","flac","m4a","opus","aac","wav","ogg"]"#),
-    ("Documents", "~/Documents", r#"["pdf","epub","docx","odt","txt","xlsx","pptx"]"#),
-    ("Archives", "~/Downloads/Archives", r#"["zip","7z","rar","tar","gz","xz","zst","bz2"]"#),
-    ("Programs", "~/Downloads/Programs", r#"["AppImage","deb","rpm","exe","msi","sh"]"#),
-    ("Images", "~/Pictures", r#"["png","jpg","jpeg","gif","webp","svg"]"#),
+    (
+        "Video",
+        "~/Videos",
+        r#"["mkv","mp4","webm","avi","mov","m4v","flv","ts"]"#,
+    ),
+    (
+        "Audio",
+        "~/Music",
+        r#"["mp3","flac","m4a","opus","aac","wav","ogg"]"#,
+    ),
+    (
+        "Documents",
+        "~/Documents",
+        r#"["pdf","epub","docx","odt","txt","xlsx","pptx"]"#,
+    ),
+    (
+        "Archives",
+        "~/Downloads/Archives",
+        r#"["zip","7z","rar","tar","gz","xz","zst","bz2"]"#,
+    ),
+    (
+        "Programs",
+        "~/Downloads/Programs",
+        r#"["AppImage","deb","rpm","exe","msi","sh"]"#,
+    ),
+    (
+        "Images",
+        "~/Pictures",
+        r#"["png","jpg","jpeg","gif","webp","svg"]"#,
+    ),
 ];
 
-const COLS: &str = "id, gid, url, filename, dir, status, kind, total_bytes, completed_bytes, \
+const COLS: &str =
+    "id, gid, session_gid, url, filename, dir, status, kind, total_bytes, completed_bytes, \
     download_speed, upload_speed, connections, num_seeders, referrer, info_hash, \
     error_code, error_message, category_id, created_at, finished_at, \
     user_agent, cookie, extra_headers, page_url, format_id, speed_limit, \
     package_id, mime, checksum, start_at, media_opts";
 
 fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
-    let status: String = row.get(5)?;
+    let status: String = row.get(6)?;
     Ok(Download {
         id: row.get(0)?,
         gid: row.get(1)?,
-        url: row.get(2)?,
-        filename: row.get(3)?,
-        dir: row.get(4)?,
+        session_gid: row.get(2)?,
+        url: row.get(3)?,
+        filename: row.get(4)?,
+        dir: row.get(5)?,
         status: DownloadStatus::parse(&status),
-        kind: row.get(6)?,
-        total_bytes: row.get(7)?,
-        completed_bytes: row.get(8)?,
-        download_speed: row.get(9)?,
-        upload_speed: row.get(10)?,
-        connections: row.get(11)?,
-        num_seeders: row.get(12)?,
-        referrer: row.get(13)?,
-        info_hash: row.get(14)?,
-        error_code: row.get(15)?,
-        error_message: row.get(16)?,
-        category_id: row.get(17)?,
-        created_at: row.get(18)?,
-        finished_at: row.get(19)?,
-        user_agent: row.get(20)?,
-        cookie: row.get(21)?,
-        extra_headers: row.get(22)?,
-        page_url: row.get(23)?,
-        format_id: row.get(24)?,
-        speed_limit: row.get(25)?,
-        package_id: row.get(26)?,
-        mime: row.get(27)?,
-        checksum: row.get(28)?,
-        start_at: row.get(29)?,
-        media_opts: row.get(30)?,
+        kind: row.get(7)?,
+        total_bytes: row.get(8)?,
+        completed_bytes: row.get(9)?,
+        download_speed: row.get(10)?,
+        upload_speed: row.get(11)?,
+        connections: row.get(12)?,
+        num_seeders: row.get(13)?,
+        referrer: row.get(14)?,
+        info_hash: row.get(15)?,
+        error_code: row.get(16)?,
+        error_message: row.get(17)?,
+        category_id: row.get(18)?,
+        created_at: row.get(19)?,
+        finished_at: row.get(20)?,
+        user_agent: row.get(21)?,
+        cookie: row.get(22)?,
+        extra_headers: row.get(23)?,
+        page_url: row.get(24)?,
+        format_id: row.get(25)?,
+        speed_limit: row.get(26)?,
+        package_id: row.get(27)?,
+        mime: row.get(28)?,
+        checksum: row.get(29)?,
+        start_at: row.get(30)?,
+        media_opts: row.get(31)?,
     })
 }
 
@@ -203,7 +237,9 @@ impl Db {
              PRAGMA foreign_keys=ON;
              PRAGMA busy_timeout=5000;",
         )?;
-        let db = Self { conn: Arc::new(Mutex::new(conn)) };
+        let db = Self {
+            conn: Arc::new(Mutex::new(conn)),
+        };
         db.migrate()?;
         Ok(db)
     }
@@ -237,6 +273,12 @@ impl Db {
             tx.execute_batch("PRAGMA user_version=3;")?;
             tx.commit()?;
         }
+        if version < 4 {
+            let tx = conn.transaction()?;
+            tx.execute_batch(MIGRATION_4)?;
+            tx.execute_batch("PRAGMA user_version=4;")?;
+            tx.commit()?;
+        }
         Ok(())
     }
 
@@ -262,7 +304,10 @@ impl Db {
     /// Persist a per-download speed cap (bytes/sec; `None` clears it).
     pub fn set_speed_limit(&self, id: i64, limit: Option<i64>) -> Result<()> {
         let conn = self.lock();
-        conn.execute("UPDATE downloads SET speed_limit=?1 WHERE id=?2", params![limit, id])?;
+        conn.execute(
+            "UPDATE downloads SET speed_limit=?1 WHERE id=?2",
+            params![limit, id],
+        )?;
         Ok(())
     }
 
@@ -272,32 +317,60 @@ impl Db {
         Ok(())
     }
 
+    /// Bind a newly-issued aria2 job. Its initial GID is also the GID aria2
+    /// persists in its session file; later metadata transitions may update only
+    /// the live `gid` through [`Self::set_gid`].
+    pub fn bind_aria2_job(&self, id: i64, gid: &str) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE downloads SET gid=?1, session_gid=?1 WHERE id=?2",
+            params![gid, id],
+        )?;
+        Ok(())
+    }
+
     pub fn get(&self, id: i64) -> Result<Option<Download>> {
         let conn = self.lock();
         let sql = format!("SELECT {COLS} FROM downloads WHERE id=?1");
-        Ok(conn.query_row(&sql, params![id], row_to_download).optional()?)
+        Ok(conn
+            .query_row(&sql, params![id], row_to_download)
+            .optional()?)
     }
 
     pub fn find_by_gid(&self, gid: &str) -> Result<Option<Download>> {
         let conn = self.lock();
         let sql = format!("SELECT {COLS} FROM downloads WHERE gid=?1");
-        Ok(conn.query_row(&sql, params![gid], row_to_download).optional()?)
+        Ok(conn
+            .query_row(&sql, params![gid], row_to_download)
+            .optional()?)
     }
 
     /// Match by info_hash (BitTorrent) or URL — used to rebind a moved GID.
-    pub fn find_by_infohash_or_url(&self, info_hash: Option<&str>, url: &str) -> Result<Option<Download>> {
+    pub fn find_by_infohash_or_url(
+        &self,
+        info_hash: Option<&str>,
+        url: &str,
+    ) -> Result<Option<Download>> {
         let conn = self.lock();
         let sql = format!(
             "SELECT {COLS} FROM downloads WHERE (?1 IS NOT NULL AND info_hash=?1) OR url=?2 ORDER BY id DESC LIMIT 1"
         );
-        Ok(conn.query_row(&sql, params![info_hash, url], row_to_download).optional()?)
+        Ok(conn
+            .query_row(&sql, params![info_hash, url], row_to_download)
+            .optional()?)
     }
 
     pub fn list(&self, status: Option<&str>) -> Result<Vec<Download>> {
         let conn = self.lock();
         let (sql, has_filter) = match status {
-            Some(_) => (format!("SELECT {COLS} FROM downloads WHERE status=?1 ORDER BY id DESC"), true),
-            None => (format!("SELECT {COLS} FROM downloads ORDER BY id DESC"), false),
+            Some(_) => (
+                format!("SELECT {COLS} FROM downloads WHERE status=?1 ORDER BY id DESC"),
+                true,
+            ),
+            None => (
+                format!("SELECT {COLS} FROM downloads ORDER BY id DESC"),
+                false,
+            ),
         };
         let mut stmt = conn.prepare(&sql)?;
         let rows = if has_filter {
@@ -324,9 +397,28 @@ impl Db {
         Ok(rows)
     }
 
+    /// Nonterminal aria2 rows whose saved session may be restored. Scheduled
+    /// rows are included so their GID survives restart, but remain excluded from
+    /// [`Self::running_rows`] so startup reconciliation does not unschedule them.
+    pub fn resumable_session_rows(&self) -> Result<Vec<Download>> {
+        let conn = self.lock();
+        let sql = format!(
+            "SELECT {COLS} FROM downloads WHERE status IN ('active','waiting','paused','queued','scheduled')"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([], row_to_download)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     pub fn set_status(&self, id: i64, status: DownloadStatus) -> Result<()> {
         let conn = self.lock();
-        let finished = if status.is_terminal() { Some(now()) } else { None };
+        let finished = if status.is_terminal() {
+            Some(now())
+        } else {
+            None
+        };
         conn.execute(
             "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3",
             params![status.as_str(), finished, id],
@@ -340,7 +432,11 @@ impl Db {
     /// organize) exactly once — the loser's `UPDATE` matches no row.
     pub fn set_status_if_changed(&self, id: i64, status: DownloadStatus) -> Result<bool> {
         let conn = self.lock();
-        let finished = if status.is_terminal() { Some(now()) } else { None };
+        let finished = if status.is_terminal() {
+            Some(now())
+        } else {
+            None
+        };
         let n = conn.execute(
             "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3 AND status<>?1",
             params![status.as_str(), finished, id],
@@ -359,13 +455,19 @@ impl Db {
 
     pub fn set_filename(&self, id: i64, filename: &str) -> Result<()> {
         let conn = self.lock();
-        conn.execute("UPDATE downloads SET filename=?1 WHERE id=?2", params![filename, id])?;
+        conn.execute(
+            "UPDATE downloads SET filename=?1 WHERE id=?2",
+            params![filename, id],
+        )?;
         Ok(())
     }
 
     pub fn set_info_hash(&self, id: i64, info_hash: &str) -> Result<()> {
         let conn = self.lock();
-        conn.execute("UPDATE downloads SET info_hash=?1 WHERE id=?2", params![info_hash, id])?;
+        conn.execute(
+            "UPDATE downloads SET info_hash=?1 WHERE id=?2",
+            params![info_hash, id],
+        )?;
         Ok(())
     }
 
@@ -375,6 +477,25 @@ impl Db {
         conn.execute(
             "UPDATE downloads SET dir=?1, category_id=?2 WHERE id=?3",
             params![dir, category_id, id],
+        )?;
+        Ok(())
+    }
+
+    /// Atomically record the final filename and destination selected by category
+    /// auto-organize. A collision can change the filename (`file (1).zip`), so
+    /// persisting only the directory would leave the UI pointing at the wrong
+    /// path.
+    pub fn set_file_location(
+        &self,
+        id: i64,
+        filename: &str,
+        dir: &str,
+        category_id: i64,
+    ) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "UPDATE downloads SET filename=?1, dir=?2, category_id=?3 WHERE id=?4",
+            params![filename, dir, category_id, id],
         )?;
         Ok(())
     }
@@ -395,7 +516,15 @@ impl Db {
         conn.execute(
             "UPDATE downloads SET completed_bytes=?1, total_bytes=?2, download_speed=?3,
                 upload_speed=?4, connections=?5, num_seeders=?6 WHERE gid=?7",
-            params![completed, total, dl_speed, ul_speed, connections, num_seeders, gid],
+            params![
+                completed,
+                total,
+                dl_speed,
+                ul_speed,
+                connections,
+                num_seeders,
+                gid
+            ],
         )?;
         Ok(())
     }
@@ -425,7 +554,10 @@ impl Db {
     /// Set (or clear) a deferred start time. Status is managed by the caller.
     pub fn set_start_at(&self, id: i64, start_at: Option<i64>) -> Result<()> {
         let conn = self.lock();
-        conn.execute("UPDATE downloads SET start_at=?1 WHERE id=?2", params![start_at, id])?;
+        conn.execute(
+            "UPDATE downloads SET start_at=?1 WHERE id=?2",
+            params![start_at, id],
+        )?;
         Ok(())
     }
 
@@ -444,7 +576,12 @@ impl Db {
 
     // ---- packages ----
 
-    pub fn insert_package(&self, name: &str, category_id: Option<i64>, dir: Option<&str>) -> Result<i64> {
+    pub fn insert_package(
+        &self,
+        name: &str,
+        category_id: Option<i64>,
+        dir: Option<&str>,
+    ) -> Result<i64> {
         let conn = self.lock();
         conn.execute(
             "INSERT INTO packages (name, category_id, dir, created_at) VALUES (?1, ?2, ?3, ?4)",
@@ -489,8 +626,9 @@ impl Db {
 
     pub fn list_categories(&self) -> Result<Vec<Category>> {
         let conn = self.lock();
-        let mut stmt =
-            conn.prepare("SELECT id, name, dir, rules, priority FROM categories ORDER BY priority, name")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, dir, rules, priority FROM categories ORDER BY priority, name",
+        )?;
         let rows = stmt
             .query_map([], |r| {
                 Ok(Category {
@@ -505,7 +643,13 @@ impl Db {
         Ok(rows)
     }
 
-    pub fn upsert_category(&self, name: &str, dir: &str, rules: &str, priority: i64) -> Result<i64> {
+    pub fn upsert_category(
+        &self,
+        name: &str,
+        dir: &str,
+        rules: &str,
+        priority: i64,
+    ) -> Result<i64> {
         let conn = self.lock();
         // `RETURNING id` gives the row's id on both the INSERT and the DO UPDATE
         // path. `last_insert_rowid()` would return a stale/unrelated rowid when
@@ -544,10 +688,18 @@ impl Db {
     pub fn reset_category_dir(&self, id: i64) -> Result<()> {
         let conn = self.lock();
         let name: Option<String> = conn
-            .query_row("SELECT name FROM categories WHERE id=?1", params![id], |r| r.get(0))
+            .query_row(
+                "SELECT name FROM categories WHERE id=?1",
+                params![id],
+                |r| r.get(0),
+            )
             .optional()?;
         if let Some(name) = name {
-            if let Some(def) = DEFAULT_CATEGORIES.iter().find(|(n, _, _)| *n == name).map(|(_, d, _)| *d) {
+            if let Some(def) = DEFAULT_CATEGORIES
+                .iter()
+                .find(|(n, _, _)| *n == name)
+                .map(|(_, d, _)| *d)
+            {
                 conn.execute("UPDATE categories SET dir=?1 WHERE id=?2", params![def, id])?;
             }
         }
@@ -618,7 +770,11 @@ impl Db {
     pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
         let conn = self.lock();
         Ok(conn
-            .query_row("SELECT value FROM settings WHERE key=?1", params![key], |r| r.get(0))
+            .query_row(
+                "SELECT value FROM settings WHERE key=?1",
+                params![key],
+                |r| r.get(0),
+            )
             .optional()?)
     }
 
@@ -648,11 +804,13 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        db.set_gid(id, "abc123").unwrap();
-        db.checkpoint_progress("abc123", 50, 100, 1000, 0, 8, 0).unwrap();
+        db.bind_aria2_job(id, "abc123").unwrap();
+        db.checkpoint_progress("abc123", 50, 100, 1000, 0, 8, 0)
+            .unwrap();
 
         let d = db.find_by_gid("abc123").unwrap().unwrap();
         assert_eq!(d.id, id);
+        assert_eq!(d.session_gid.as_deref(), Some("abc123"));
         assert_eq!(d.completed_bytes, 50);
         assert_eq!(d.connections, 8);
 
@@ -678,7 +836,12 @@ mod tests {
         // bogus last_insert_rowid().
         let id2 = db.upsert_category("Custom", "~/b", "[]", 9).unwrap();
         assert_eq!(id1, id2);
-        let cat = db.list_categories().unwrap().into_iter().find(|c| c.name == "Custom").unwrap();
+        let cat = db
+            .list_categories()
+            .unwrap()
+            .into_iter()
+            .find(|c| c.name == "Custom")
+            .unwrap();
         assert_eq!(cat.id, id1);
         assert_eq!(cat.dir, "~/b");
     }
@@ -720,6 +883,43 @@ mod tests {
         db.delete(id).unwrap();
         db.delete_package_if_empty(pkg).unwrap();
         assert!(db.list_packages().unwrap().is_empty());
+    }
+
+    #[test]
+    fn session_gid_survives_live_metadata_rebind() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "magnet:?xt=urn:btih:abc".into(),
+                dir: "/dl".into(),
+                kind: "magnet".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        db.bind_aria2_job(id, "metadata-parent").unwrap();
+        db.set_gid(id, "content-child").unwrap();
+
+        let row = db.get(id).unwrap().unwrap();
+        assert_eq!(row.gid.as_deref(), Some("content-child"));
+        assert_eq!(row.session_gid.as_deref(), Some("metadata-parent"));
+    }
+
+    #[test]
+    fn resumable_session_rows_include_scheduled_without_changing_reconcile_rows() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://example.invalid/file".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        db.bind_aria2_job(id, "scheduled-gid").unwrap();
+        db.set_status(id, DownloadStatus::Scheduled).unwrap();
+
+        assert!(db.running_rows().unwrap().is_empty());
+        assert_eq!(db.resumable_session_rows().unwrap().len(), 1);
     }
 
     #[test]

@@ -1,6 +1,8 @@
 // Mini Downloader Connector — background/event page.
-// Path A (primary): webRequest header sniff + cancel → full cookie/header fidelity.
-// Path B (fallback): downloads.onCreated + cancel/erase + cookies.getAll.
+// Path A (primary): Firefox response-header sniffing preserves full request
+// fidelity, then cancels only after the native app acknowledges the job.
+// Path B (fallback): the browser starts its download first; it is cancelled and
+// erased only after the native app acknowledges the same job.
 // Both forward a CaptureJob to the native host over native messaging.
 
 const b = globalThis.browser || globalThis.chrome;
@@ -73,8 +75,9 @@ async function sendJob(job) {
     return reply;
   } catch (e) {
     notify(t("notifyNotReachableTitle"), t("notifyNotReachableBody"));
-    // App down/unreachable → queue for retry so the capture isn't lost.
-    enqueueRetry(job);
+    // Automatic captures keep the browser's download when this happens. Do not
+    // save the job for a later automatic retry: URLs and auth can be stale, and
+    // replaying it later would start a download the user did not request then.
     return null;
   }
 }
@@ -91,63 +94,31 @@ async function sendPresence() {
   } catch {}
 }
 
-// ---------- Retry queue (app unreachable) ----------
-const RETRY_KEY = "pendingJobs";
-const RETRY_TTL = 60 * 60 * 1000; // drop after 1h
-const RETRY_MAX = 50;
-
-async function enqueueRetry(job) {
+// Older connector releases stored failed captures in this key and replayed
+// them from alarms/startup. Discard that legacy queue during upgrade so no old
+// capture can silently start later. New failures are left in the browser (or,
+// for an explicit context-menu action, reported immediately to the user).
+const LEGACY_RETRY_KEY = "pendingJobs";
+async function discardLegacyRetries() {
   try {
-    const q = (await b.storage.local.get(RETRY_KEY))[RETRY_KEY] || [];
-    q.push({ job, ts: Date.now() });
-    await b.storage.local.set({ [RETRY_KEY]: q.slice(-RETRY_MAX) });
+    await b.storage.local.remove(LEGACY_RETRY_KEY);
   } catch {}
 }
 
-let flushing = false;
-async function flushRetries() {
-  if (flushing) return;
-  flushing = true;
-  try {
-    const q = (await b.storage.local.get(RETRY_KEY))[RETRY_KEY] || [];
-    if (!q.length) return;
-    const now = Date.now();
-    const keep = [];
-    for (const item of q) {
-      if (now - item.ts > RETRY_TTL) continue; // expired
-      let ok = false;
-      try {
-        const reply = await b.runtime.sendNativeMessage(HOST, {
-          ...item.job,
-          browserFamily: BROWSER_FAMILY,
-        });
-        ok = !!(reply && reply.ok);
-      } catch {}
-      if (!ok) keep.push(item); // still unreachable → keep for next round
-    }
-    await b.storage.local.set({ [RETRY_KEY]: keep });
-  } catch {
-  } finally {
-    flushing = false;
-  }
-}
-
 b.runtime.onStartup.addListener(() => {
-  void flushRetries();
   void sendPresence();
 });
 b.runtime.onInstalled.addListener(() => {
+  void discardLegacyRetries();
   void sendPresence();
 });
 try {
-  b.alarms.create("ldm-retry", { periodInMinutes: 2 });
   b.alarms.create("ldm-presence", { periodInMinutes: 5 });
   b.alarms.onAlarm.addListener((a) => {
-    if (a.name === "ldm-retry") flushRetries();
     if (a.name === "ldm-presence") void sendPresence();
   });
 } catch {}
-void flushRetries();
+void discardLegacyRetries();
 void sendPresence();
 
 // Dedup the same URL across Path A / Path B within a short window.
@@ -293,7 +264,10 @@ b.webRequest.onHeadersReceived.addListener(
     const len = Number.isNaN(lenRaw) ? -1 : lenRaw;
     if (!shouldHijack(cd, ct, len, d.url)) return {};
     if (isBlacklisted(d.url, filenameFromCD(cd, d.url))) return {};
-    if (seen(d.url)) return { cancel: true };
+    // A duplicate must never be cancelled merely because another request used
+    // the same URL. Only the request whose native handoff is acknowledged may
+    // be cancelled below.
+    if (seen(d.url)) return {};
 
     const job = jobFromRequest(
       d.url,
@@ -303,8 +277,11 @@ b.webRequest.onHeadersReceived.addListener(
       reqHeaders.get(d.requestId) || [],
       d.cookieStoreId,
     );
-    sendJob(job);
-    return { cancel: true };
+    // Firefox lets a blocking webRequest listener return a Promise. Keep the
+    // browser request alive while the native host appraises the capture; a
+    // failed/rejected handoff falls through to Firefox's normal download.
+    const reply = await sendJob(job);
+    return reply && reply.ok ? { cancel: true } : {};
   },
   { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
   ["blocking", "responseHeaders"],

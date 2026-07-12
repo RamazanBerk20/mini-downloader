@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { api, on, errText, type ConnectorStatus } from "./api";
   import { announce, trapFocus } from "./lib/a11y";
@@ -83,6 +83,7 @@
   const connectorNeedsSetup = $derived(
     Boolean(
       connectorStatus &&
+        (connectorStatus.firefoxProfileDetected || connectorStatus.chromiumProfileDetected) &&
         !connectorStatus.firefoxDetected &&
         !connectorStatus.chromiumDetected &&
         !connectorStatus.firefoxConnectorInstalled &&
@@ -100,7 +101,7 @@
           complete: t("titleCompleted"),
           error: t("titleFailed"),
           scheduled: t("titleScheduled"),
-        }[statusFilter] ?? "Downloads"),
+        }[statusFilter] ?? t("titleAll")),
   );
 
   async function refresh() {
@@ -179,8 +180,35 @@
 
   // Single shared right-click context menu (positioned at the cursor).
   let menu = $state<{ d: Download; x: number; y: number } | null>(null);
+  let menuEl = $state<HTMLDivElement | null>(null);
   function openMenu(d: Download, x: number, y: number) {
-    menu = { d, x, y };
+    // Keep the menu reachable when a row sits near the bottom/right edge.
+    menu = {
+      d,
+      x: Math.max(8, Math.min(x, window.innerWidth - 190)),
+      y: Math.max(8, Math.min(y, window.innerHeight - 260)),
+    };
+    void tick().then(() => menuEl?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());
+  }
+  function closeMenu() {
+    menu = null;
+  }
+  function onMenuKey(e: KeyboardEvent) {
+    if (!menuEl) return;
+    const items = Array.from(menuEl.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    if (!items.length) return;
+    const current = Math.max(0, items.indexOf(document.activeElement as HTMLButtonElement));
+    let next: number | null = null;
+    if (e.key === "ArrowDown") next = (current + 1) % items.length;
+    else if (e.key === "ArrowUp") next = (current - 1 + items.length) % items.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else if (e.key === "Escape" || e.key === "Tab") {
+      closeMenu();
+      return;
+    } else return;
+    e.preventDefault();
+    items[next].focus();
   }
   // Drag-reorder: move the dragged row to the drop target's slot in aria2's
   // waiting queue.
@@ -318,7 +346,7 @@
     // A dialog is open → let it own the keyboard (its own focus trap handles
     // Escape). Otherwise single-key shortcuts (/, ?, 1–5) leak to the background
     // and pull focus out of the trapped modal.
-    if (menu && e.key === "Escape") { menu = null; return; }
+    if (menu && e.key === "Escape") { closeMenu(); return; }
     if (showSettings || showMedia || showGrabber || showHelp) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); addEl?.focus(); return; }
@@ -418,7 +446,7 @@
       <h2 class="page-title">{pageTitle}</h2>
       <div class="search">
         <Icon name="search" size={15} />
-        <input type="search" placeholder={t("search")} bind:value={search} bind:this={searchEl} aria-label="Search downloads" />
+        <input type="search" placeholder={t("search")} bind:value={search} bind:this={searchEl} aria-label={t("searchDownloads")} />
       </div>
       <div class="head-actions">
         {#if completedCount > 0}
@@ -447,7 +475,7 @@
     </div>
 
     <form class="addbar" onsubmit={add}>
-      <input placeholder={t("addPlaceholder")} bind:value={url} bind:this={addEl} aria-label="Add download URL" />
+      <input placeholder={t("addPlaceholder")} bind:value={url} bind:this={addEl} aria-label={t("addDownloadUrl")} />
       <button
         class="icon-btn"
         type="button"
@@ -492,7 +520,7 @@
     {/if}
 
     {#if selected.size > 0}
-      <div class="selbar" role="toolbar" aria-label="Selection actions">
+      <div class="selbar" role="toolbar" aria-label={t("selectionActions")}>
         <span>{t("bulkSelected", { n: selected.size })}</span>
         <button class="btn btn-ghost" onclick={() => bulk(api.resume)}><Icon name="play" size={15} /> {t("resume")}</button>
         <button class="btn btn-ghost" onclick={() => bulk(api.pause)}><Icon name="pause" size={15} /> {t("pause")}</button>
@@ -616,22 +644,22 @@
 {/if}
 
 {#if menu}
-  <div class="ctx-backdrop" onclick={() => (menu = null)} oncontextmenu={(e) => { e.preventDefault(); menu = null; }} role="presentation"></div>
-  <div class="ctx-menu" style="left:{menu.x}px; top:{menu.y}px" role="menu">
-    <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; toggleDetails(id); }}>{t("detailTitle")}</button>
-    <button role="menuitem" onclick={() => { navigator.clipboard.writeText(menu!.d.url).catch(() => {}); menu = null; }}>{t("copyUrl")}</button>
+  <div class="ctx-backdrop" onclick={closeMenu} oncontextmenu={(e) => { e.preventDefault(); closeMenu(); }} role="presentation"></div>
+  <div class="ctx-menu" bind:this={menuEl} style="left:{menu.x}px; top:{menu.y}px" role="menu" tabindex="-1" onkeydown={onMenuKey}>
+    <button role="menuitem" onclick={() => { const id = menu!.d.id; closeMenu(); toggleDetails(id); }}>{t("detailTitle")}</button>
+    <button role="menuitem" onclick={() => { navigator.clipboard.writeText(menu!.d.url).catch(() => {}); closeMenu(); }}>{t("copyUrl")}</button>
     {#if menu.d.status === "complete"}
-      <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.openFolder(id)); }}>{t("openFolder")}</button>
+      <button role="menuitem" onclick={() => { const id = menu!.d.id; closeMenu(); act(() => api.openFolder(id)); }}>{t("openFolder")}</button>
     {/if}
     {#if menu.d.status === "error"}
-      <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.retry(id)); }}>{t("retry")}</button>
+      <button role="menuitem" onclick={() => { const id = menu!.d.id; closeMenu(); act(() => api.retry(id)); }}>{t("retry")}</button>
     {/if}
     {#if menu.d.status === "scheduled"}
-      <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.scheduleDownload(id, null)); }}>{t("scheduleCancel")}</button>
+      <button role="menuitem" onclick={() => { const id = menu!.d.id; closeMenu(); act(() => api.scheduleDownload(id, null)); }}>{t("scheduleCancel")}</button>
     {:else if menu.d.status !== "complete"}
-      <button role="menuitem" onclick={() => { const d = menu!.d; menu = null; openSchedule(d); }}>{t("scheduleAction")}</button>
+      <button role="menuitem" onclick={() => { const d = menu!.d; closeMenu(); openSchedule(d); }}>{t("scheduleAction")}</button>
     {/if}
-    <button role="menuitem" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.remove(id, false)); }}>{t("remove")}</button>
-    <button role="menuitem" class="danger" onclick={() => { const id = menu!.d.id; menu = null; act(() => api.remove(id, true)); }}>{t("removeDelete")}</button>
+    <button role="menuitem" onclick={() => { const id = menu!.d.id; closeMenu(); act(() => api.remove(id, false)); }}>{t("remove")}</button>
+    <button role="menuitem" class="danger" onclick={() => { const id = menu!.d.id; closeMenu(); act(() => api.remove(id, true)); }}>{t("removeDelete")}</button>
   </div>
 {/if}

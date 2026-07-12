@@ -23,8 +23,8 @@ extension reads, **only for the download you initiate**:
 - It is **never** transmitted to the developer, to any website, or to any
   third-party server.
 - The extension stores only your **settings** (enabled sites, minimum file size)
-  and a short-lived **retry queue** of pending downloads, in the browser's local
-  storage on your device. These never leave your device.
+  in the browser's local storage on your device. A failed automatic handoff is
+  left with the browser and is never retained or retried in the background.
 
 ## What we do NOT do
 
