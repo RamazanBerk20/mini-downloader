@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { api, on, errText } from "./api";
+  import { api, on, errText, type ConnectorStatus } from "./api";
   import { announce, trapFocus } from "./lib/a11y";
   import type { Category, Download, Package, Tick, UpdateInfo } from "./types";
   import Sidebar from "./Sidebar.svelte";
@@ -26,6 +26,7 @@
   let error = $state("");
   let clipboardUrl = $state<string | null>(null);
   let showSettings = $state(false);
+  let settingsSection = $state<"extensions" | null>(null);
   let showMedia = $state(false);
   let showGrabber = $state(false);
   let showHelp = $state(false);
@@ -36,6 +37,7 @@
   let scheduleAt = $state("");
   let showAddOpts = $state(false);
   let addChecksum = $state("");
+  let connectorStatus = $state<ConnectorStatus | null>(null);
 
   function toggleDetails(id: number) {
     expandedId = expandedId === id ? null : id;
@@ -78,6 +80,15 @@
 
   const completedCount = $derived(all.filter((d) => d.status === "complete").length);
   const errorCount = $derived(all.filter((d) => d.status === "error").length);
+  const connectorNeedsSetup = $derived(
+    Boolean(
+      connectorStatus &&
+        !connectorStatus.firefoxDetected &&
+        !connectorStatus.chromiumDetected &&
+        !connectorStatus.firefoxConnectorInstalled &&
+        !connectorStatus.chromiumConnectorInstalled,
+    ),
+  );
 
   const pageTitle = $derived(
     categoryId !== null
@@ -254,6 +265,20 @@
     );
     subs.push(on("downloads:reconciled", () => refresh()));
     subs.push(on<{ url: string }>("clipboard:detected", (p) => (clipboardUrl = p.url)));
+    let connectorEventReceived = false;
+    const connectorSub = on<ConnectorStatus>("connector:status", (status) => {
+      connectorEventReceived = true;
+      connectorStatus = status;
+    });
+    subs.push(connectorSub);
+    // Subscribe before snapshotting so a heartbeat cannot fall in the setup
+    // gap. If an event wins the race, keep its newer status.
+    connectorSub
+      .then(() => api.getConnectorStatus())
+      .then((status) => {
+        if (!connectorEventReceived) connectorStatus = status;
+      })
+      .catch(() => {});
 
     window.addEventListener("keydown", onGlobalKey);
     return () => {
@@ -271,6 +296,20 @@
     statusFilter = "all";
   }
 
+  function openSettings() {
+    settingsSection = null;
+    showSettings = true;
+  }
+  function openExtensions() {
+    settingsSection = "extensions";
+    showSettings = true;
+  }
+  function closeSettings() {
+    showSettings = false;
+    settingsSection = null;
+    refresh();
+  }
+
   function inField(t: EventTarget | null) {
     const el = t as HTMLElement | null;
     return !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
@@ -284,7 +323,7 @@
     const mod = e.ctrlKey || e.metaKey;
     if (mod && e.key.toLowerCase() === "n") { e.preventDefault(); addEl?.focus(); return; }
     if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); searchEl?.focus(); return; }
-    if (mod && e.key === ",") { e.preventDefault(); showSettings = true; return; }
+    if (mod && e.key === ",") { e.preventDefault(); openSettings(); return; }
     if (mod && e.shiftKey && e.key.toLowerCase() === "p") { e.preventDefault(); act(api.pauseAll); return; }
     if (mod && e.shiftKey && e.key.toLowerCase() === "r") { e.preventDefault(); act(api.resumeAll); return; }
     if (inField(e.target)) return;
@@ -359,15 +398,6 @@
     }
   }
 
-  async function setupBrowser() {
-    error = "";
-    try {
-      const msg = await api.installBrowser();
-      announce(msg);
-    } catch (e) {
-      error = errText(e);
-    }
-  }
 </script>
 
 <div class="shell">
@@ -380,7 +410,7 @@
     onStatus={setStatus}
     onCategory={setCategory}
     onSpeed={setSpeed}
-    onSettings={() => (showSettings = true)}
+    onSettings={openSettings}
   />
 
   <main class="main">
@@ -450,6 +480,17 @@
       </div>
     {/if}
 
+    {#if connectorNeedsSetup}
+      <button class="extension-warning" type="button" onclick={openExtensions}>
+        <Icon name="warning" size={19} />
+        <span class="extension-warning-copy">
+          <strong>{t("extensionWarningTitle")}</strong>
+          <span>{t("extensionWarningBody")}</span>
+        </span>
+        <span class="extension-warning-action">{t("extensionOpenSettings")} <Icon name="chevron-right" size={16} /></span>
+      </button>
+    {/if}
+
     {#if selected.size > 0}
       <div class="selbar" role="toolbar" aria-label="Selection actions">
         <span>{t("bulkSelected", { n: selected.size })}</span>
@@ -471,7 +512,7 @@
               <button class="ob-card" onclick={() => addEl?.focus()}><Icon name="add" size={20} /><span>{t("obPaste")}</span></button>
               <button class="ob-card" onclick={() => (showMedia = true)}><Icon name="video" size={20} /><span>{t("obVideo")}</span></button>
               <button class="ob-card" onclick={() => (showGrabber = true)}><Icon name="link" size={20} /><span>{t("obLinks")}</span></button>
-              <button class="ob-card" onclick={setupBrowser}><Icon name="download" size={20} /><span>{t("obBrowser")}</span></button>
+              <button class="ob-card" onclick={openExtensions}><Icon name="link" size={20} /><span>{t("obBrowser")}</span></button>
             </div>
             <p class="keys"><kbd>Ctrl</kbd> <kbd>N</kbd> {t("emptyToAdd")} · <kbd>?</kbd> {t("emptyForShortcuts")}</p>
           {:else}
@@ -506,7 +547,7 @@
 </div>
 
 {#if showSettings}
-  <Settings onclose={() => { showSettings = false; refresh(); }} />
+  <Settings onclose={closeSettings} initialSection={settingsSection} {connectorStatus} />
 {/if}
 {#if showMedia}
   <MediaGrab onclose={() => { showMedia = false; refresh(); }} />

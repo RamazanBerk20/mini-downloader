@@ -14,6 +14,9 @@ pub struct AppState {
     /// Segment/connection defaults — adjustable at runtime from Settings.
     pub defaults: Arc<Mutex<EngineDefaults>>,
     pub download_dir: PathBuf,
+    /// Session-local confirmations received from browser connectors through
+    /// the native-messaging bridge.
+    pub connector_presence: Arc<Mutex<crate::nativehost::ConnectorPresence>>,
     /// Used by the native-host bridge + packaging (later milestones).
     #[allow(dead_code)]
     pub data_dir: PathBuf,

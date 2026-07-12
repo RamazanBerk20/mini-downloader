@@ -2,6 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Category, Download, DownloadDetails, MediaInfo, MediaOpts, Package, ParsedLink, PlaylistEntry, Schedule, UpdateInfo } from "./types";
 
+export type ConnectorStatus = {
+  /** A supported browser profile root exists locally for this family. */
+  firefoxProfileDetected: boolean;
+  chromiumProfileDetected: boolean;
+  /** A connector has reached the running app during this session. */
+  firefoxDetected: boolean;
+  chromiumDetected: boolean;
+  /** An enabled connector entry was found in a supported local profile. */
+  firefoxConnectorInstalled: boolean;
+  chromiumConnectorInstalled: boolean;
+  firefoxLastSeen: number | null;
+  chromiumLastSeen: number | null;
+};
+
 export const api = {
   add: (url: string, checksum?: string) =>
     invoke<Download>("add_download", { url, checksum: checksum ?? null }),
@@ -44,7 +58,7 @@ export const api = {
       quality: quality ?? null,
       opts: opts ?? null,
     }),
-  installBrowser: () => invoke<string>("install_browser_integration"),
+  getConnectorStatus: () => invoke<ConnectorStatus>("get_connector_status"),
   listCategories: () => invoke<Category[]>("list_categories"),
   saveCategory: (name: string, dir: string, rules: string, priority: number) =>
     invoke<void>("save_category", { name, dir, rules, priority }),

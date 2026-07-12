@@ -32,6 +32,16 @@ pub const CHROME_EXTENSION_ID: &str = "lkllgjnnglfjifnioojkcbefjlfmfahi";
 /// allowed by the native host so store + unpacked installs work.
 pub const CHROME_STORE_EXTENSION_ID: &str = "hhaobmkdgijodfieadeeanjmnneckafj";
 
+/// Browser family that established a native-messaging connection. This is
+/// supplied by the connector itself: native-messaging manifests do not expose
+/// the calling browser to the host process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BrowserFamily {
+    Firefox,
+    Chromium,
+}
+
 /// What kind of source a captured job points at. The app routes each kind to
 /// the right aria2 method or to yt-dlp.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +143,15 @@ pub struct BridgeRequest {
     /// ingesting anything. Lets the options page confirm the bridge is wired.
     #[serde(default)]
     pub ping: bool,
+    /// Browser family reported by the native host from its invocation origin
+    /// (or, for an unknown fork, by the connector message). This annotates
+    /// regular captures and manual pings as well as presence heartbeats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub browser_family: Option<BrowserFamily>,
+    /// A silent connector-presence heartbeat. Unlike `ping`, the native host
+    /// must never start the desktop app just to deliver this message.
+    #[serde(default)]
+    pub presence: bool,
 }
 
 impl BridgeRequest {
@@ -141,6 +160,8 @@ impl BridgeRequest {
             protocol_version: PROTOCOL_VERSION,
             job,
             ping: false,
+            browser_family: None,
+            presence: false,
         }
     }
 
@@ -149,6 +170,8 @@ impl BridgeRequest {
         Self {
             protocol_version: PROTOCOL_VERSION,
             ping: true,
+            browser_family: None,
+            presence: false,
             job: CaptureJob {
                 url: "ping://".into(),
                 filename: None,
@@ -167,6 +190,42 @@ impl BridgeRequest {
             },
         }
     }
+
+    /// A connector heartbeat carrying no capture job. The desktop app records
+    /// the browser family and returns an acknowledgement without focusing the
+    /// window or adding a download.
+    pub fn presence(browser_family: BrowserFamily) -> Self {
+        Self {
+            protocol_version: PROTOCOL_VERSION,
+            ping: false,
+            browser_family: Some(browser_family),
+            presence: true,
+            job: CaptureJob {
+                url: "presence://".into(),
+                filename: None,
+                referrer: None,
+                user_agent: None,
+                cookie: None,
+                extra_headers: Vec::new(),
+                kind: DownloadKind::Http,
+                mime: None,
+                size: None,
+                page_url: None,
+                cookie_store_id: None,
+                torrent_b64: None,
+                batch_id: None,
+                batch_name: None,
+            },
+        }
+    }
+
+    /// Annotate a regular capture or manual ping with the browser family that
+    /// launched the native host. This is additive, so older app/host pairs
+    /// continue to exchange the same capture payload.
+    pub fn with_browser_family(mut self, browser_family: Option<BrowserFamily>) -> Self {
+        self.browser_family = browser_family;
+        self
+    }
 }
 
 /// The app's reply, relayed by the host back to the extension.
@@ -181,6 +240,16 @@ pub struct BridgeReply {
 }
 
 impl BridgeReply {
+    /// Acknowledge a non-capture bridge message such as a ping or presence
+    /// heartbeat.
+    pub fn acknowledged() -> Self {
+        Self {
+            ok: true,
+            job_id: None,
+            error: None,
+        }
+    }
+
     pub fn accepted(job_id: i64) -> Self {
         Self { ok: true, job_id: Some(job_id), error: None }
     }
@@ -279,5 +348,13 @@ mod tests {
         // matches whole components, so this checks the last two path segments.
         let p = bridge_socket_path();
         assert!(p.ends_with("minidownloader/bridge.sock"));
+    }
+
+    #[test]
+    fn presence_request_is_distinct_from_a_regular_capture() {
+        let req = BridgeRequest::presence(BrowserFamily::Chromium);
+        assert!(req.presence);
+        assert_eq!(req.browser_family, Some(BrowserFamily::Chromium));
+        assert!(!req.ping);
     }
 }

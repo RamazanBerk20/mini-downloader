@@ -5,9 +5,15 @@ The extension is available from the public stores:
 - Firefox: https://addons.mozilla.org/firefox/addon/mini-downloader-connector/
 - Chrome: https://chromewebstore.google.com/detail/mini-downloader-connector/hhaobmkdgijodfieadeeanjmnneckafj
 
-The desktop app links to those listings from Settings → Browser integration.
+The desktop app links to those listings from Settings → Extensions.
 No runtime key, AMO token, Chrome OAuth token, or extension private key is
 needed for users to install the published extension.
+
+The connector sends a silent, local presence signal while the desktop app is
+running so the app can show an accurate setup prompt. Any connector change
+needs a version bump in both extension manifests and a new AMO/CWS submission;
+the desktop app uses active connector metadata in supported browser profiles as
+a local fallback, but only a native-messaging heartbeat proves a live bridge.
 
 ## Firefox — addons.mozilla.org (AMO)
 

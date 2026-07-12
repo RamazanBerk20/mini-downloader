@@ -11,6 +11,10 @@ const t = (k) => b.i18n.getMessage(k);
 // blocking webRequest (Path A: sniff headers + cancel → full cookie fidelity);
 // Chromium MV3 removed it, so there we rely on Path B (downloads.onCreated).
 const IS_FIREFOX = typeof globalThis.browser !== "undefined";
+// The native host also derives this from the browser-provided launch argument
+// for our known store IDs. Keep it in every connector message as a fallback
+// for Firefox/Chromium forks with a different invocation shape.
+const BROWSER_FAMILY = IS_FIREFOX ? "firefox" : "chromium";
 
 const DEFAULTS = {
   enabled: true,
@@ -60,7 +64,10 @@ function notify(title, message) {
 
 async function sendJob(job) {
   try {
-    const reply = await b.runtime.sendNativeMessage(HOST, job);
+    const reply = await b.runtime.sendNativeMessage(HOST, {
+      ...job,
+      browserFamily: BROWSER_FAMILY,
+    });
     if (reply && reply.ok) notify(t("notifySentTitle"), job.filename || job.url);
     else notify(t("notifyRejectedTitle"), (reply && reply.error) || t("notifyUnknownError"));
     return reply;
@@ -70,6 +77,18 @@ async function sendJob(job) {
     enqueueRetry(job);
     return null;
   }
+}
+
+// Presence is intentionally silent: it confirms an already-running desktop
+// app, but does not notify, queue work, or cause the native host to launch the
+// app just because a browser background worker woke up.
+async function sendPresence() {
+  try {
+    await b.runtime.sendNativeMessage(HOST, {
+      presence: true,
+      browserFamily: BROWSER_FAMILY,
+    });
+  } catch {}
 }
 
 // ---------- Retry queue (app unreachable) ----------
@@ -98,7 +117,10 @@ async function flushRetries() {
       if (now - item.ts > RETRY_TTL) continue; // expired
       let ok = false;
       try {
-        const reply = await b.runtime.sendNativeMessage(HOST, item.job);
+        const reply = await b.runtime.sendNativeMessage(HOST, {
+          ...item.job,
+          browserFamily: BROWSER_FAMILY,
+        });
         ok = !!(reply && reply.ok);
       } catch {}
       if (!ok) keep.push(item); // still unreachable → keep for next round
@@ -110,14 +132,23 @@ async function flushRetries() {
   }
 }
 
-b.runtime.onStartup.addListener(flushRetries);
+b.runtime.onStartup.addListener(() => {
+  void flushRetries();
+  void sendPresence();
+});
+b.runtime.onInstalled.addListener(() => {
+  void sendPresence();
+});
 try {
   b.alarms.create("ldm-retry", { periodInMinutes: 2 });
+  b.alarms.create("ldm-presence", { periodInMinutes: 5 });
   b.alarms.onAlarm.addListener((a) => {
     if (a.name === "ldm-retry") flushRetries();
+    if (a.name === "ldm-presence") void sendPresence();
   });
 } catch {}
-flushRetries();
+void flushRetries();
+void sendPresence();
 
 // Dedup the same URL across Path A / Path B within a short window.
 const recent = new Map();

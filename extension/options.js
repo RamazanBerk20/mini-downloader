@@ -1,5 +1,9 @@
 const b = globalThis.browser || globalThis.chrome;
 const t = (k) => globalThis.ldmI18n.t(k);
+// Keep the manual bridge test on the same browser-family wire contract as the
+// background heartbeat and captured jobs. This matters for supported forks
+// whose native-host launch arguments do not identify the calling browser.
+const BROWSER_FAMILY = typeof globalThis.browser !== "undefined" ? "firefox" : "chromium";
 const DEFAULTS = {
   enabled: true,
   minSize: 1048576,
@@ -103,7 +107,10 @@ document.getElementById("test").addEventListener("click", async () => {
   const st = document.getElementById("test-status");
   setStatus(st, "…", "busy");
   try {
-    const reply = await b.runtime.sendNativeMessage("com.minidownloader.host", { ping: true });
+    const reply = await b.runtime.sendNativeMessage("com.minidownloader.host", {
+      ping: true,
+      browserFamily: BROWSER_FAMILY,
+    });
     if (reply && reply.ok) {
       setStatus(st, reply.error || t("optionsTestOk"), "ok");
     } else {

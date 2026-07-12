@@ -104,7 +104,9 @@ jobs:
       - uses: actions/checkout@v4
       - id: extension_version
         name: Read extension version
-        run: echo "version=$(node -p 'require(\"./extension/manifest.json\").version')" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(node -p 'require("./extension/manifest.json").version')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Package browser extensions
         run: |
           ./scripts/build-extension.sh

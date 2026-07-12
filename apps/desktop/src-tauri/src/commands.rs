@@ -390,13 +390,13 @@ pub async fn open_containing_folder(
     Ok(())
 }
 
-/// Install the native-messaging host manifest for every detected browser
-/// (Firefox family + Chromium family). Returns a summary.
+/// Return connector status from live bridge messages plus a read-only active
+/// extension-profile fallback for store builds that predate the heartbeat.
 #[tauri::command]
-pub async fn install_browser_integration() -> Result<String, CommandError> {
-    crate::nativehost::install_browser_integration()
-        .map(|paths| format!("Installed {} manifest(s):\n{}", paths.len(), paths.join("\n")))
-        .map_err(err)
+pub async fn get_connector_status(
+    state: State<'_, AppState>,
+) -> Result<crate::nativehost::ConnectorStatus, CommandError> {
+    Ok(crate::nativehost::connector_status(&state.connector_presence))
 }
 
 async fn add_file_job(

@@ -157,6 +157,7 @@ pub fn run() {
                 .map(|v| v == "true")
                 .unwrap_or(false);
             let clipboard_on = Arc::new(AtomicBool::new(clip_enabled));
+            let connector_presence = Arc::new(Mutex::new(nativehost::ConnectorPresence::default()));
 
             app.manage(AppState {
                 engine: engine.clone(),
@@ -165,6 +166,7 @@ pub fn run() {
                 clipboard_on: clipboard_on.clone(),
                 defaults: defaults.clone(),
                 download_dir: download_dir.clone(),
+                connector_presence: connector_presence.clone(),
                 data_dir,
             });
 
@@ -180,7 +182,7 @@ pub fn run() {
             scheduler::spawn(app.handle().clone(), engine.clone(), db.clone());
             clipboard::spawn(app.handle().clone(), clipboard_on);
 
-            // Browser bridge: UDS listener + best-effort manifest install.
+            // Browser bridge: UDS listener + best-effort native-host registration.
             nativehost::spawn_listener(
                 app.handle().clone(),
                 engine,
@@ -188,10 +190,11 @@ pub fn run() {
                 ytdlp,
                 download_dir,
                 defaults,
+                connector_presence,
             );
-            match nativehost::install_browser_integration() {
-                Ok(paths) => eprintln!("browser integration: {} manifest(s) installed", paths.len()),
-                Err(e) => eprintln!("browser integration not installed: {e}"),
+            match nativehost::register_native_host_manifests() {
+                Ok(paths) => eprintln!("browser bridge: {} manifest(s) registered", paths.len()),
+                Err(e) => eprintln!("browser bridge registration skipped: {e}"),
             }
             // System tray.
             tray::build(app.handle())?;
@@ -276,7 +279,7 @@ pub fn run() {
             commands::set_global_speed,
             commands::set_download_speed,
             commands::open_containing_folder,
-            commands::install_browser_integration,
+            commands::get_connector_status,
             commands::add_torrent_file,
             commands::add_metalink_file,
             commands::list_categories,

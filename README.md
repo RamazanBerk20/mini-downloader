@@ -73,9 +73,16 @@ put it on `PATH` if you want video muxing.
 ### Browser extension
 
 Install the approved extension from **Firefox Add-ons** or the **Chrome Web
-Store** using the buttons in Settings → Browser integration. The browser shows
-its own permission/confirmation UI; a public desktop app cannot silently
-install an extension in consumer Firefox or Chrome.
+Store** using Settings → Extensions. Choose the Firefox listing for Firefox
+and Firefox-based browsers, or the Chrome listing for Chrome and other
+Chromium-based browsers. The browser shows its own permission/confirmation UI;
+a public desktop app cannot silently install an extension in consumer Firefox
+or Chrome.
+
+The app shows a non-blocking Extensions prompt until it finds an active
+connector in a supported browser profile or receives a connector confirmation.
+If the connector is already installed, opening that browser also confirms the
+live bridge for the session.
 
 For development only, load it manually:
 
@@ -85,9 +92,8 @@ For development only, load it manually:
    pick `manifest.json` from the unzipped folder.
    **Chromium/Chrome/Edge/Brave**: `chrome://extensions` → Developer mode →
    Load unpacked → the unzipped folder.
-3. Start the app once — it registers the native-messaging host for every
-   detected browser automatically (Settings → "Install native-messaging host"
-   re-runs it).
+3. Start the app once so it can configure its local native-messaging bridge
+   for supported browser profiles.
 
 ## Build from source
 

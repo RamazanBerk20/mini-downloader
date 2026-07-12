@@ -5,6 +5,7 @@ pub const EV_STATE: &str = "downloads:state";
 pub const EV_COMPLETE: &str = "downloads:complete";
 pub const EV_ERROR: &str = "downloads:error";
 pub const EV_RECONCILED: &str = "downloads:reconciled";
+pub const EV_CONNECTOR_STATUS: &str = "connector:status";
 
 /// One live-progress row. Batched into a `downloads:tick` array per poll.
 /// Keyed by the stable app `id` so aria2 and yt-dlp downloads share one path.

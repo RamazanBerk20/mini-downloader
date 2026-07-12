@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
   import { open } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { api, errText } from "./api";
+  import { api, errText, type ConnectorStatus } from "./api";
 
   const SPONSOR_URL = "https://github.com/sponsors/RamazanBerk20";
   import { trapFocus } from "./lib/a11y";
@@ -17,9 +17,16 @@
     firefox: "https://addons.mozilla.org/firefox/addon/mini-downloader-connector/",
     chrome: "https://chromewebstore.google.com/detail/mini-downloader-connector/hhaobmkdgijodfieadeeanjmnneckafj",
   };
-  const RELEASE_URL = "https://github.com/RamazanBerk20/mini-downloader/releases/latest";
 
-  let { onclose }: { onclose: () => void } = $props();
+  let {
+    onclose,
+    initialSection = null,
+    connectorStatus = null,
+  }: {
+    onclose: () => void;
+    initialSection?: "extensions" | null;
+    connectorStatus?: ConnectorStatus | null;
+  } = $props();
 
   let autoOrganize = $state(true);
   let clipboardWatch = $state(false);
@@ -27,9 +34,24 @@
   let autostart = $state(false);
   let categories = $state<Category[]>([]);
   let schedules = $state<Schedule[]>([]);
-  let browserStatus = $state("");
+  let settingsStatus = $state("");
+  let extensionsSection = $state<HTMLElement | null>(null);
   let split = $state(16);
   let connections = $state(16);
+
+  // A profile is the useful definition of an available browser here: it is
+  // where the connector is installed and where the native host is registered.
+  // With no known profile, retain both choices for a newly installed browser.
+  const showFirefoxStore = $derived(
+    connectorStatus === null ||
+      connectorStatus.firefoxProfileDetected ||
+      !connectorStatus.chromiumProfileDetected,
+  );
+  const showChromiumStore = $derived(
+    connectorStatus === null ||
+      connectorStatus.chromiumProfileDetected ||
+      !connectorStatus.firefoxProfileDetected,
+  );
 
   const DAYS = ["dayMon", "dayTue", "dayWed", "dayThu", "dayFri", "daySat", "daySun"] as const;
   const ACTIONS: [string, MsgKey][] = [
@@ -101,6 +123,17 @@
     try {
       maxConcurrent = await api.getMaxConcurrent();
     } catch {}
+  });
+
+  async function focusExtensions() {
+    await tick();
+    if (initialSection !== "extensions" || !extensionsSection) return;
+    extensionsSection.scrollIntoView({ block: "start", behavior: "smooth" });
+    extensionsSection.focus({ preventScroll: true });
+  }
+
+  $effect(() => {
+    if (initialSection === "extensions" && extensionsSection) void focusExtensions();
   });
 
   function applyTheme(v: string) {
@@ -202,7 +235,7 @@
     try {
       await api.setEngineDefaults(split, connections);
     } catch (e) {
-      browserStatus = "Engine error: " + errText(e);
+      settingsStatus = "Engine error: " + errText(e);
     }
   }
 
@@ -226,7 +259,7 @@
       if (autostart) await enable();
       else await disable();
     } catch (err) {
-      browserStatus = "Autostart error: " + errText(err);
+      settingsStatus = "Autostart error: " + errText(err);
     }
   }
   async function onLocaleChange(e: Event) {
@@ -261,13 +294,6 @@
       c.dir = dir;
       categories = [...categories];
       await api.saveCategory(c.name, c.dir, c.rules, c.priority);
-    }
-  }
-  async function installBrowser() {
-    try {
-      browserStatus = "Installed: " + (await api.installBrowser());
-    } catch (e) {
-      browserStatus = "Error: " + errText(e);
     }
   }
   const fmtTime = (m: number) =>
@@ -333,6 +359,7 @@
     <h2 id="set-h">{t("settings")}</h2>
     <button class="icon-btn" aria-label={t("close")} onclick={onclose}><Icon name="close" size={18} /></button>
   </div>
+  {#if settingsStatus}<p class="hint settings-status" role="status">{settingsStatus}</p>{/if}
 
   <section class="section">
     <h3>{t("sectGeneral")}</h3>
@@ -447,22 +474,34 @@
     <p class="hint">{t("connHint")}</p>
   </section>
 
-  <section class="section">
-    <h3>{t("sectBrowser")}</h3>
-    {#if STORE_URLS.firefox || STORE_URLS.chrome}
-      <div class="srow" style="justify-content:flex-start; gap:0.5rem">
-        {#if STORE_URLS.firefox}<button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.firefox)}>{t("getForFirefox")}</button>{/if}
-        {#if STORE_URLS.chrome}<button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.chrome)}>{t("getForChrome")}</button>{/if}
-      </div>
-    {/if}
-    <div class="btn-row">
-      <button class="btn" onclick={installBrowser}><Icon name="link" size={16} /> {t("installHost")}</button>
+  <section class="section extensions-section" id="extensions" bind:this={extensionsSection} tabindex="-1">
+    <h3>{t("sectExtensions")}</h3>
+    <p class="hint">{t("extensionStoreHint")}</p>
+    <div class="extension-store-list">
+      {#if showFirefoxStore}
+        <div class="extension-store">
+          <div>
+            <strong>Firefox</strong>
+            <p class="hint">{t("firefoxFamilyHint")}</p>
+          </div>
+          <button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.firefox)}>
+            <Icon name="link" size={16} /> {t("getForFirefox")}
+          </button>
+        </div>
+      {/if}
+      {#if showChromiumStore}
+        <div class="extension-store">
+          <div>
+            <strong>Chrome</strong>
+            <p class="hint">{t("chromiumFamilyHint")}</p>
+          </div>
+          <button class="btn btn-primary" onclick={() => openUrl(STORE_URLS.chrome)}>
+            <Icon name="link" size={16} /> {t("getForChrome")}
+          </button>
+        </div>
+      {/if}
     </div>
-    {#if browserStatus}<p class="hint">{browserStatus}</p>{/if}
-    {#if !STORE_URLS.firefox && !STORE_URLS.chrome}
-      <p class="hint">{t("browserHint")}</p>
-    {/if}
-    <button class="btn btn-ghost" onclick={() => openUrl(RELEASE_URL)}>{t("installGuide")}</button>
+    <p class="hint">{t("extensionStoreOpenNote")}</p>
   </section>
 
   <section class="section">
