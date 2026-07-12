@@ -111,8 +111,10 @@ jobs:
         run: |
           ./scripts/build-extension.sh
           cd dist-ext
-          (cd firefox && zip -qr ../mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip .)
-          (cd chrome && zip -qr ../mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip .)
+          # Archive entries must not be prefixed with `./`: store uploaders
+          # require manifest.json to sit at the archive root.
+          (cd firefox && zip -qr ../mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip *)
+          (cd chrome && zip -qr ../mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip *)
       - name: Attach extension packages
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
