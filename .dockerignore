@@ -1,8 +1,29 @@
-node_modules
-target
-apps/desktop/src-tauri/target
-dist
-*.AppImage
-*.deb
-*.rpm
+# Build output and dependency folders can exist at several levels in this
+# workspace. Excluding them recursively keeps local container builds small and
+# prevents host-built binaries from leaking into the image context.
+**/node_modules
+**/target
+**/dist
+**/.pnpm-store
+dist-ext
+
+# Distribution and local AUR build artifacts are never needed to build the
+# development image.
+**/*.AppImage
+**/*.deb
+**/*.rpm
+**/*.xpi
+packaging/aur/*/src
+packaging/aur/*/pkg
+packaging/aur/*/*.tar.gz
+packaging/aur/*/*.pkg.tar.zst
+
+# Keep local credentials and the Chrome extension signing key out of every
+# Docker build context.
+.env
+.env.*
+**/*.log
+packaging/chrome-extension-key.pem
+packaging/chrome-key.b64
+
 .git

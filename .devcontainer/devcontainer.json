@@ -1,0 +1,27 @@
+{
+  "name": "Mini Downloader (Ubuntu 22.04)",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "vscode",
+  "workspaceFolder": "/workspaces/mini-downloader",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/mini-downloader,type=bind,consistency=cached",
+  "mounts": [
+    "source=minidl-desktop-node-modules,target=/workspaces/mini-downloader/apps/desktop/node_modules,type=volume"
+  ],
+  "overrideCommand": true,
+  "postCreateCommand": "sudo install -d -o vscode -g vscode /workspaces/mini-downloader/apps/desktop/node_modules /home/vscode/.pnpm-store && CI=true pnpm --dir apps/desktop install --frozen-lockfile && cargo fetch",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tauri-apps.tauri-vscode",
+        "svelte.svelte-vscode",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}

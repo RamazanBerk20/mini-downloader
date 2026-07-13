@@ -13,9 +13,12 @@ The whole app is distributed as `GPL-3.0-or-later` because it bundles GPL'd aria
 ## Browser extension
 
 - Firefox add-on id: `minidownloader@ramazan.dev` → host manifest `allowed_extensions`.
-- Chromium extension id: `lkllgjnnglfjifnioojkcbefjlfmfahi` (from `manifest.chrome.json`'s
-  `key`; private key in `chrome-extension-key.pem`, keep it secret / out of releases)
-  → host manifest `allowed_origins: ["chrome-extension://<id>/"]`.
+- Chromium has two accepted IDs: unpacked builds use
+  `lkllgjnnglfjifnioojkcbefjlfmfahi` (derived from `manifest.chrome.json`'s
+  `key`; the private key lives in ignored `chrome-extension-key.pem`), while
+  the Chrome Web Store build strips that key and uses
+  `hhaobmkdgijodfieadeeanjmnneckafj`. The host manifest permits both origins
+  so local development and the store release can connect.
 - Build both packages: `./scripts/build-extension.sh` → `dist-ext/{firefox,chrome}`.
 - The app registers the host manifest for supported browser profiles on first
   run. Extension installation remains a browser-controlled action from

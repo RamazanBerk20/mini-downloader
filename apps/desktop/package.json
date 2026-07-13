@@ -11,9 +11,6 @@
     "tauri": "tauri"
   },
   "license": "GPL-3.0-or-later",
-  "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
-  },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-autostart": "^2",

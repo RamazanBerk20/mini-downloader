@@ -1,7 +1,14 @@
-# Tauri + SvelteKit + TypeScript
+# Mini Downloader desktop app
 
-This template should help get you started developing with Tauri, SvelteKit and TypeScript in Vite.
+This directory contains Mini Downloader's Tauri 2 + Svelte 5/Vite desktop
+frontend. The Rust workspace lives at the repository root, so run Cargo
+commands from there.
 
-## Recommended IDE Setup
+See the [root README](../../README.md) for prerequisites, Dev Container setup,
+development commands, packaging, and browser-connector instructions.
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+```sh
+pnpm install --frozen-lockfile
+pnpm check
+pnpm tauri dev
+```
