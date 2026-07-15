@@ -32,9 +32,10 @@ a local fallback, but only a native-messaging heartbeat proves a live bridge.
 ## Chromium — Chrome Web Store (CWS)
 
 1. Register at https://chrome.google.com/webstore/devconsole (one-time $5).
-2. Do the first upload manually to get the **item id** (keep the same `key` from
-   `extension/manifest.chrome.json` so the id — and the native-host
-   `allowed_origins` — stay stable).
+2. Do the first upload manually to get the **item id**. Store-upload ZIPs must
+   omit the `key` from `extension/manifest.chrome.json`: that key is only for a
+   stable unpacked-development ID. The native host permits both the development
+   ID and the Chrome Web Store item ID.
 3. Create OAuth creds + a refresh token (see chrome-webstore-upload-cli docs).
 4. Add repo secrets: `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`,
    `CWS_ITEM_ID`.

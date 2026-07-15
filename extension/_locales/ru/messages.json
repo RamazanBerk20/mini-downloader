@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "Загрузки этих типов остаются в браузере."
-  },
-  "optionsMagnetSkip": {
-    "message": "Оставлять magnet-ссылки системе"
   }
 }

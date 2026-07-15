@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "这些类型的下载留在浏览器中。"
-  },
-  "optionsMagnetSkip": {
-    "message": "将磁力链接交给系统处理"
   }
 }

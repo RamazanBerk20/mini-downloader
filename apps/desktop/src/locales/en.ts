@@ -72,6 +72,8 @@ export const en = {
   settingsNavigation: "Settings sections",
   sectGeneral: "General",
   optAutoOrganize: "Auto-organize finished files",
+  optPreventDuplicates: "Prevent duplicate downloads",
+  optPreventDuplicatesHint: "Reuses an existing download with the same URL and type. Turn this off to allow numbered copies; failed downloads and different media options can still be added.",
   optClipboard: "Watch clipboard for links",
   optCloseTray: "Close to tray (keep running)",
   optAutostart: "Start on login (minimized)",
@@ -256,6 +258,6 @@ export const en = {
   scheduleCancel: "Cancel schedule",
   peerSeed: "seed",
   peerLeech: "peer",
-  optHandleMagnets: "Handle magnet links",
-  optHandleMagnetsHint: "When off, magnet links are left to your torrent app (takes effect after the app restarts).",
+  optHandleMagnets: "Make Mini Downloader the default app for magnet links",
+  optHandleMagnetsHint: "Updates the system association immediately. Explicit “Download with Mini Downloader” actions still work when this is off.",
 };

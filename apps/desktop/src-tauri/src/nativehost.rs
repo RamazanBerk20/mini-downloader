@@ -20,7 +20,7 @@ use minidl_core::db::Db;
 use minidl_core::ipc::{self, BridgeReply, BridgeRequest, BrowserFamily};
 
 use crate::events::{EV_CONNECTOR_STATUS, EV_STATE};
-use crate::ingest::ingest;
+use crate::ingest::{ingest, IngestOutcome};
 
 const MAX_MSG: usize = 64 * 1024 * 1024;
 
@@ -524,11 +524,25 @@ async fn handle_conn(mut conn: Stream, ctx: Ctx) {
                 )
                 .await
                 {
-                    Ok(id) => {
+                    Ok(IngestOutcome::Added(id)) => {
                         let _ = ctx
                             .app
                             .emit(EV_STATE, json!({ "id": id, "status": "active" }));
                         focus_window(&ctx.app);
+                        BridgeReply::accepted(id)
+                    }
+                    Ok(IngestOutcome::Existing(id)) => {
+                        // A duplicate is still an accepted browser handoff: the
+                        // extension must cancel its copy instead of falling back
+                        // to a second browser-managed download. If this was the
+                        // first item in a batch, discard the unused package.
+                        if let (Some((pkg, true)), Some(bid)) = (batch, batch_id) {
+                            let _ = ctx.db.delete_package_if_empty(pkg);
+                            ctx.batches
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .remove(&bid);
+                        }
                         BridgeReply::accepted(id)
                     }
                     Err(e) => {

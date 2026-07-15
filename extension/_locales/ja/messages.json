@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "これらの形式のダウンロードはブラウザーに残ります。"
-  },
-  "optionsMagnetSkip": {
-    "message": "マグネットリンクをシステムに任せる"
   }
 }

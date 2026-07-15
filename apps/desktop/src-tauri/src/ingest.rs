@@ -7,9 +7,24 @@ use std::path::Path;
 use serde_json::Value;
 
 use minidl_core::aria2::{build_add_options, Engine, EngineDefaults};
-use minidl_core::db::Db;
+use minidl_core::db::{Db, DownloadInsertResult};
 use minidl_core::ipc::{CaptureJob, DownloadKind};
 use minidl_core::model::{Download, DownloadStatus, NewDownload};
+
+/// Whether an ingest created engine work or reused an existing download.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestOutcome {
+    Added(i64),
+    Existing(i64),
+}
+
+impl IngestOutcome {
+    pub fn id(self) -> i64 {
+        match self {
+            Self::Added(id) | Self::Existing(id) => id,
+        }
+    }
+}
 
 fn kind_str(k: DownloadKind) -> &'static str {
     match k {
@@ -126,9 +141,10 @@ pub fn job_from_row(d: &Download) -> CaptureJob {
     }
 }
 
-/// Add a captured job. Returns the stable DB id on success. aria2 handles
-/// http/magnet/torrent/metalink; yt-dlp handles HLS/DASH. `checksum` is a
-/// pre-normalized aria2 checksum value (`sha-256=<hex>`), honored for HTTP only.
+/// Add a captured job, or return the matching existing row when duplicate
+/// prevention is enabled. aria2 handles http/magnet/torrent/metalink; yt-dlp
+/// handles HLS/DASH. `checksum` is a pre-normalized aria2 checksum value
+/// (`sha-256=<hex>`), honored for HTTP only.
 #[allow(clippy::too_many_arguments)]
 pub async fn ingest(
     engine: &Engine,
@@ -140,7 +156,7 @@ pub async fn ingest(
     category_id: Option<i64>,
     package_id: Option<i64>,
     checksum: Option<String>,
-) -> Result<i64, String> {
+) -> Result<IngestOutcome, String> {
     let dir = download_dir.to_string_lossy().to_string();
     // For streaming media the "url" we track/resume from is the page URL.
     let is_stream = matches!(job.kind, DownloadKind::Hls | DownloadKind::Dash);
@@ -191,30 +207,41 @@ pub async fn ingest(
     }
 
     let checksum = checksum.filter(|_| matches!(job.kind, DownloadKind::Http));
-    let id = db
-        .insert_download(&NewDownload {
-            url: target.clone(),
-            filename: job.filename.clone(),
-            dir: dir.clone(),
-            kind: kind_str(job.kind).into(),
-            referrer: job.referrer.clone(),
-            category_id,
-            user_agent: job.user_agent.clone(),
-            cookie: job.cookie.clone(),
-            extra_headers: extra_headers_json(&job),
-            page_url: job.page_url.clone(),
-            format_id: None,
-            package_id,
-            mime: job.mime.clone(),
-            checksum: checksum.clone(),
-            media_opts: None,
-        })
-        .map_err(|e| e.to_string())?;
+    let new_download = NewDownload {
+        url: target.clone(),
+        filename: job.filename.clone(),
+        dir: dir.clone(),
+        kind: kind_str(job.kind).into(),
+        referrer: job.referrer.clone(),
+        category_id,
+        user_agent: job.user_agent.clone(),
+        cookie: job.cookie.clone(),
+        extra_headers: extra_headers_json(&job),
+        page_url: job.page_url.clone(),
+        format_id: None,
+        package_id,
+        mime: job.mime.clone(),
+        checksum: checksum.clone(),
+        media_opts: None,
+    };
+    let inserted = if fetches_url {
+        db.insert_download_with_duplicate_policy(&new_download)
+            .map_err(|e| e.to_string())?
+    } else {
+        DownloadInsertResult::Inserted(
+            db.insert_download(&new_download)
+                .map_err(|e| e.to_string())?,
+        )
+    };
+    let id = inserted.id();
+    if matches!(inserted, DownloadInsertResult::Existing(_)) {
+        return Ok(IngestOutcome::Existing(id));
+    }
 
     if is_stream {
         db.set_status(id, DownloadStatus::Active).map_err(|e| e.to_string())?;
         ytdlp.start(id, target, None, job.header_lines(), None);
-        return Ok(id);
+        return Ok(IngestOutcome::Added(id));
     }
 
     let mut opts_map = build_add_options(&job, &dir, &defaults);
@@ -277,7 +304,7 @@ pub async fn ingest(
                     let _ = db.set_status(child_id, DownloadStatus::Active);
                 }
             }
-            Ok(id)
+            Ok(IngestOutcome::Added(id))
         }
         Err(e) => {
             let _ = db.set_error(id, None, Some(&e.to_string()));

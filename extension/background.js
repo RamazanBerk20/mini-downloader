@@ -23,7 +23,6 @@ const DEFAULTS = {
   minSize: 1048576, // 1 MiB floor: ignore tiny/inline files
   disabledHosts: [],
   blacklistExts: [], // file types the browser keeps (lowercase, no dot)
-  blacklistMagnet: false, // leave magnet: links to the system handler
 };
 let settings = { ...DEFAULTS };
 
@@ -121,14 +120,19 @@ try {
 void discardLegacyRetries();
 void sendPresence();
 
-// Dedup the same URL across Path A / Path B within a short window.
-const recent = new Map();
-function seen(url) {
+// Correlate Firefox's Path A handoff with the Path B download event it may
+// produce for the same browser request. Every Path A request still reaches the
+// app, where the user's duplicate-prevention setting is authoritative.
+const pathAHandoffs = new Map();
+function rememberPathAHandoff(url, handoff) {
+  pathAHandoffs.set(url, { at: Date.now(), handoff });
+}
+function recentPathAHandoff(url) {
   const now = Date.now();
-  for (const [k, t] of recent) if (now - t > 5000) recent.delete(k);
-  if (recent.has(url)) return true;
-  recent.set(url, now);
-  return false;
+  for (const [key, entry] of pathAHandoffs) {
+    if (now - entry.at > 5000) pathAHandoffs.delete(key);
+  }
+  return pathAHandoffs.get(url)?.handoff || null;
 }
 
 // ---------- Path A: webRequest (Firefox only) ----------
@@ -264,11 +268,6 @@ b.webRequest.onHeadersReceived.addListener(
     const len = Number.isNaN(lenRaw) ? -1 : lenRaw;
     if (!shouldHijack(cd, ct, len, d.url)) return {};
     if (isBlacklisted(d.url, filenameFromCD(cd, d.url))) return {};
-    // A duplicate must never be cancelled merely because another request used
-    // the same URL. Only the request whose native handoff is acknowledged may
-    // be cancelled below.
-    if (seen(d.url)) return {};
-
     const job = jobFromRequest(
       d.url,
       filenameFromCD(cd, d.url),
@@ -280,7 +279,9 @@ b.webRequest.onHeadersReceived.addListener(
     // Firefox lets a blocking webRequest listener return a Promise. Keep the
     // browser request alive while the native host appraises the capture; a
     // failed/rejected handoff falls through to Firefox's normal download.
-    const reply = await sendJob(job);
+    const handoff = sendJob(job);
+    rememberPathAHandoff(d.url, handoff);
+    const reply = await handoff;
     return reply && reply.ok ? { cancel: true } : {};
   },
   { urls: ["<all_urls>"], types: ["main_frame", "sub_frame"] },
@@ -296,10 +297,24 @@ b.downloads.onCreated.addListener(async (item) => {
     if (/^blob:|^data:/i.test(item.url)) return;
     await settingsReady;
     if (!enabledForUrl(item.url)) return;
-    if (item.url.startsWith("magnet:") && settings.blacklistMagnet) return;
+    // Ordinary magnet clicks belong to the system-selected handler. The
+    // context-menu action below remains an explicit Mini Downloader override.
+    if (item.url.startsWith("magnet:")) return;
     if (isBlacklisted(item.url, item.filename ? item.filename.split("/").pop() : "")) return;
     if (item.totalBytes > -1 && item.totalBytes < settings.minSize) return;
-    if (seen(item.url)) return;
+
+    // Firefox can surface the same request through both capture paths. Await
+    // Path A's in-flight decision: on acceptance, remove this browser copy; on
+    // failure, let Path B make its own handoff so the normal fallback survives.
+    const earlierHandoff = recentPathAHandoff(item.url);
+    if (earlierHandoff) {
+      const earlierReply = await earlierHandoff.catch(() => null);
+      if (earlierReply && earlierReply.ok) {
+        await b.downloads.cancel(item.id).catch(() => {});
+        await b.downloads.erase({ id: item.id }).catch(() => {});
+        return;
+      }
+    }
 
     let cookie = "";
     try {

@@ -16,6 +16,21 @@ pub struct Db {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// Result of an idempotent download insert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadInsertResult {
+    Inserted(i64),
+    Existing(i64),
+}
+
+impl DownloadInsertResult {
+    pub fn id(self) -> i64 {
+        match self {
+            Self::Inserted(id) | Self::Existing(id) => id,
+        }
+    }
+}
+
 const MIGRATION_1: &str = r#"
 CREATE TABLE downloads (
     id              INTEGER PRIMARY KEY,
@@ -286,6 +301,72 @@ impl Db {
 
     pub fn insert_download(&self, d: &NewDownload) -> Result<i64> {
         let conn = self.lock();
+        Self::insert_download_locked(&conn, d)
+    }
+
+    /// Insert `d` unless the same source is already represented by a usable
+    /// row. The lookup and insert share one DB lock, so simultaneous browser
+    /// handoffs cannot both pass the duplicate check.
+    ///
+    /// Failed/removed rows deliberately do not block a fresh attempt. A
+    /// completed row does: users can remove it or turn duplicate prevention off
+    /// when they intentionally want to fetch the same stable URL again.
+    pub fn insert_download_deduplicated(&self, d: &NewDownload) -> Result<DownloadInsertResult> {
+        let conn = self.lock();
+        Self::insert_download_deduplicated_locked(&conn, d)
+    }
+
+    /// Apply the user's duplicate-prevention setting while inserting. Reading
+    /// the setting, checking for a match, and inserting all happen under one
+    /// lock so a concurrent setting write or handoff cannot split the decision.
+    pub fn insert_download_with_duplicate_policy(
+        &self,
+        d: &NewDownload,
+    ) -> Result<DownloadInsertResult> {
+        let conn = self.lock();
+        let enabled = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key='prevent_duplicate_downloads'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .as_deref()
+            != Some("false");
+        if enabled {
+            Self::insert_download_deduplicated_locked(&conn, d)
+        } else {
+            Ok(DownloadInsertResult::Inserted(
+                Self::insert_download_locked(&conn, d)?,
+            ))
+        }
+    }
+
+    fn insert_download_deduplicated_locked(
+        conn: &Connection,
+        d: &NewDownload,
+    ) -> Result<DownloadInsertResult> {
+        let existing = conn
+            .query_row(
+                "SELECT id FROM downloads
+                 WHERE url=?1 AND kind=?2
+                   AND format_id IS ?3 AND media_opts IS ?4 AND checksum IS ?5
+                   AND status IN ('queued','active','waiting','paused','complete','scheduled')
+                 ORDER BY id DESC LIMIT 1",
+                params![d.url, d.kind, d.format_id, d.media_opts, d.checksum],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            return Ok(DownloadInsertResult::Existing(id));
+        }
+
+        Ok(DownloadInsertResult::Inserted(
+            Self::insert_download_locked(conn, d)?,
+        ))
+    }
+
+    fn insert_download_locked(conn: &Connection, d: &NewDownload) -> Result<i64> {
         conn.execute(
             "INSERT INTO downloads
                 (url, filename, dir, kind, referrer, category_id, status, created_at,
@@ -818,6 +899,117 @@ mod tests {
         let d = db.get(id).unwrap().unwrap();
         assert_eq!(d.status, DownloadStatus::Complete);
         assert!(d.finished_at.is_some());
+    }
+
+    #[test]
+    fn deduplicated_insert_reuses_live_and_completed_rows_but_not_failures() {
+        let db = Db::open_in_memory().unwrap();
+        let download = NewDownload {
+            url: "https://x/f.iso".into(),
+            dir: "/dl".into(),
+            kind: "http".into(),
+            ..Default::default()
+        };
+
+        let first = db.insert_download_deduplicated(&download).unwrap();
+        let first_id = first.id();
+        assert_eq!(first, DownloadInsertResult::Inserted(first_id));
+        assert_eq!(
+            db.insert_download_deduplicated(&download).unwrap(),
+            DownloadInsertResult::Existing(first_id)
+        );
+
+        db.set_status(first_id, DownloadStatus::Complete).unwrap();
+        assert_eq!(
+            db.insert_download_deduplicated(&download).unwrap(),
+            DownloadInsertResult::Existing(first_id)
+        );
+        let mut after_auto_organize = download.clone();
+        after_auto_organize.dir = "/organized/archives".into();
+        assert_eq!(
+            db.insert_download_deduplicated(&after_auto_organize)
+                .unwrap(),
+            DownloadInsertResult::Existing(first_id)
+        );
+
+        db.set_error(first_id, None, Some("network failed")).unwrap();
+        let retry = db.insert_download_deduplicated(&download).unwrap();
+        assert!(matches!(retry, DownloadInsertResult::Inserted(id) if id != first_id));
+        assert_eq!(db.list(None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn deduplicated_insert_is_atomic_across_simultaneous_handoffs() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let db = Db::open_in_memory().unwrap();
+        let barrier = Arc::new(Barrier::new(8));
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let db = db.clone();
+            let barrier = barrier.clone();
+            workers.push(thread::spawn(move || {
+                let download = NewDownload {
+                    url: "https://x/same.iso".into(),
+                    dir: "/dl".into(),
+                    kind: "http".into(),
+                    ..Default::default()
+                };
+                barrier.wait();
+                db.insert_download_deduplicated(&download).unwrap()
+            }));
+        }
+
+        let results: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| matches!(r, DownloadInsertResult::Inserted(_)))
+                .count(),
+            1
+        );
+        let id = results[0].id();
+        assert!(results.iter().all(|r| r.id() == id));
+        assert_eq!(db.list(None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn duplicate_policy_defaults_on_can_be_disabled_and_keeps_media_variants() {
+        let db = Db::open_in_memory().unwrap();
+        let video = NewDownload {
+            url: "https://video.example/watch/1".into(),
+            dir: "/dl".into(),
+            kind: "video".into(),
+            format_id: Some("1080p".into()),
+            media_opts: Some(r#"{"write_subs":true}"#.into()),
+            ..Default::default()
+        };
+
+        let first = db
+            .insert_download_with_duplicate_policy(&video)
+            .unwrap();
+        assert!(matches!(first, DownloadInsertResult::Inserted(_)));
+        assert_eq!(
+            db.insert_download_with_duplicate_policy(&video).unwrap(),
+            DownloadInsertResult::Existing(first.id())
+        );
+
+        let mut other_quality = video.clone();
+        other_quality.format_id = Some("720p".into());
+        assert!(matches!(
+            db.insert_download_with_duplicate_policy(&other_quality)
+                .unwrap(),
+            DownloadInsertResult::Inserted(_)
+        ));
+
+        db.set_setting("prevent_duplicate_downloads", "false")
+            .unwrap();
+        assert!(matches!(
+            db.insert_download_with_duplicate_policy(&video).unwrap(),
+            DownloadInsertResult::Inserted(_)
+        ));
+        assert_eq!(db.list(None).unwrap().len(), 3);
     }
 
     #[test]

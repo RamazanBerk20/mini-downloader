@@ -23,6 +23,27 @@ use minidl_core::paths;
 
 use state::AppState;
 
+/// Make Mini Downloader claim or release the system `magnet:` association.
+/// `is_registered` avoids treating an absent association as an unregister
+/// error (notably a missing `mimeapps.list` on a fresh Linux profile).
+pub(crate) fn configure_magnet_handler(
+    app: &tauri::AppHandle,
+    enabled: bool,
+) -> Result<(), String> {
+    use tauri_plugin_deep_link::DeepLinkExt;
+
+    let deep_link = app.deep_link();
+    if enabled {
+        deep_link.register("magnet").map_err(|e| e.to_string())
+    } else {
+        match deep_link.is_registered("magnet") {
+            Ok(false) => Ok(()),
+            Ok(true) => deep_link.unregister("magnet").map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+}
+
 fn looks_like_link(s: &str) -> bool {
     let l = s.to_ascii_lowercase();
     l.starts_with("http://") || l.starts_with("https://") || l.starts_with("ftp://") || l.starts_with("magnet:")
@@ -211,18 +232,20 @@ pub fn run() {
                         ingest_url(&h, url.to_string());
                     }
                 });
-                // With magnet handling off, only claim our own scheme so the
-                // OS routes magnet: to the user's torrent app instead.
+                // Our private scheme is always ours. The magnet association is
+                // the one user-facing source of truth and is reconciled on each
+                // launch in case a previous session or another app changed it.
+                if let Err(e) = app.deep_link().register("minidownloader") {
+                    eprintln!("private deep-link registration skipped: {e}");
+                }
                 let handle_magnets = db
                     .get_setting("handle_magnets")
                     .ok()
                     .flatten()
                     .map(|v| v != "false")
                     .unwrap_or(true);
-                if handle_magnets {
-                    let _ = app.deep_link().register_all();
-                } else {
-                    let _ = app.deep_link().register("minidownloader");
+                if let Err(e) = configure_magnet_handler(app.handle(), handle_magnets) {
+                    eprintln!("magnet handler reconciliation skipped: {e}");
                 }
             }
 
@@ -293,6 +316,7 @@ pub fn run() {
             commands::get_setting,
             commands::get_system_locale,
             commands::set_setting,
+            commands::set_handle_magnets,
             commands::probe_media,
             commands::add_media_download,
             commands::add_playlist_batch,

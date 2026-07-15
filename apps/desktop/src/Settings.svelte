@@ -57,6 +57,7 @@
   ];
 
   let autoOrganize = $state(true);
+  let preventDuplicates = $state(true);
   let clipboardWatch = $state(false);
   let closeToTray = $state(true);
   let autostart = $state(false);
@@ -143,6 +144,7 @@
 
   onMount(async () => {
     autoOrganize = (await api.getSetting("auto_organize")) !== "false";
+    preventDuplicates = (await api.getSetting("prevent_duplicate_downloads")) !== "false";
     clipboardWatch = (await api.getSetting("clipboard_watch")) === "true";
     closeToTray = (await api.getSetting("close_to_tray")) !== "false";
     theme = (await api.getSetting("theme")) || "system";
@@ -322,6 +324,21 @@
     autoOrganize = (e.target as HTMLInputElement).checked;
     await setBool("auto_organize", autoOrganize);
   }
+  async function togglePreventDuplicates(e: Event) {
+    preventDuplicates = (e.target as HTMLInputElement).checked;
+    await setBool("prevent_duplicate_downloads", preventDuplicates);
+  }
+  async function toggleHandleMagnets(e: Event) {
+    const previous = handleMagnets;
+    handleMagnets = (e.target as HTMLInputElement).checked;
+    try {
+      await api.setHandleMagnets(handleMagnets);
+      settingsStatus = "";
+    } catch (err) {
+      handleMagnets = previous;
+      settingsStatus = t("settingsSaveError", { msg: errText(err) });
+    }
+  }
   async function toggleClipboard(e: Event) {
     clipboardWatch = (e.target as HTMLInputElement).checked;
     await api.setClipboardWatch(clipboardWatch);
@@ -498,6 +515,11 @@
       <label class="switch"><input type="checkbox" checked={autoOrganize} onchange={toggleOrganize} aria-label={t("optAutoOrganize")} /><span class="track"></span></label>
     </div>
     <div class="srow">
+      <span>{t("optPreventDuplicates")}</span>
+      <label class="switch"><input type="checkbox" checked={preventDuplicates} onchange={togglePreventDuplicates} aria-label={t("optPreventDuplicates")} /><span class="track"></span></label>
+    </div>
+    <p class="hint">{t("optPreventDuplicatesHint")}</p>
+    <div class="srow">
       <span>{t("optClipboard")}</span>
       <label class="switch"><input type="checkbox" checked={clipboardWatch} onchange={toggleClipboard} aria-label={t("optClipboard")} /><span class="track"></span></label>
     </div>
@@ -558,7 +580,7 @@
     {#if proxyStatus}<p class="hint" style="color:var(--error-fg)">{proxyStatus}</p>{/if}
     <div class="srow">
       <span>{t("optHandleMagnets")}</span>
-      <label class="switch"><input type="checkbox" checked={handleMagnets} onchange={(e) => { handleMagnets = (e.target as HTMLInputElement).checked; setBool("handle_magnets", handleMagnets); }} aria-label={t("optHandleMagnets")} /><span class="track"></span></label>
+      <label class="switch"><input type="checkbox" checked={handleMagnets} onchange={toggleHandleMagnets} aria-label={t("optHandleMagnets")} /><span class="track"></span></label>
     </div>
     <p class="hint">{t("optHandleMagnetsHint")}</p>
     <div class="srow">

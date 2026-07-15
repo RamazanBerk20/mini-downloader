@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "Bu türdeki indirmeler tarayıcıda kalır."
-  },
-  "optionsMagnetSkip": {
-    "message": "Magnet bağlantılarını sisteme bırak"
   }
 }

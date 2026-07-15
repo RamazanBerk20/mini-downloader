@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "Downloads dieser Typen bleiben im Browser."
-  },
-  "optionsMagnetSkip": {
-    "message": "Magnet-Links dem System überlassen"
   }
 }

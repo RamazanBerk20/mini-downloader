@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "تنزيلات هذه الأنواع تبقى في المتصفح."
-  },
-  "optionsMagnetSkip": {
-    "message": "ترك روابط المغناطيس للنظام"
   }
 }

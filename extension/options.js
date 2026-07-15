@@ -9,7 +9,6 @@ const DEFAULTS = {
   minSize: 1048576,
   disabledHosts: [],
   blacklistExts: [],
-  blacklistMagnet: false,
   lang: "",
 };
 const MIB = 1048576;
@@ -65,7 +64,6 @@ async function load() {
   document.getElementById("minSize").value = cfg.minSize;
   document.getElementById("disabledHosts").value = (cfg.disabledHosts || []).join("\n");
   document.getElementById("blacklistExts").value = (cfg.blacklistExts || []).join(", ");
-  document.getElementById("blacklistMagnet").checked = !!cfg.blacklistMagnet;
   updateMibHint();
 }
 
@@ -85,7 +83,6 @@ async function save() {
       .value.split(",")
       .map((s) => s.trim().toLowerCase().replace(/^\./, ""))
       .filter(Boolean),
-    blacklistMagnet: document.getElementById("blacklistMagnet").checked,
     lang,
   };
   await b.storage.local.set({ settings: cfg });

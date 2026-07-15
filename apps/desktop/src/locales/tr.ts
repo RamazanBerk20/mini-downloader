@@ -56,6 +56,8 @@ export const tr = {
   "settingsNavigation": "Ayar bölümleri",
   "sectGeneral": "Genel",
   "optAutoOrganize": "Biten dosyaları otomatik düzenle",
+  "optPreventDuplicates": "Yinelenen indirmeleri engelle",
+  "optPreventDuplicatesHint": "Aynı URL ve türdeki mevcut indirmeyi yeniden kullanır. Numaralı kopyalara izin vermek için kapatın; başarısız indirmeler ve farklı medya seçenekleri yine eklenebilir.",
   "optClipboard": "Panoyu bağlantılar için izle",
   "optCloseTray": "Tepsiye küçült (çalışmaya devam et)",
   "optAutostart": "Oturum açılışında başlat (küçültülmüş)",
@@ -227,6 +229,6 @@ export const tr = {
   "updateUpToDate": "Güncel (v{v})",
   "updateInstall": "Kur",
   "updateView": "Sürümü görüntüle",
-  "optHandleMagnets": "Magnet bağlantılarını işle",
-  "optHandleMagnetsHint": "Kapalıyken magnet bağlantıları torrent uygulamanıza bırakılır (uygulama yeniden başlatıldığında geçerli olur).",
+  "optHandleMagnets": "Mini Downloader'ı magnet bağlantıları için varsayılan uygulama yap",
+  "optHandleMagnetsHint": "Sistem ilişkilendirmesini hemen günceller. Açıkça seçilen “Mini Downloader ile indir” eylemleri kapalıyken de çalışır.",
 };

@@ -110,6 +110,10 @@ jobs:
       - name: Package browser extensions
         run: |
           ./scripts/build-extension.sh
+          # The source key gives unpacked development builds a stable local ID.
+          # CWS owns the published item ID and rejects store uploads containing
+          # that different development key, so exclude it from upload artifacts.
+          node -e "const f='dist-ext/chrome/manifest.json',m=require('./'+f);delete m.key;require('fs').writeFileSync(f,JSON.stringify(m,null,2)+'\n')"
           cd dist-ext
           # Archive entries must not be prefixed with `./`: store uploaders
           # require manifest.json to sit at the archive root.
@@ -149,8 +153,6 @@ jobs:
       - name: Publish Chrome extension (Web Store)
         if: ${{ env.CWS_CLIENT_ID != '' && github.ref_name == format('v{0}', steps.extension_version.outputs.version) }}
         run: |
-          # CWS rejects the `key` field (it assigns the id itself) — strip it.
-          node -e "const f='dist-ext/chrome/manifest.json',m=require('./'+f);delete m.key;require('fs').writeFileSync(f,JSON.stringify(m,null,2))"
           npx --yes chrome-webstore-upload-cli@3 upload \
             --source dist-ext/chrome \
             --extension-id "$CWS_ITEM_ID" \

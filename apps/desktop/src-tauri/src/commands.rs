@@ -7,6 +7,7 @@ use base64::Engine;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
+use minidl_core::db::DownloadInsertResult;
 use minidl_core::grabber::ParsedLink;
 use minidl_core::ipc::{CaptureJob, DownloadKind};
 use minidl_core::model::{Category, Download, DownloadStatus, NewDownload, Package, Schedule};
@@ -14,7 +15,7 @@ use minidl_core::ytdlp::MediaInfo;
 
 use crate::errors::CommandError;
 use crate::events::EV_STATE;
-use crate::ingest::{ingest, job_from_url};
+use crate::ingest::{ingest, job_from_url, IngestOutcome};
 use crate::state::AppState;
 
 fn err<E: std::fmt::Display>(e: E) -> CommandError {
@@ -108,7 +109,8 @@ pub async fn add_download(
         None,
         checksum,
     )
-    .await?;
+    .await?
+    .id();
     state
         .db
         .get(id)
@@ -557,7 +559,8 @@ async fn add_file_job(
         None,
         None,
     )
-    .await?;
+    .await?
+    .id();
     state
         .db
         .get(id)
@@ -586,9 +589,9 @@ pub async fn add_media_download(
     state: State<'_, AppState>,
 ) -> Result<Download, CommandError> {
     let dir = state.download_dir.to_string_lossy().to_string();
-    let id = state
+    let inserted = state
         .db
-        .insert_download(&NewDownload {
+        .insert_download_with_duplicate_policy(&NewDownload {
             url: url.clone(),
             dir,
             kind: "video".into(),
@@ -597,6 +600,14 @@ pub async fn add_media_download(
             ..Default::default()
         })
         .map_err(err)?;
+    let id = inserted.id();
+    if matches!(inserted, DownloadInsertResult::Existing(_)) {
+        return state
+            .db
+            .get(id)
+            .map_err(err)?
+            .ok_or_else(|| err("download vanished"));
+    }
     state
         .db
         .set_status(id, DownloadStatus::Active)
@@ -647,9 +658,9 @@ pub async fn add_playlist_batch(
     let opts_json = opts.as_ref().and_then(|o| o.to_json());
     let mut added = 0;
     for e in entries {
-        let id = state
+        let inserted = state
             .db
-            .insert_download(&NewDownload {
+            .insert_download_with_duplicate_policy(&NewDownload {
                 url: e.url.clone(),
                 // Display name until yt-dlp reports the real file on completion.
                 filename: e.title.clone(),
@@ -661,6 +672,10 @@ pub async fn add_playlist_batch(
                 ..Default::default()
             })
             .map_err(err)?;
+        let id = inserted.id();
+        if matches!(inserted, DownloadInsertResult::Existing(_)) {
+            continue;
+        }
         state
             .db
             .set_status(id, DownloadStatus::Active)
@@ -669,6 +684,9 @@ pub async fn add_playlist_batch(
             .ytdlp
             .start(id, e.url, quality.clone(), vec![], opts.clone());
         added += 1;
+    }
+    if let Some(pkg) = package_id {
+        let _ = state.db.delete_package_if_empty(pkg);
     }
     let _ = app.emit(EV_STATE, json!({ "batch": added }));
     Ok(added)
@@ -752,6 +770,33 @@ pub async fn set_setting(
     state: State<'_, AppState>,
 ) -> Result<(), CommandError> {
     state.db.set_setting(&key, &value).map_err(err)
+}
+
+/// Claim or release the OS `magnet:` association immediately, then persist the
+/// preference. If persistence fails, best-effort restore the previous handler
+/// state so the switch and the operating system do not silently disagree.
+#[tauri::command]
+pub async fn set_handle_magnets(
+    enabled: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let previous = state
+        .db
+        .get_setting("handle_magnets")
+        .map_err(err)?
+        .map(|value| value != "false")
+        .unwrap_or(true);
+
+    crate::configure_magnet_handler(&app, enabled).map_err(err)?;
+    if let Err(e) = state
+        .db
+        .set_setting("handle_magnets", if enabled { "true" } else { "false" })
+    {
+        let _ = crate::configure_magnet_handler(&app, previous);
+        return Err(err(e));
+    }
+    Ok(())
 }
 
 // ---- download details (expandable panel) ----
@@ -955,20 +1000,21 @@ pub async fn add_links_batch(
     let mut added = 0;
     let defaults = state.defaults.lock().unwrap().clone();
     for u in urls {
-        if ingest(
-            &state.engine,
-            &state.db,
-            &state.ytdlp,
-            &state.download_dir,
-            defaults.clone(),
-            job_from_url(u),
-            None,
-            package_id,
-            None,
-        )
-        .await
-        .is_ok()
-        {
+        if matches!(
+            ingest(
+                &state.engine,
+                &state.db,
+                &state.ytdlp,
+                &state.download_dir,
+                defaults.clone(),
+                job_from_url(u),
+                None,
+                package_id,
+                None,
+            )
+            .await,
+            Ok(IngestOutcome::Added(_))
+        ) {
             added += 1;
         }
     }

@@ -38,7 +38,7 @@ Icon=mini-downloader
 Terminal=false
 Type=Application
 Categories=Network;FileTransfer;Utility;
-MimeType=x-scheme-handler/magnet;x-scheme-handler/minidownloader;
+MimeType=x-scheme-handler/minidownloader;
 DESKTOP
 
   # Firefox native-messaging host (system-wide).

@@ -85,8 +85,5 @@
   },
   "optionsBlacklistHint": {
     "message": "이 형식의 다운로드는 브라우저에 남습니다."
-  },
-  "optionsMagnetSkip": {
-    "message": "마그넷 링크를 시스템에 맡기기"
   }
 }

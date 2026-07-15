@@ -68,6 +68,7 @@ export const api = {
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
   getSystemLocale: () => invoke<string | null>("get_system_locale"),
   setSetting: (key: string, value: string) => invoke<void>("set_setting", { key, value }),
+  setHandleMagnets: (enabled: boolean) => invoke<void>("set_handle_magnets", { enabled }),
   grabLinks: (text: string) => invoke<ParsedLink[]>("grab_links", { text }),
   addLinksBatch: (urls: string[], packageName?: string) =>
     invoke<number>("add_links_batch", { urls, packageName: packageName ?? null }),
