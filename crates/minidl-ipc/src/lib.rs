@@ -342,6 +342,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn bridge_socket_under_runtime_dir() {
         // Just assert the tail; the base varies by environment. `Path::ends_with`
