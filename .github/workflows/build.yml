@@ -70,4 +70,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Rust tests (Windows)
+        env:
+          # Compile and test Windows code without requiring release-only
+          # sidecars. The release workflow stages the real binaries.
+          TAURI_CONFIG: '{"bundle":{"externalBin":[]}}'
         run: cargo test --workspace
