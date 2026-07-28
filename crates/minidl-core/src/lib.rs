@@ -7,6 +7,7 @@
 
 pub mod aria2;
 pub mod categories;
+pub mod child_process;
 pub mod db;
 pub mod grabber;
 pub mod i18n;

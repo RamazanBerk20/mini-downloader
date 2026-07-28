@@ -6,6 +6,11 @@
       "binaries/minidl-native-host",
       "binaries/aria2c",
       "binaries/yt-dlp"
-    ]
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "tsp": true
+    }
   }
 }

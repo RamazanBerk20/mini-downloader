@@ -1,9 +1,9 @@
 //! Spawn and own a private `aria2c` daemon on a random loopback port with a
 //! per-launch RPC secret.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
-use std::io::Write;
 
 use anyhow::{anyhow, Context, Result};
 
@@ -235,6 +235,7 @@ impl Aria2Process {
         let secret_arg = format!("--rpc-secret={secret}");
 
         let mut cmd = Command::new(&bin);
+        crate::child_process::hide_console_window(&mut cmd);
         cmd.arg("--enable-rpc=true")
             .arg("--rpc-listen-all=false")
             .arg(format!("--rpc-listen-port={port}"))

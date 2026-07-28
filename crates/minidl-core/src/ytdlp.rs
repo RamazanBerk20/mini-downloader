@@ -53,6 +53,7 @@ fn default_media_kind() -> String {
 /// a plain video probed that way still returns a normal format list.
 pub async fn probe(ytdlp: &Path, url: &str, headers: &[String], playlist: bool) -> Result<MediaInfo> {
     let mut cmd = tokio::process::Command::new(ytdlp);
+    crate::child_process::hide_console_window(cmd.as_std_mut());
     if playlist {
         cmd.args(["-J", "--no-warnings", "--flat-playlist"]);
     } else {

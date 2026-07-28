@@ -37,6 +37,11 @@ dist-ext
 packaging/chrome-extension-key.pem
 packaging/chrome-key.b64
 
+# Windows Authenticode private keys (secret)
+*.pfx
+*.p12
+certificate.b64
+
 # AUR local build artifacts (updpkgsums/makepkg leave these in the pkg dirs)
 packaging/aur/*/src/
 packaging/aur/*/pkg/

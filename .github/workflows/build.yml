@@ -59,3 +59,15 @@ jobs:
       - name: Smoke-build the app (no bundle)
         working-directory: apps/desktop
         run: pnpm tauri build --no-bundle
+
+  windows-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Rust tests (Windows)
+        run: cargo test --workspace

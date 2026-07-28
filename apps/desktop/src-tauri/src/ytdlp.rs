@@ -239,6 +239,7 @@ async fn run(
     let opts = media_opts.unwrap_or_default();
 
     let mut cmd = Command::new(&bin);
+    minidl_core::child_process::hide_console_window(cmd.as_std_mut());
     cmd.arg("--newline")
         .arg("--no-playlist")
         .arg("--progress-template")

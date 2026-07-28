@@ -1,3 +1,7 @@
+// Native messaging uses inherited stdin/stdout pipes and never needs a visible
+// console. Keep debug/test builds as console apps so local failures stay visible.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 //! Browser native-messaging host: a thin, short-lived bridge.
 //!
 //! The browser launches this per captured job (via `sendNativeMessage`), owns
@@ -74,7 +78,9 @@ fn connect_or_launch() -> Option<Stream> {
             // writes to stdout would corrupt this process's length-prefixed reply
             // frames. The job travels over the UDS, not these pipes.
             use std::process::Stdio;
-            let _ = std::process::Command::new(path)
+            let mut command = std::process::Command::new(path);
+            hide_console_window(&mut command);
+            let _ = command
                 .arg("--background")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -89,6 +95,19 @@ fn connect_or_launch() -> Option<Stream> {
         std::thread::sleep(Duration::from_millis(100));
     }
     None
+}
+
+fn hide_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 enum NativeMessage {

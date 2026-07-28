@@ -70,6 +70,46 @@ jobs:
           # yt-dlp (latest official single-binary; self-updates in-app afterwards)
           Invoke-WebRequest -Uri "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "$bin/yt-dlp-${{ matrix.triple }}.exe"
 
+      - id: windows_signing
+        name: Detect Authenticode signing credentials (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE
+          )
+          $hasPassword = -not [string]::IsNullOrWhiteSpace(
+            $env:WINDOWS_CERTIFICATE_PASSWORD
+          )
+          if ($hasCertificate -ne $hasPassword) {
+            throw "Configure both Windows signing secrets or remove both."
+          }
+
+          $enabled = $hasCertificate.ToString().ToLowerInvariant()
+          "enabled=$enabled" | Out-File `
+            -FilePath $env:GITHUB_OUTPUT `
+            -Encoding utf8 `
+            -Append
+          if (-not $hasCertificate) {
+            Write-Warning (
+              "Windows signing credentials are absent; publishing unsigned " +
+              "installers that may trigger a SmartScreen warning."
+            )
+          }
+
+      - name: Configure Authenticode signing (Windows)
+        if: ${{ runner.os == 'Windows' && steps.windows_signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          & ./scripts/configure-windows-signing.ps1 `
+            -ConfigPath "apps/desktop/src-tauri/tauri.windows.conf.json"
+
       - name: Build + bundle + attach to release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -85,6 +125,32 @@ jobs:
             Linux: `.deb` / `.rpm` (depend on distro `aria2` + `ffmpeg`) and `.AppImage`.
             Windows: NSIS `.exe` installer / `.msi` (bundle aria2c + yt-dlp; install
             ffmpeg yourself for video muxing).
+
+            **Windows notice:** these installers may be unsigned. If Windows shows
+            "Windows protected your PC", verify the download against `SHA256SUMS`,
+            then choose **More info → Run anyway**.
+
+      - name: Verify Authenticode signatures (Windows)
+        if: ${{ runner.os == 'Windows' && steps.windows_signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        run: |
+          & ./scripts/verify-windows-signatures.ps1 `
+            -TargetRoot "target/release" `
+            -SidecarRoot "apps/desktop/src-tauri/binaries" `
+            -TargetTriple "${{ matrix.triple }}"
+
+      - name: Remove imported signing certificate (Windows)
+        if: ${{ always() && runner.os == 'Windows' && steps.windows_signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace(
+              $env:MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT
+          )) {
+            $certificatePath = "Cert:\CurrentUser\My\$env:MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT"
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -Force
+            }
+          }
 
   extension:
     needs: build # the draft release must exist before uploading to it

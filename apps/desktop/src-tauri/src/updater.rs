@@ -6,9 +6,10 @@
 //! installer bytes against its SHA-256 entry.
 //!
 //! This is an integrity check, not a publisher signature: an attacker who can
-//! modify both the GitHub release and `SHA256SUMS` can still replace both. Add
-//! Authenticode signing or a signed manifest with a pinned public key when the
-//! project has managed signing-key authority.
+//! modify both the GitHub release and `SHA256SUMS` can still replace both.
+//! Windows release artifacts may also be Authenticode-signed when release
+//! signing credentials are configured. That provides a publisher identity but
+//! does not replace this byte-level check.
 //!
 //! - Windows: download the NSIS `setup.exe`, launch it, and quit so it can
 //!   replace the running binary.
