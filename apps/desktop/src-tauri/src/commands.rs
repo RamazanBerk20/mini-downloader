@@ -1142,9 +1142,10 @@ mod tests {
         assert_eq!(std::fs::read(&outside).unwrap(), b"do not delete");
 
         let valid = nested.join("inside-file");
+        let expected = nested.canonicalize().unwrap().join("inside-file");
         assert_eq!(
             deletion_target_in_dir(&downloads, &valid).as_deref(),
-            Some(valid.as_path())
+            Some(expected.as_path())
         );
 
         let _ = std::fs::remove_dir_all(root);
