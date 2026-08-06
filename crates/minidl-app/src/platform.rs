@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::io::Write as _;
 
+#[cfg(unix)]
 const DESKTOP_ID: &str = "io.minidownloader.app.desktop";
 
 #[cfg(unix)]

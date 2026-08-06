@@ -173,7 +173,7 @@ fn checksum_for_asset(manifest: &str, asset_name: &str) -> Result<String, String
     found.ok_or_else(|| "installer is missing from the release checksum manifest".into())
 }
 
-#[cfg(any(windows, test))]
+#[cfg(test)]
 fn verify_sha256(bytes: &[u8], expected: &str) -> Result<(), String> {
     use sha2::{Digest, Sha256};
     let actual = format!("{:x}", Sha256::digest(bytes));

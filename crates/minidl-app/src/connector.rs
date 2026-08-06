@@ -155,11 +155,6 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
 
-#[cfg(windows)]
-fn home() -> Option<PathBuf> {
-    std::env::var_os("USERPROFILE").map(PathBuf::from)
-}
-
 #[cfg(unix)]
 fn config_home(home: &Path) -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
