@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "Скачать через Mini Downloader"
   },
+  "menuAllLinks": { "message": "Mini Downloader: все ссылки на странице" },
+  "menuAllImages": { "message": "Mini Downloader: все изображения на странице" },
   "popupCatchDownloads": {
     "message": "Перехватывать загрузки"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "Отправлено"
   },
+  "popupSending": { "message": "Отправка…" },
+  "popupFailed": { "message": "Ошибка — повторить" },
+  "popupRetryHint": { "message": "Не удалось отправить. Нажмите, чтобы повторить." },
   "optionsTitle": {
     "message": "Настройки коннектора Mini Downloader"
   },
   "optionsMinSize": {
-    "message": "Минимальный размер файла для перехвата (байты)"
+    "message": "Минимальный размер файла для перехвата"
   },
   "optionsMinSizeHint": {
-    "message": "Загрузки меньше этого размера оставляются браузеру. По умолчанию 1048576 (1 МиБ)."
+    "message": "Загрузки меньшего размера остаются в браузере. По умолчанию: 1 МБ."
   },
   "optionsDisabledHosts": {
     "message": "Отключённые сайты (по одному имени хоста в строке)"

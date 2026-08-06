@@ -38,7 +38,7 @@ a local fallback, but only a native-messaging heartbeat proves a live bridge.
    ID and the Chrome Web Store item ID.
 3. Create OAuth creds + a refresh token (see chrome-webstore-upload-cli docs).
 4. Add repo secrets: `CWS_CLIENT_ID`, `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`,
-   `CWS_ITEM_ID`.
+   `CWS_ITEM_ID`, and the Chrome Web Store `CWS_PUBLISHER_ID`.
 5. Cut a release whose tag matches the extension manifest version — the
    **Publish Chrome extension (Web Store)** step uploads + auto-publishes.
 
@@ -61,9 +61,13 @@ their browser policies:
 
 ## Notes
 
-- Both steps are `if: ${{ env.X != '' }}` gated — releases without the secrets
-  still attach the unsigned zips exactly as before.
-- The manifest is already AMO-submittable (MV3, `gecko.id`,
-  `strict_min_version`, `data_collection_permissions: none`). Broad permissions
+- Store publication is optional, but each store's credentials are validated as
+  a complete set. Releases without a configured set still attach the review
+  ZIPs; a partially configured set fails instead of silently skipping publish.
+- The manifest is already AMO-submittable (MV3, `gecko.id`, Firefox 140+
+  desktop/142+ Android compatibility floors). Its required data declarations
+  cover browsing activity, website content, and website activity because
+  Mozilla treats native-messaging handoff to the local desktop companion as
+  transmission outside the add-on. Broad permissions
   (`<all_urls>`, `webRequest`, `nativeMessaging`) will draw a review but are
   declared correctly.

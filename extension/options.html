@@ -2,13 +2,20 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-i18n="optionsTitle">Mini Downloader Connector Options</title>
+    <link rel="icon" type="image/png" sizes="48x48" href="icons/48.png" />
     <link rel="stylesheet" href="ui.css" />
   </head>
   <body class="options">
     <main class="panel">
-      <h1 data-i18n="extName">Mini Downloader Connector</h1>
-      <p class="desc" data-i18n="extDescription">Catch downloads in your browser and hand them to Mini Downloader.</p>
+      <header class="options-head">
+        <img class="brand-icon brand-icon-large" src="icons/96.png" alt="" />
+        <div>
+          <h1 data-i18n="extName">Mini Downloader Connector</h1>
+          <p class="desc" data-i18n="extDescription">Catch downloads in your browser and hand them to Mini Downloader.</p>
+        </div>
+      </header>
 
       <div class="field switch-row">
         <label for="enabled" data-i18n="popupCatchDownloads">Catch downloads</label>
@@ -19,12 +26,17 @@
       </div>
 
       <div class="field">
-        <label for="minSize" data-i18n="optionsMinSize">Minimum file size to catch (bytes)</label>
-        <div class="input-row">
-          <input type="number" id="minSize" min="0" />
-          <span id="minSizeMiB" class="unit"></span>
+        <label id="minSizeLabel" for="minSize" data-i18n="optionsMinSize">Minimum file size to catch</label>
+        <div class="size-input" role="group" aria-labelledby="minSizeLabel">
+          <input type="number" id="minSize" min="0" step="0.1" inputmode="decimal" required />
+          <select id="minSizeUnit" aria-labelledby="minSizeLabel">
+            <option value="B">B</option>
+            <option value="KB">KB</option>
+            <option value="MB">MB</option>
+            <option value="GB">GB</option>
+          </select>
         </div>
-        <p class="hint" data-i18n="optionsMinSizeHint">Downloads smaller than this are left to your browser. Default 1048576 (1 MiB).</p>
+        <p class="hint" data-i18n="optionsMinSizeHint">Downloads smaller than this stay in your browser. Default: 1 MB.</p>
       </div>
 
       <div class="field">
@@ -54,6 +66,8 @@
       </div>
     </main>
 
+    <script src="background-helpers.js"></script>
+    <script src="options-helpers.js"></script>
     <script src="i18n.js"></script>
     <script src="options.js"></script>
   </body>

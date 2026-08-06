@@ -1,0 +1,17 @@
+Mini Downloader third-party software licenses
+================================================
+
+This file is generated from Cargo.lock. Do not edit it by hand.
+
+{{#each licenses}}
+-------------------------------------------------------------------------------
+{{name}} ({{id}})
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} — {{crate.repository}}{{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

@@ -1,14 +1,9 @@
-# Mini Downloader desktop app
+# Legacy desktop reference
 
-This directory contains Mini Downloader's Tauri 2 + Svelte 5/Vite desktop
-frontend. The Rust workspace lives at the repository root, so run Cargo
-commands from there.
+This is the former Tauri/Svelte shell. It is not a Cargo workspace member, is
+not built by CI, and is not shipped. The native Slint desktop is in
+[`../native-desktop`](../native-desktop).
 
-See the [root README](../../README.md) for prerequisites, Dev Container setup,
-development commands, packaging, and browser-connector instructions.
-
-```sh
-pnpm install --frozen-lockfile
-pnpm check
-pnpm tauri dev
-```
+The native locale loader temporarily reuses the ten translation catalogs in
+`src/locales`; keep those catalogs until they are moved to a framework-neutral
+resource directory.

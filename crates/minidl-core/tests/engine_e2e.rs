@@ -52,7 +52,10 @@ async fn download_completes_with_notification() {
     let opts = build_add_options(&j, dir.to_str().unwrap(), &EngineDefaults::default());
     let gid = engine
         .rpc
-        .add_uri(&[j.url.clone()], serde_json::Value::Object(opts))
+        .add_uri(
+            std::slice::from_ref(&j.url),
+            serde_json::Value::Object(opts),
+        )
         .await
         .expect("addUri");
 
@@ -139,7 +142,10 @@ async fn restored_session_stays_paused_until_explicit_resume() {
     })
     .await
     .unwrap_or(false);
-    assert!(completed, "explicitly resumed session did not complete in time");
+    assert!(
+        completed,
+        "explicitly resumed session did not complete in time"
+    );
     assert_eq!(
         std::fs::metadata(dir.join("must-not-exist")).unwrap().len(),
         1_048_576

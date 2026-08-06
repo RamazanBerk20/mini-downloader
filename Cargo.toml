@@ -3,12 +3,13 @@ resolver = "2"
 members = [
     "crates/minidl-ipc",
     "crates/minidl-core",
+    "crates/minidl-app",
     "crates/minidl-native-host",
-    "apps/desktop/src-tauri",
+    "apps/native-desktop",
 ]
 
 [workspace.package]
-version = "2.1.2"
+version = "3.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 authors = ["RamazanBerk20 <ramazanberksirin@protonmail.com>"]
@@ -28,3 +29,5 @@ interprocess = { version = "2", features = ["tokio"] }
 [profile.release]
 strip = true
 lto = "thin"
+codegen-units = 1
+panic = "abort"

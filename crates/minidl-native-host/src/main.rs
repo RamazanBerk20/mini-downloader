@@ -6,7 +6,7 @@
 //!
 //! The browser launches this per captured job (via `sendNativeMessage`), owns
 //! its stdio, and kills it after one reply. The real work runs in the
-//! long-lived Tauri app, which this process reaches over a local socket (Unix
+//! long-lived native controller, which this process reaches over a local socket (Unix
 //! domain socket on Linux, named pipe on Windows) — launching the app
 //! first if it is not already running.
 //!
@@ -25,7 +25,7 @@ use minidl_ipc::{
     CHROME_EXTENSION_ID, CHROME_STORE_EXTENSION_ID, EXTENSION_ID,
 };
 
-const MAX_MSG: usize = 64 * 1024 * 1024;
+const MAX_MSG: usize = 16 * 1024 * 1024;
 
 fn read_frame<R: Read>(r: &mut R, native: bool) -> Option<Vec<u8>> {
     let mut len = [0u8; 4];
@@ -44,6 +44,12 @@ fn read_frame<R: Read>(r: &mut R, native: bool) -> Option<Vec<u8>> {
 }
 
 fn write_frame<W: Write>(w: &mut W, msg: &[u8], native: bool) -> std::io::Result<()> {
+    if msg.is_empty() || msg.len() > MAX_MSG {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid native-message length",
+        ));
+    }
     let len = msg.len() as u32;
     let prefix = if native {
         len.to_ne_bytes()
@@ -113,7 +119,7 @@ fn hide_console_window(command: &mut std::process::Command) {
 enum NativeMessage {
     Presence(Option<BrowserFamily>),
     Ping(Option<BrowserFamily>),
-    Capture(CaptureJob, Option<BrowserFamily>),
+    Capture(Box<CaptureJob>, Option<BrowserFamily>),
 }
 
 /// Native-messaging does not tell the host which browser launched it. The
@@ -180,7 +186,7 @@ fn parse_native_message(job_bytes: &[u8]) -> Option<NativeMessage> {
     }
     serde_json::from_value::<CaptureJob>(value)
         .ok()
-        .map(|job| NativeMessage::Capture(job, reported_family))
+        .map(|job| NativeMessage::Capture(Box::new(job), reported_family))
 }
 
 /// Forward one browser message to the app and return its reply bytes. Presence
@@ -198,7 +204,7 @@ fn forward(job_bytes: &[u8], invoking_family: Option<BrowserFamily>) -> Option<V
             false,
         ),
         NativeMessage::Capture(job, reported_family) => (
-            BridgeRequest::new(job).with_browser_family(invoking_family.or(reported_family)),
+            BridgeRequest::new(*job).with_browser_family(invoking_family.or(reported_family)),
             false,
         ),
     };
@@ -213,9 +219,35 @@ fn forward(job_bytes: &[u8], invoking_family: Option<BrowserFamily>) -> Option<V
     read_frame(&mut sock, false)
 }
 
+fn main() {
+    let invoking_family = browser_family_from_invocation(std::env::args().skip(1));
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let stdout = std::io::stdout();
+
+    // For `sendNativeMessage` this loop runs once; for `connectNative`, per message.
+    while let Some(job_bytes) = read_frame(&mut input, true) {
+        let reply = forward(&job_bytes, invoking_family).unwrap_or_else(|| {
+            serde_json::to_vec(&BridgeReply::rejected("Mini Downloader app unavailable"))
+                .unwrap_or_default()
+        });
+        let mut out = stdout.lock();
+        if write_frame(&mut out, &reply, true).is_err() {
+            break;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_message_limit_is_bounded() {
+        assert_eq!(MAX_MSG, 16 * 1024 * 1024);
+        assert!(write_frame(&mut Vec::new(), &[], true).is_err());
+        assert!(write_frame(&mut Vec::new(), &vec![0; MAX_MSG + 1], true).is_err());
+    }
 
     #[test]
     fn parses_presence_family_from_camel_case_wire_message() {
@@ -255,24 +287,5 @@ mod tests {
             ]),
             Some(BrowserFamily::Chromium)
         );
-    }
-}
-
-fn main() {
-    let invoking_family = browser_family_from_invocation(std::env::args().skip(1));
-    let stdin = std::io::stdin();
-    let mut input = stdin.lock();
-    let stdout = std::io::stdout();
-
-    // For `sendNativeMessage` this loop runs once; for `connectNative`, per message.
-    while let Some(job_bytes) = read_frame(&mut input, true) {
-        let reply = forward(&job_bytes, invoking_family).unwrap_or_else(|| {
-            serde_json::to_vec(&BridgeReply::rejected("Mini Downloader app unavailable"))
-                .unwrap_or_default()
-        });
-        let mut out = stdout.lock();
-        if write_frame(&mut out, &reply, true).is_err() {
-            break;
-        }
     }
 }

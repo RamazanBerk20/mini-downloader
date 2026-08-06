@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "使用 Mini Downloader 下载"
   },
+  "menuAllLinks": { "message": "Mini Downloader：页面上的所有链接" },
+  "menuAllImages": { "message": "Mini Downloader：页面上的所有图片" },
   "popupCatchDownloads": {
     "message": "捕获下载"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "已发送"
   },
+  "popupSending": { "message": "正在发送…" },
+  "popupFailed": { "message": "失败 — 重试" },
+  "popupRetryHint": { "message": "无法发送。点击重试。" },
   "optionsTitle": {
     "message": "Mini Downloader 连接器选项"
   },
   "optionsMinSize": {
-    "message": "捕获的最小文件大小（字节）"
+    "message": "捕获的最小文件大小"
   },
   "optionsMinSizeHint": {
-    "message": "小于此大小的下载将交给浏览器处理。默认 1048576（1 MiB）。"
+    "message": "小于此大小的下载会保留在浏览器中。默认值：1 MB。"
   },
   "optionsDisabledHosts": {
     "message": "禁用的网站（每行一个主机名）"

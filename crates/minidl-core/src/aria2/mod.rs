@@ -15,7 +15,7 @@ pub use process::{Aria2Process, LaunchOptions};
 pub use rpc::{RpcClient, DETAIL_KEYS, POLL_KEYS, STATUS_KEYS};
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -33,6 +33,7 @@ pub struct Engine {
     process: Arc<Mutex<Aria2Process>>,
     notify_task: Arc<Mutex<JoinHandle<()>>>,
     shutting_down: Arc<AtomicBool>,
+    launch_options: Arc<RwLock<LaunchOptions>>,
     watchdog: JoinHandle<()>,
 }
 
@@ -48,6 +49,7 @@ impl Engine {
         let process = Arc::new(Mutex::new(process));
         let notify_task = Arc::new(Mutex::new(notify_task));
         let shutting_down = Arc::new(AtomicBool::new(false));
+        let launch_options = Arc::new(RwLock::new(opts));
 
         // If aria2c is OOM-killed or crashes, respawn it and retarget the RPC
         // client + notification listener at the new port. Cold startup pauses
@@ -61,7 +63,7 @@ impl Engine {
             let rpc = rpc.clone();
             let events = events.clone();
             let shutting_down = shutting_down.clone();
-            let opts = opts.clone();
+            let launch_options = launch_options.clone();
             tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(Duration::from_secs(3)).await;
@@ -75,7 +77,11 @@ impl Engine {
                     if !exited || shutting_down.load(Ordering::Relaxed) {
                         continue;
                     }
-                    if let Ok(newp) = Self::respawn(&opts, &rpc).await {
+                    let options = launch_options
+                        .read()
+                        .unwrap_or_else(|error| error.into_inner())
+                        .clone();
+                    if let Ok(newp) = Self::respawn(&options, &rpc).await {
                         let port = newp.port;
                         {
                             let mut nt = notify_task.lock().unwrap_or_else(|e| e.into_inner());
@@ -95,6 +101,7 @@ impl Engine {
             process,
             notify_task,
             shutting_down,
+            launch_options,
             watchdog,
         })
     }
@@ -105,7 +112,7 @@ impl Engine {
         let mut last_err = None;
         for _ in 0..3 {
             let proc = Aria2Process::spawn(opts)?;
-            let client = RpcClient::new(proc.port, proc.secret.clone());
+            let client = RpcClient::new(proc.port, proc.secret.clone())?;
             match client.wait_ready(50, Duration::from_millis(100)).await {
                 Ok(()) => return Ok((proc, client)),
                 Err(e) => last_err = Some(e), // proc drops → stuck aria2c killed
@@ -131,6 +138,16 @@ impl Engine {
     /// Subscribe to aria2 lifecycle notifications.
     pub fn subscribe(&self) -> broadcast::Receiver<Aria2Event> {
         self.events.subscribe()
+    }
+
+    /// Replace the options used by the crash watchdog on its next respawn.
+    /// Options already applied over RPC take effect immediately; process-only
+    /// options (DHT/sandbox) take effect on the next clean or watchdog launch.
+    pub fn update_launch_options(&self, options: LaunchOptions) {
+        *self
+            .launch_options
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = options;
     }
 
     /// Graceful shutdown: stop the watchdog, flush the session, ask aria2 to stop.

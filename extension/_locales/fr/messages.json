@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "Télécharger avec Mini Downloader"
   },
+  "menuAllLinks": { "message": "Mini Downloader : tous les liens de la page" },
+  "menuAllImages": { "message": "Mini Downloader : toutes les images de la page" },
   "popupCatchDownloads": {
     "message": "Intercepter les téléchargements"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "Envoyé"
   },
+  "popupSending": { "message": "Envoi…" },
+  "popupFailed": { "message": "Échec — réessayer" },
+  "popupRetryHint": { "message": "Envoi impossible. Cliquez pour réessayer." },
   "optionsTitle": {
     "message": "Options du connecteur Mini Downloader"
   },
   "optionsMinSize": {
-    "message": "Taille de fichier minimale à intercepter (octets)"
+    "message": "Taille minimale des fichiers à intercepter"
   },
   "optionsMinSizeHint": {
-    "message": "Les téléchargements plus petits sont laissés à votre navigateur. Par défaut 1048576 (1 Mio)."
+    "message": "Les téléchargements plus petits restent dans votre navigateur. Valeur par défaut : 1 Mo."
   },
   "optionsDisabledHosts": {
     "message": "Sites désactivés (un nom d'hôte par ligne)"

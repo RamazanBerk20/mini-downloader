@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "Mini Downloader ile indir"
   },
+  "menuAllLinks": { "message": "Mini Downloader: sayfadaki tüm bağlantılar" },
+  "menuAllImages": { "message": "Mini Downloader: sayfadaki tüm görseller" },
   "popupCatchDownloads": {
     "message": "İndirmeleri yakala"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "Gönderildi"
   },
+  "popupSending": { "message": "Gönderiliyor…" },
+  "popupFailed": { "message": "Başarısız — yeniden dene" },
+  "popupRetryHint": { "message": "Gönderilemedi. Yeniden denemek için tıklayın." },
   "optionsTitle": {
     "message": "Mini Downloader Bağlayıcı Seçenekleri"
   },
   "optionsMinSize": {
-    "message": "Yakalanacak en küçük dosya boyutu (bayt)"
+    "message": "Yakalanacak en küçük dosya boyutu"
   },
   "optionsMinSizeHint": {
-    "message": "Bundan küçük indirmeler tarayıcınıza bırakılır. Varsayılan 1048576 (1 MiB)."
+    "message": "Bundan küçük indirmeler tarayıcınızda kalır. Varsayılan: 1 MB."
   },
   "optionsDisabledHosts": {
     "message": "Devre dışı siteler (her satıra bir ana bilgisayar adı)"

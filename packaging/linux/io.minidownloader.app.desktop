@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Mini Downloader
+Comment=Fast, local-first download manager
+Exec=mini-downloader %U
+Icon=mini-downloader
+Terminal=false
+Categories=Network;FileTransfer;
+MimeType=x-scheme-handler/magnet;x-scheme-handler/minidownloader;application/x-bittorrent;application/metalink4+xml;
+StartupNotify=true
+StartupWMClass=mini-downloader

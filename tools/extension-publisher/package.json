@@ -1,0 +1,11 @@
+{
+  "name": "mini-downloader-extension-publisher",
+  "version": "3.0.0",
+  "private": true,
+  "description": "Pinned release-only browser store publishing tools",
+  "license": "GPL-3.0-or-later",
+  "devDependencies": {
+    "chrome-webstore-upload-cli": "4.0.1",
+    "web-ext": "10.6.0"
+  }
+}

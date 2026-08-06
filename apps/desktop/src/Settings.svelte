@@ -132,7 +132,7 @@
   let updateStatus = $state("");
   let update = $state<UpdateInfo | null>(null);
   let langChoice = $state("system");
-  let defaultSpeedKb = $state(0);
+  let defaultSpeedMb = $state(0);
 
   const OC_ACTIONS: [string, MsgKey][] = [
     ["none", "ocNone"],
@@ -163,7 +163,9 @@
     const savedLoc = await api.getSetting("locale");
     langChoice = savedLoc && savedLoc !== "system" ? savedLoc : "system";
     const dsl = await api.getSetting("default_speed_limit");
-    defaultSpeedKb = dsl ? Math.round(parseInt(dsl, 10) / 1024) : 0;
+    defaultSpeedMb = dsl
+      ? Math.round((parseInt(dsl, 10) / (1024 * 1024)) * 100) / 100
+      : 0;
     categories = await api.listCategories();
     schedules = await api.listSchedules();
     try {
@@ -371,7 +373,7 @@
     }
   }
   async function saveDefaultSpeed() {
-    const bytes = Math.max(0, Math.round(defaultSpeedKb)) * 1024;
+    const bytes = Math.round(Math.max(0, Number(defaultSpeedMb)) * 1024 * 1024);
     await api.setSetting("default_speed_limit", String(bytes));
   }
   async function restoreDefaults() {
@@ -628,7 +630,7 @@
     <input type="range" min="1" max="20" bind:value={maxConcurrent} onchange={onMaxConcurrent} aria-label={t("maxConcurrent")} />
     <div class="srow">
       <span>{t("defaultSpeedLimit")}</span>
-      <input type="number" min="0" bind:value={defaultSpeedKb} onchange={saveDefaultSpeed} style="width:110px" aria-label={t("defaultSpeedLimit")} />
+      <input type="number" min="0" step="0.1" bind:value={defaultSpeedMb} onchange={saveDefaultSpeed} style="width:110px" aria-label={t("defaultSpeedLimit")} />
     </div>
     <p class="hint">{t("connHint")}</p>
   </section>

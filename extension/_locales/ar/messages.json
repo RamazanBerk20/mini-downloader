@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "التنزيل باستخدام Mini Downloader"
   },
+  "menuAllLinks": { "message": "Mini Downloader: كل الروابط في الصفحة" },
+  "menuAllImages": { "message": "Mini Downloader: كل الصور في الصفحة" },
   "popupCatchDownloads": {
     "message": "التقاط التنزيلات"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "تم الإرسال"
   },
+  "popupSending": { "message": "جارٍ الإرسال…" },
+  "popupFailed": { "message": "فشل — أعد المحاولة" },
+  "popupRetryHint": { "message": "تعذر الإرسال. انقر لإعادة المحاولة." },
   "optionsTitle": {
     "message": "خيارات موصّل Mini Downloader"
   },
   "optionsMinSize": {
-    "message": "الحد الأدنى لحجم الملف المراد التقاطه (بايت)"
+    "message": "الحد الأدنى لحجم الملف المراد التقاطه"
   },
   "optionsMinSizeHint": {
-    "message": "التنزيلات الأصغر من ذلك تُترك للمتصفح. الافتراضي 1048576 (1 ميبي بايت)."
+    "message": "تبقى التنزيلات الأصغر من ذلك في المتصفح. الافتراضي: 1 ميغابايت."
   },
   "optionsDisabledHosts": {
     "message": "المواقع المعطّلة (اسم مضيف واحد في كل سطر)"

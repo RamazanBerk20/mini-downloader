@@ -88,7 +88,7 @@ fn keys_value(keys: &[&str]) -> Value {
 }
 
 impl RpcClient {
-    pub fn new(port: u16, secret: impl Into<String>) -> Self {
+    pub fn new(port: u16, secret: impl Into<String>) -> Result<Self> {
         // Bound every call: an aria2 that is alive but wedged (SIGSTOP, stalled
         // disk/NFS) must not hang the poll loop forever — without a timeout the
         // request never returns and the `Err(_) => continue` fallback never fires.
@@ -96,15 +96,15 @@ impl RpcClient {
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
-        Self {
+            .context("build bounded aria2 HTTP client")?;
+        Ok(Self {
             target: Arc::new(RwLock::new(Target {
                 endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
                 secret: secret.into(),
             })),
             http,
             next_id: Arc::new(AtomicU64::new(1)),
-        }
+        })
     }
 
     /// Point this client (and all its clones) at a restarted aria2.
@@ -126,7 +126,8 @@ impl RpcClient {
         arr.extend(params);
 
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let body = json!({ "jsonrpc": "2.0", "id": id.to_string(), "method": method, "params": arr });
+        let body =
+            json!({ "jsonrpc": "2.0", "id": id.to_string(), "method": method, "params": arr });
 
         let resp: Value = self
             .http
@@ -140,14 +141,19 @@ impl RpcClient {
             .with_context(|| format!("aria2 {method} response not JSON"))?;
 
         if let Some(err) = resp.get("error") {
-            let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("unknown");
+            let msg = err
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown");
             return Err(anyhow!("aria2 {method} error: {msg}"));
         }
         Ok(resp.get("result").cloned().unwrap_or(Value::Null))
     }
 
     fn as_str(v: &Value) -> Result<String> {
-        v.as_str().map(String::from).ok_or_else(|| anyhow!("expected string result, got {v}"))
+        v.as_str()
+            .map(String::from)
+            .ok_or_else(|| anyhow!("expected string result, got {v}"))
     }
 
     fn as_array(v: Value) -> Vec<Value> {
@@ -166,9 +172,17 @@ impl RpcClient {
         Self::as_str(&res)
     }
 
-    pub async fn add_torrent(&self, torrent_b64: &str, uris: &[String], options: Value) -> Result<String> {
+    pub async fn add_torrent(
+        &self,
+        torrent_b64: &str,
+        uris: &[String],
+        options: Value,
+    ) -> Result<String> {
         let res = self
-            .call("aria2.addTorrent", vec![json!(torrent_b64), json!(uris), options])
+            .call(
+                "aria2.addTorrent",
+                vec![json!(torrent_b64), json!(uris), options],
+            )
             .await?;
         Self::as_str(&res)
     }
@@ -192,7 +206,8 @@ impl RpcClient {
         self.call("aria2.forceRemove", vec![json!(gid)]).await
     }
     pub async fn remove_download_result(&self, gid: &str) -> Result<Value> {
-        self.call("aria2.removeDownloadResult", vec![json!(gid)]).await
+        self.call("aria2.removeDownloadResult", vec![json!(gid)])
+            .await
     }
     pub async fn pause(&self, gid: &str) -> Result<Value> {
         self.call("aria2.pause", vec![json!(gid)]).await
@@ -208,27 +223,40 @@ impl RpcClient {
     }
     /// Reorder a queued download. `how` is `POS_SET`/`POS_CUR`/`POS_END`.
     pub async fn change_position(&self, gid: &str, pos: i64, how: &str) -> Result<Value> {
-        self.call("aria2.changePosition", vec![json!(gid), json!(pos), json!(how)]).await
+        self.call(
+            "aria2.changePosition",
+            vec![json!(gid), json!(pos), json!(how)],
+        )
+        .await
     }
 
     // ---- query ----
 
     pub async fn tell_status(&self, gid: &str, keys: &[&str]) -> Result<Value> {
-        self.call("aria2.tellStatus", vec![json!(gid), keys_value(keys)]).await
+        self.call("aria2.tellStatus", vec![json!(gid), keys_value(keys)])
+            .await
     }
     pub async fn tell_active(&self, keys: &[&str]) -> Result<Vec<Value>> {
-        let res = self.call("aria2.tellActive", vec![keys_value(keys)]).await?;
+        let res = self
+            .call("aria2.tellActive", vec![keys_value(keys)])
+            .await?;
         Ok(Self::as_array(res))
     }
     pub async fn tell_waiting(&self, offset: i64, num: i64, keys: &[&str]) -> Result<Vec<Value>> {
         let res = self
-            .call("aria2.tellWaiting", vec![json!(offset), json!(num), keys_value(keys)])
+            .call(
+                "aria2.tellWaiting",
+                vec![json!(offset), json!(num), keys_value(keys)],
+            )
             .await?;
         Ok(Self::as_array(res))
     }
     pub async fn tell_stopped(&self, offset: i64, num: i64, keys: &[&str]) -> Result<Vec<Value>> {
         let res = self
-            .call("aria2.tellStopped", vec![json!(offset), json!(num), keys_value(keys)])
+            .call(
+                "aria2.tellStopped",
+                vec![json!(offset), json!(num), keys_value(keys)],
+            )
             .await?;
         Ok(Self::as_array(res))
     }
@@ -249,7 +277,8 @@ impl RpcClient {
     // ---- options ----
 
     pub async fn change_option(&self, gid: &str, options: Value) -> Result<Value> {
-        self.call("aria2.changeOption", vec![json!(gid), options]).await
+        self.call("aria2.changeOption", vec![json!(gid), options])
+            .await
     }
     pub async fn change_global_option(&self, options: Value) -> Result<Value> {
         self.call("aria2.changeGlobalOption", vec![options]).await
@@ -259,7 +288,11 @@ impl RpcClient {
 
     pub async fn get_version(&self) -> Result<String> {
         let res = self.call("aria2.getVersion", vec![]).await?;
-        Ok(res.get("version").and_then(|v| v.as_str()).unwrap_or("unknown").to_string())
+        Ok(res
+            .get("version")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string())
     }
     pub async fn save_session(&self) -> Result<Value> {
         self.call("aria2.saveSession", vec![]).await

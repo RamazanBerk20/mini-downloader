@@ -1,20 +1,16 @@
-# Linux bundle builds + a dev shell.
-# Build bundles (no GUI):      docker compose run --rm build
-# Interactive dev shell + GUI: xhost +local:docker && docker compose run --rm dev
-#
-# NOTE: Docker provides a consistent Linux build environment. Firefox native
-# messaging must be tested on the HOST — the native-host manifest path and
-# browser exec chain do not work from inside a container.
+# Native Linux build + development shell.
+# Build release tar:          docker compose run --rm build
+# Interactive GUI via X11:   xhost +local:docker && docker compose run --rm dev
 services:
   dev:
     build: .
-    image: minidl-dev
+    image: minidl-dev:ubuntu22.04-rust1.97.1
     working_dir: /app
     volumes:
       - .:/app
       - cargo-registry:/usr/local/cargo/registry
-      - target-cache:/app/apps/desktop/src-tauri/target
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw          # GUI via XWayland
+      - target-cache:/app/target
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
     environment:
       - DISPLAY=${DISPLAY}
     network_mode: host
@@ -22,15 +18,15 @@ services:
     tty: true
     command: bash
 
-  build:                                          # headless bundle producer
+  build:
     build: .
-    image: minidl-dev
+    image: minidl-dev:ubuntu22.04-rust1.97.1
     working_dir: /app
     volumes:
       - .:/app
       - cargo-registry:/usr/local/cargo/registry
-      - target-cache:/app/apps/desktop/src-tauri/target
-    command: bash -lc "cargo build --release -p minidl-native-host && cd apps/desktop && pnpm install --frozen-lockfile && pnpm tauri build --bundles deb,rpm,appimage"
+      - target-cache:/app/target
+    command: bash -lc "./scripts/package-linux.sh"
 
 volumes:
   cargo-registry:

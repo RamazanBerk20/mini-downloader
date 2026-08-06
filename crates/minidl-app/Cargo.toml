@@ -1,0 +1,33 @@
+[package]
+name = "minidl-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+minidl-core = { path = "../minidl-core" }
+minidl-ipc = { path = "../minidl-ipc" }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }
+interprocess = { workspace = true }
+base64 = "0.22"
+sys-locale = "0.3"
+open = "5"
+chrono = "0.4"
+arboard = { version = "3", default-features = false }
+dirs = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"
+fs2 = "0.4"
+tempfile = "3"
+url = "2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+xattr = "1"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Security_WinTrust"] }

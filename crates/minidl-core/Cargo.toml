@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 # GUI-agnostic engine: aria2 JSON-RPC client, yt-dlp driver, link grabber,
-# scheduler, categories, and SQLite persistence. No Tauri dependency — the
+# scheduler, categories, and SQLite persistence. No UI-framework dependency — the
 # desktop app depends on this, not the other way around.
 [dependencies]
 minidl-ipc = { path = "../minidl-ipc" }
@@ -23,6 +23,8 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["c
 futures-util = "0.3"
 # Embedded SQLite (bundled: no system libsqlite3 dependency).
 rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+url = "2"
 
 # Landlock confinement for spawned engine children (opt-in, Linux only).
 [target.'cfg(target_os = "linux")'.dependencies]

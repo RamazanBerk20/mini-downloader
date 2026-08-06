@@ -6,6 +6,28 @@ async function currentTab() {
   return tab;
 }
 
+async function submitGrab(button, job, isPrivate = false) {
+  button.disabled = true;
+  button.removeAttribute("title");
+  button.classList.remove("sent", "failed");
+  button.textContent = t("popupSending");
+  try {
+    const reply = await b.runtime.sendMessage({ type: "ldm-grab", job, private: isPrivate });
+    if (reply && reply.ok) {
+      button.textContent = t("popupSent");
+      button.classList.add("sent");
+      return;
+    }
+    button.textContent = t("popupFailed");
+    button.classList.add("failed");
+  } catch {
+    button.textContent = t("popupFailed");
+    button.classList.add("failed");
+  }
+  button.disabled = false;
+  button.title = t("popupRetryHint");
+}
+
 async function init() {
   await globalThis.ldmI18n.ready;
   const s = await b.storage.local.get("settings");
@@ -25,18 +47,23 @@ async function init() {
 
   const tab = await currentTab();
 
-  document.getElementById("grabpage").addEventListener("click", () => {
+  document.getElementById("grabpage").addEventListener("click", async (event) => {
     if (!tab) return;
     // Hand the page URL to yt-dlp (kind hls is a hint that yt-dlp should drive).
-    b.runtime.sendMessage({
-      type: "ldm-grab",
-      job: { url: tab.url, page_url: tab.url, kind: "hls", extra_headers: [] },
-    });
+    await submitGrab(
+      event.currentTarget,
+      { url: tab.url, page_url: tab.url, kind: "hls", extra_headers: [] },
+      Boolean(tab.incognito),
+    );
   });
 
   // `tab` can be undefined if no active tab is queryable — guard the deref.
   const media = tab
-    ? await b.runtime.sendMessage({ type: "ldm-get-media", tabId: tab.id })
+    ? await b.runtime.sendMessage({
+        type: "ldm-get-media",
+        tabId: tab.id,
+        private: Boolean(tab.incognito),
+      })
     : [];
   render(media || [], tab);
 }
@@ -68,15 +95,13 @@ function render(list, tab) {
     const btn = document.createElement("button");
     btn.className = "btn";
     btn.textContent = t("popupGrab");
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const kind = m.type === "dash" ? "dash" : m.type === "hls" ? "hls" : "http";
-      b.runtime.sendMessage({
-        type: "ldm-grab",
-        job: { url: m.url, page_url: tab && tab.url, kind, extra_headers: [] },
-      });
-      btn.textContent = t("popupSent");
-      btn.classList.add("sent");
-      btn.disabled = true;
+      await submitGrab(
+        btn,
+        { url: m.url, page_url: tab && tab.url, kind, extra_headers: [] },
+        Boolean(tab && tab.incognito),
+      );
     });
     div.append(tag, u, btn);
     root.appendChild(div);

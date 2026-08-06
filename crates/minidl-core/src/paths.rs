@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 fn home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
+    dirs::home_dir().unwrap_or_else(|| data_dir().join("home"))
 }
 
 /// Per-user data dir + our folder: `~/.local/share/minidownloader` on Linux,
@@ -16,9 +16,7 @@ fn home() -> PathBuf {
 /// Must stay in sync with `minidl_ipc::data_dir()` (the native host reads the
 /// app-exec-path file from there).
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| home().join(".local/share"))
-        .join("minidownloader")
+    minidl_ipc::data_dir()
 }
 
 /// Per-user config dir + our folder: `~/.config/minidownloader` on Linux,
@@ -26,8 +24,8 @@ pub fn data_dir() -> PathBuf {
 /// filenames).
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
-        .unwrap_or_else(|| home().join(".config"))
-        .join("minidownloader")
+        .map(|directory| directory.join("minidownloader"))
+        .unwrap_or_else(|| data_dir().join("config"))
 }
 
 /// A per-user writable bin dir for tools that self-update (yt-dlp).
@@ -49,7 +47,9 @@ pub fn resolve_tool(name: &str) -> Option<PathBuf> {
         }
     }
     std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths).map(|d| d.join(&file)).find(|c| c.is_file())
+        std::env::split_paths(&paths)
+            .map(|d| d.join(&file))
+            .find(|c| c.is_file())
     })
 }
 

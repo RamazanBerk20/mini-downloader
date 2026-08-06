@@ -5,7 +5,12 @@
 // erased only after the native app acknowledges the same job.
 // Both forward a CaptureJob to the native host over native messaging.
 
+if (typeof importScripts === "function" && !globalThis.ldmBackgroundHelpers) {
+  importScripts("background-helpers.js");
+}
+
 const b = globalThis.browser || globalThis.chrome;
+const helpers = globalThis.ldmBackgroundHelpers;
 const HOST = "com.minidownloader.host";
 const t = (k) => b.i18n.getMessage(k);
 
@@ -41,15 +46,8 @@ b.storage.onChanged.addListener((c) => {
   if (c.settings) settings = { ...DEFAULTS, ...(c.settings.newValue || {}) };
 });
 
-function hostOf(url) {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "";
-  }
-}
 function enabledForUrl(url) {
-  return settings.enabled && !settings.disabledHosts.includes(hostOf(url));
+  return settings.enabled && !helpers.isHostDisabled(url, settings.disabledHosts);
 }
 
 function notify(title, message) {
@@ -63,22 +61,34 @@ function notify(title, message) {
   } catch {}
 }
 
-async function sendJob(job) {
+async function sendJob(job, { notifyResult = true } = {}) {
   try {
     const reply = await b.runtime.sendNativeMessage(HOST, {
       ...job,
       browserFamily: BROWSER_FAMILY,
     });
-    if (reply && reply.ok) notify(t("notifySentTitle"), job.filename || job.url);
-    else notify(t("notifyRejectedTitle"), (reply && reply.error) || t("notifyUnknownError"));
+    if (notifyResult) {
+      if (reply && reply.ok) notify(t("notifySentTitle"), job.filename || job.url);
+      else notify(t("notifyRejectedTitle"), (reply && reply.error) || t("notifyUnknownError"));
+    }
     return reply;
   } catch (e) {
-    notify(t("notifyNotReachableTitle"), t("notifyNotReachableBody"));
+    if (notifyResult) notify(t("notifyNotReachableTitle"), t("notifyNotReachableBody"));
     // Automatic captures keep the browser's download when this happens. Do not
     // save the job for a later automatic retry: URLs and auth can be stale, and
     // replaying it later would start a download the user did not request then.
     return null;
   }
+}
+
+async function enrichJob(job, tab) {
+  return helpers.enrichCaptureJob(job, tab, async (query) => {
+    try {
+      return await b.cookies.getAll(query);
+    } catch {
+      return [];
+    }
+  });
 }
 
 // Presence is intentionally silent: it confirms an already-running desktop
@@ -104,11 +114,20 @@ async function discardLegacyRetries() {
   } catch {}
 }
 
+async function discardPersistedMedia() {
+  try {
+    const stored = await b.storage.local.get(null);
+    const keys = Object.keys(stored).filter((key) => key.startsWith("media:"));
+    if (keys.length) await b.storage.local.remove(keys);
+  } catch {}
+}
+
 b.runtime.onStartup.addListener(() => {
   void sendPresence();
 });
 b.runtime.onInstalled.addListener(() => {
   void discardLegacyRetries();
+  void discardPersistedMedia();
   void sendPresence();
 });
 try {
@@ -118,6 +137,7 @@ try {
   });
 } catch {}
 void discardLegacyRetries();
+void discardPersistedMedia();
 void sendPresence();
 
 // Correlate Firefox's Path A handoff with the Path B download event it may
@@ -125,7 +145,14 @@ void sendPresence();
 // app, where the user's duplicate-prevention setting is authoritative.
 const pathAHandoffs = new Map();
 function rememberPathAHandoff(url, handoff) {
-  pathAHandoffs.set(url, { at: Date.now(), handoff });
+  const at = Date.now();
+  pathAHandoffs.set(url, { at, handoff });
+  while (pathAHandoffs.size > 512) {
+    pathAHandoffs.delete(pathAHandoffs.keys().next().value);
+  }
+  setTimeout(() => {
+    if (pathAHandoffs.get(url)?.at === at) pathAHandoffs.delete(url);
+  }, 5000);
 }
 function recentPathAHandoff(url) {
   const now = Date.now();
@@ -141,7 +168,20 @@ if (IS_FIREFOX) {
 const reqHeaders = new Map(); // requestId -> headers[]
 b.webRequest.onBeforeSendHeaders.addListener(
   (d) => {
-    reqHeaders.set(d.requestId, d.requestHeaders || []);
+    if (d.incognito) return;
+    const wanted = new Set(["cookie", "referer", "user-agent", "authorization", "origin"]);
+    let bytes = 0;
+    const headers = [];
+    for (const header of d.requestHeaders || []) {
+      if (typeof header.name !== "string" || typeof header.value !== "string") continue;
+      if (!wanted.has(header.name.toLowerCase())) continue;
+      const size = header.name.length + header.value.length;
+      if (bytes + size > 64 * 1024) break;
+      bytes += size;
+      headers.push(header);
+    }
+    reqHeaders.set(d.requestId, headers);
+    while (reqHeaders.size > 512) reqHeaders.delete(reqHeaders.keys().next().value);
   },
   { urls: ["<all_urls>"] },
   ["requestHeaders"],
@@ -259,6 +299,7 @@ b.webRequest.onHeadersReceived.addListener(
     // Firefox honors a Promise return from a blocking listener; await the initial
     // settings load so a cold-start request isn't judged against DEFAULTS.
     await settingsReady;
+    if (d.incognito) return {};
     if (!enabledForUrl(d.url)) return {};
     const h = {};
     for (const x of d.responseHeaders || []) h[x.name.toLowerCase()] = x.value;
@@ -293,6 +334,7 @@ b.webRequest.onHeadersReceived.addListener(
 
 b.downloads.onCreated.addListener(async (item) => {
   try {
+    if (item.incognito) return;
     if (item.byExtensionId === b.runtime.id) return;
     if (/^blob:|^data:/i.test(item.url)) return;
     await settingsReady;
@@ -300,7 +342,7 @@ b.downloads.onCreated.addListener(async (item) => {
     // Ordinary magnet clicks belong to the system-selected handler. The
     // context-menu action below remains an explicit Mini Downloader override.
     if (item.url.startsWith("magnet:")) return;
-    if (isBlacklisted(item.url, item.filename ? item.filename.split("/").pop() : "")) return;
+    if (isBlacklisted(item.url, item.filename ? item.filename.split(/[\\/]/).pop() : "")) return;
     if (item.totalBytes > -1 && item.totalBytes < settings.minSize) return;
 
     // Firefox can surface the same request through both capture paths. Await
@@ -316,23 +358,17 @@ b.downloads.onCreated.addListener(async (item) => {
       }
     }
 
-    let cookie = "";
-    try {
-      const cs = await b.cookies.getAll({ url: item.url, storeId: item.cookieStoreId });
-      cookie = cs.map((c) => `${c.name}=${c.value}`).join("; ");
-    } catch {}
-
-    const reply = await sendJob({
+    const job = await enrichJob({
       url: item.url,
-      filename: item.filename ? item.filename.split("/").pop() : undefined,
+      filename: item.filename ? item.filename.split(/[\\/]/).pop() : undefined,
       mime: item.mime,
       size: item.totalBytes,
       referrer: item.referrer || undefined,
-      cookie: cookie || undefined,
       extra_headers: [],
       kind: item.url.startsWith("magnet:") ? "magnet" : "http",
       cookie_store_id: item.cookieStoreId,
-    });
+    }, { cookieStoreId: item.cookieStoreId });
+    const reply = await sendJob(job);
     // Only pull the download out of the browser once the app has accepted it.
     // If the app is down/unreachable or rejects the job, leave the browser's own
     // download intact instead of erasing it with no fallback.
@@ -345,32 +381,32 @@ b.downloads.onCreated.addListener(async (item) => {
 
 // ---------- Context menu ----------
 
-function createMenu() {
+async function createMenu() {
   try {
-    b.contextMenus.removeAll(() => {
-      b.contextMenus.create({
-        id: "ldm-download",
-        title: t("actionTitle"),
-        contexts: ["link", "video", "audio", "image", "selection"],
-      });
-      b.contextMenus.create({
-        id: "ldm-links",
-        title: "Mini Downloader: all links on page",
-        contexts: ["page"],
-      });
-      b.contextMenus.create({
-        id: "ldm-images",
-        title: "Mini Downloader: all images on page",
-        contexts: ["page"],
-      });
-    });
+    await b.contextMenus.removeAll();
+    await Promise.resolve(b.contextMenus.create({
+      id: "ldm-download",
+      title: t("actionTitle"),
+      contexts: ["link", "video", "audio", "image", "selection"],
+    }));
+    await Promise.resolve(b.contextMenus.create({
+      id: "ldm-links",
+      title: t("menuAllLinks"),
+      contexts: ["page"],
+    }));
+    await Promise.resolve(b.contextMenus.create({
+      id: "ldm-images",
+      title: t("menuAllImages"),
+      contexts: ["page"],
+    }));
   } catch {}
 }
-b.runtime.onInstalled.addListener(createMenu);
-b.runtime.onStartup.addListener(createMenu);
-createMenu();
+b.runtime.onInstalled.addListener(() => void createMenu());
+b.runtime.onStartup.addListener(() => void createMenu());
+void createMenu();
 
 b.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (tab && tab.incognito) return;
   // Bulk grab: harvest every downloadable link / image on the page.
   if (info.menuItemId === "ldm-links" || info.menuItemId === "ldm-images") {
     if (!tab) return;
@@ -380,11 +416,6 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
       urls = (await b.tabs.sendMessage(tab.id, { type: "ldm-harvest", what })) || [];
     } catch {}
     urls = urls.slice(0, 200); // cap a runaway page
-    let cookie = "";
-    try {
-      const cs = await b.cookies.getAll({ url: tab.url });
-      cookie = cs.map((c) => `${c.name}=${c.value}`).join("; ");
-    } catch {}
     // Group the whole harvest into one package on the app side. Only batches of
     // 2+ get a batch id — a single hit lands ungrouped like a normal capture.
     const batchId = urls.length >= 2 && crypto.randomUUID ? crypto.randomUUID() : undefined;
@@ -398,15 +429,15 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
     }
     let sent = 0;
     for (const u of urls) {
-      const reply = await sendJob({
+      const job = await enrichJob({
         url: u,
         referrer: tab.url,
-        cookie: cookie || undefined,
         extra_headers: [],
         kind: "http",
         batch_id: batchId,
         batch_name: batchName,
-      });
+      }, tab);
+      const reply = await sendJob(job, { notifyResult: false });
       if (reply && reply.ok) sent++;
     }
     notify(t("notifySentTitle"), `${sent} / ${urls.length}`);
@@ -415,30 +446,26 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
 
   const url = info.linkUrl || info.srcUrl || (info.selectionText || "").trim();
   if (!url || !/^(https?:|ftp:|magnet:)/i.test(url)) return;
-  let cookie = "";
-  try {
-    const cs = await b.cookies.getAll({ url });
-    cookie = cs.map((c) => `${c.name}=${c.value}`).join("; ");
-  } catch {}
-  sendJob({
+  const job = await enrichJob({
     url,
     referrer: tab && tab.url,
-    cookie: cookie || undefined,
     extra_headers: [],
     kind: url.startsWith("magnet:") ? "magnet" : "http",
-  });
+  }, tab);
+  void sendJob(job);
 });
 
 // ---------- Media sniffer (HLS/DASH) + content-script media ----------
 
-// Per-tab sniffed media is persisted in `storage.session` (falling back to
-// `storage.local`) so it survives the MV3 worker/event-page being suspended —
-// an in-memory Map is lost after ~30s idle, leaving the popup empty. Cleared on
-// tab close / navigation.
-const mediaStore = (b.storage && b.storage.session) || b.storage.local;
+// Per-tab media lives only for the browser session. Never fall back to
+// persistent local storage: signed media URLs can contain reusable credentials.
+const mediaStore = b.storage && b.storage.session;
+const memoryMedia = new Map();
+const mediaOperations = new Map();
 const MEDIA_KEY = (tabId) => `media:${tabId}`;
 
-async function getMedia(tabId) {
+async function readMedia(tabId) {
+  if (!mediaStore) return memoryMedia.get(tabId) || [];
   try {
     const key = MEDIA_KEY(tabId);
     const r = await mediaStore.get(key);
@@ -447,23 +474,52 @@ async function getMedia(tabId) {
     return [];
   }
 }
-async function addMedia(tabId, entry) {
+
+function enqueueMedia(tabId, operation) {
+  const previous = mediaOperations.get(tabId) || Promise.resolve();
+  const current = previous
+    .catch(() => {})
+    .then(operation)
+    .finally(() => {
+      if (mediaOperations.get(tabId) === current) mediaOperations.delete(tabId);
+    });
+  mediaOperations.set(tabId, current);
+  return current;
+}
+
+async function getMedia(tabId) {
+  await (mediaOperations.get(tabId) || Promise.resolve()).catch(() => {});
+  return readMedia(tabId);
+}
+
+function addMedia(tabId, entry) {
   if (tabId === undefined || tabId < 0) return;
-  const list = await getMedia(tabId);
-  if (list.some((m) => m.url === entry.url)) return;
-  list.push(entry);
-  try {
-    await mediaStore.set({ [MEDIA_KEY(tabId)]: list });
-  } catch {}
+  return enqueueMedia(tabId, async () => {
+    const list = await readMedia(tabId);
+    const next = helpers.addBoundedMedia(list, entry);
+    if (next.length === list.length && next.every((item, index) => item === list[index])) return;
+    if (!mediaStore) {
+      memoryMedia.set(tabId, next);
+      return;
+    }
+    try {
+      await mediaStore.set({ [MEDIA_KEY(tabId)]: next });
+    } catch {}
+  });
 }
 function clearMedia(tabId) {
-  try {
-    mediaStore.remove(MEDIA_KEY(tabId));
-  } catch {}
+  return enqueueMedia(tabId, async () => {
+    memoryMedia.delete(tabId);
+    if (!mediaStore) return;
+    try {
+      await mediaStore.remove(MEDIA_KEY(tabId));
+    } catch {}
+  });
 }
 
 b.webRequest.onResponseStarted.addListener(
   (d) => {
+    if (d.incognito) return;
     const isHls = /\.m3u8(\?|$)|mpegurl/i.test(d.url);
     const isDash = /\.mpd(\?|$)|dash\+xml/i.test(d.url);
     if (!isHls && !isDash) return;
@@ -479,11 +535,17 @@ b.tabs.onUpdated.addListener((id, ch) => {
 b.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
   if (msg.type === "ldm-media" && sender.tab) {
+    if (sender.tab.incognito) return;
     const tabId = sender.tab.id;
     for (const u of msg.urls || []) addMedia(tabId, { url: u, type: "file" });
     return;
   }
   if (msg.type === "ldm-get-media") {
+    if (msg.private || (sender.tab && sender.tab.incognito)) {
+      if (IS_FIREFOX) return Promise.resolve([]);
+      sendResponse([]);
+      return false;
+    }
     // Firefox honors a returned Promise; Chromium needs sendResponse + `return
     // true` to keep the message channel open for the async storage read.
     const p = getMedia(msg.tabId);
@@ -492,7 +554,12 @@ b.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === "ldm-grab") {
-    const p = sendJob(msg.job);
+    if (msg.private || (sender.tab && sender.tab.incognito)) {
+      if (IS_FIREFOX) return Promise.resolve(null);
+      sendResponse(null);
+      return false;
+    }
+    const p = enrichJob(msg.job, sender.tab).then((job) => sendJob(job));
     if (IS_FIREFOX) return p;
     p.then((reply) => sendResponse(reply));
     return true;

@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "Mini Downloader로 다운로드"
   },
+  "menuAllLinks": { "message": "Mini Downloader: 페이지의 모든 링크" },
+  "menuAllImages": { "message": "Mini Downloader: 페이지의 모든 이미지" },
   "popupCatchDownloads": {
     "message": "다운로드 가로채기"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "전송됨"
   },
+  "popupSending": { "message": "전송 중…" },
+  "popupFailed": { "message": "실패 — 다시 시도" },
+  "popupRetryHint": { "message": "전송하지 못했습니다. 클릭하여 다시 시도하세요." },
   "optionsTitle": {
     "message": "Mini Downloader 커넥터 옵션"
   },
   "optionsMinSize": {
-    "message": "가로챌 최소 파일 크기(바이트)"
+    "message": "가로챌 최소 파일 크기"
   },
   "optionsMinSizeHint": {
-    "message": "이보다 작은 다운로드는 브라우저에 맡깁니다. 기본값 1048576(1 MiB)."
+    "message": "이보다 작은 다운로드는 브라우저에 남습니다. 기본값: 1 MB."
   },
   "optionsDisabledHosts": {
     "message": "비활성화된 사이트(줄당 호스트 이름 하나)"

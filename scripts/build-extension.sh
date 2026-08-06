@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT="dist-ext"
-SHARED="background.js content.js popup.html popup.js options.html options.js i18n.js ui.css _locales icons"
+SHARED="background-helpers.js options-helpers.js background.js content.js popup.html popup.js options.html options.js i18n.js ui.css _locales icons"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/firefox" "$OUT/chrome"
@@ -18,6 +18,8 @@ for f in $SHARED; do
 done
 cp extension/manifest.json         "$OUT/firefox/manifest.json"
 cp extension/manifest.chrome.json  "$OUT/chrome/manifest.json"
+cp LICENSE PRIVACY.md "$OUT/firefox/"
+cp LICENSE PRIVACY.md "$OUT/chrome/"
 
 echo "Firefox → $OUT/firefox"
 echo "  Load: about:debugging → This Firefox → Load Temporary Add-on → pick manifest.json"

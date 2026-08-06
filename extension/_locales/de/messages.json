@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "Mit Mini Downloader herunterladen"
   },
+  "menuAllLinks": { "message": "Mini Downloader: alle Links auf der Seite" },
+  "menuAllImages": { "message": "Mini Downloader: alle Bilder auf der Seite" },
   "popupCatchDownloads": {
     "message": "Downloads abfangen"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "Gesendet"
   },
+  "popupSending": { "message": "Wird gesendet…" },
+  "popupFailed": { "message": "Fehlgeschlagen — erneut versuchen" },
+  "popupRetryHint": { "message": "Senden fehlgeschlagen. Zum Wiederholen klicken." },
   "optionsTitle": {
     "message": "Mini Downloader Connector – Optionen"
   },
   "optionsMinSize": {
-    "message": "Minimale Dateigröße zum Abfangen (Bytes)"
+    "message": "Mindestdateigröße zum Abfangen"
   },
   "optionsMinSizeHint": {
-    "message": "Kleinere Downloads werden dem Browser überlassen. Standard 1048576 (1 MiB)."
+    "message": "Kleinere Downloads bleiben im Browser. Standard: 1 MB."
   },
   "optionsDisabledHosts": {
     "message": "Deaktivierte Seiten (ein Hostname pro Zeile)"

@@ -39,11 +39,7 @@ impl Default for EngineDefaults {
 /// Take only the last path component and reject dot-segments; on rejection we
 /// return `None` and let aria2 derive the name from the URL.
 fn safe_out_name(name: &str) -> Option<String> {
-    let base = name
-        .rsplit(|c| c == '/' || c == '\\')
-        .next()
-        .unwrap_or("")
-        .trim();
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("").trim();
     if base.is_empty() || base == "." || base == ".." {
         return None;
     }
@@ -56,7 +52,11 @@ fn safe_out_name(name: &str) -> Option<String> {
 /// file is written straight into place, which is resume-safe). Cookies/headers
 /// are replayed verbatim: dropping them turns a working browser download into a
 /// 403.
-pub fn build_add_options(job: &CaptureJob, dir: &str, defaults: &EngineDefaults) -> Map<String, Value> {
+pub fn build_add_options(
+    job: &CaptureJob,
+    dir: &str,
+    defaults: &EngineDefaults,
+) -> Map<String, Value> {
     let mut opts = Map::new();
     opts.insert("dir".into(), Value::String(dir.to_string()));
     if let Some(name) = &job.filename {
@@ -89,7 +89,10 @@ pub fn build_add_options(job: &CaptureJob, dir: &str, defaults: &EngineDefaults)
         "max-connection-per-server".into(),
         Value::String(defaults.max_connection_per_server.to_string()),
     );
-    opts.insert("min-split-size".into(), Value::String(defaults.min_split_size.clone()));
+    opts.insert(
+        "min-split-size".into(),
+        Value::String(defaults.min_split_size.clone()),
+    );
     opts.insert("continue".into(), Value::String("true".into()));
 
     // Survive transient network flaps (Wi-Fi/DNS blips) instead of hard-erroring
@@ -161,8 +164,14 @@ mod tests {
         let opts = build_add_options(&job(), "/dl", &EngineDefaults::default());
         assert_eq!(opts["dir"], Value::String("/dl".into()));
         assert_eq!(opts["out"], Value::String("big.iso".into()));
-        assert_eq!(opts["referer"], Value::String("https://example/page".into()));
-        assert_eq!(opts["max-connection-per-server"], Value::String("16".into()));
+        assert_eq!(
+            opts["referer"],
+            Value::String("https://example/page".into())
+        );
+        assert_eq!(
+            opts["max-connection-per-server"],
+            Value::String("16".into())
+        );
         assert_eq!(opts["continue"], Value::String("true".into()));
         let headers = opts["header"].as_array().unwrap();
         assert!(headers.contains(&Value::String("Cookie: sid=abc".into())));

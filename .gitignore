@@ -1,6 +1,5 @@
 # Rust
 /target
-apps/desktop/src-tauri/target
 **/*.rs.bk
 
 # Node / frontend
@@ -9,18 +8,12 @@ dist
 apps/desktop/dist
 .pnpm-store
 
-# Tauri
-apps/desktop/src-tauri/gen
-
-# Staged sidecar binaries (fetched by scripts/stage-sidecars.sh)
-apps/desktop/src-tauri/binaries/*
-!apps/desktop/src-tauri/binaries/.gitkeep
-
 # Bundles / artifacts
 *.AppImage
 *.deb
 *.rpm
 *.xpi
+/dist-native
 
 # Extension build
 extension/web-ext-artifacts

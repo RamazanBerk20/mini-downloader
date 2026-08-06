@@ -1,36 +1,26 @@
 # Publishing to the AUR
 
-Three packages:
+The repository maintains three native packages:
 
-- `mini-downloader-bin` — repackages the released `.deb` (fast install)
-- `mini-downloader` — builds from the release tarball (rust + pnpm)
-- `mini-downloader-git` — builds from `main` HEAD (`pkgver()` derived from `git describe`)
+- `mini-downloader-bin` installs the prebuilt native release archive.
+- `mini-downloader` builds a tagged source release with Cargo.
+- `mini-downloader-git` builds `main` and derives its version from Git.
 
-## One-time setup
+The native Slint build has no Node, WebKitGTK, GTK, or AppIndicator dependency.
+Runtime downloads use system `aria2`. `yt-dlp` enables media downloads, while
+`ffmpeg` enables stream merging, embedding, and audio conversion; both are
+optional dependencies.
 
-1. Create an account on https://aur.archlinux.org and add your SSH public key.
-2. `git clone ssh://aur@aur.archlinux.org/mini-downloader-bin.git` (an empty
-   repo is created on first push; same for `mini-downloader`).
-
-## Publish / update
+Before publishing a stable package:
 
 ```sh
 cd packaging/aur/mini-downloader-bin
-# 1. bump pkgver to match the GitHub release; reset pkgrel to 1
-# 2. replace sha256sums=('SKIP') with the real hash:
-updpkgsums                     # (pacman-contrib) downloads + fills sha256
-# 3. verify the asset filename matches the release (tauri derives it from the
-#    product name) and that it builds:
+# Set pkgver/pkgrel, then replace SKIP with the released asset checksum.
+updpkgsums
 makepkg -si
-namcap PKGBUILD *.pkg.tar.zst  # lint
-# 4. regenerate metadata and push to the AUR repo:
+namcap PKGBUILD ./*.pkg.tar.zst
 makepkg --printsrcinfo > .SRCINFO
-git add PKGBUILD .SRCINFO && git commit -m "v<version>" && git push
 ```
 
-Same flow for `mini-downloader` (source package).
-
-Notes:
-- Never commit built artifacts to the AUR repo — only `PKGBUILD` + `.SRCINFO`.
-- `sha256sums=('SKIP')` is fine for local testing but MUST be a real checksum
-  when pushed.
+Repeat for `mini-downloader`, then commit only `PKGBUILD` and `.SRCINFO` to the
+corresponding AUR repositories. Never publish a stable package with `SKIP`.

@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::model::{now, Category, Download, DownloadStatus, NewDownload, Package, Schedule};
@@ -132,6 +132,8 @@ ALTER TABLE downloads ADD COLUMN session_gid TEXT;
 CREATE INDEX idx_downloads_session_gid ON downloads(session_gid);
 "#;
 
+const SCHEMA_VERSION: i64 = 4;
+
 /// Default categories seeded on first run. Dirs are `~`-relative markers the app
 /// resolves at runtime.
 const DEFAULT_CATEGORIES: &[(&str, &str, &str)] = &[
@@ -222,7 +224,12 @@ impl Db {
     }
 
     pub fn open(data_dir: &Path) -> Result<Self> {
-        std::fs::create_dir_all(data_dir).ok();
+        std::fs::create_dir_all(data_dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
         let path = data_dir.join("minidl.db");
         let conn = Connection::open(&path)?;
         let db = Self::init(conn)?;
@@ -232,10 +239,13 @@ impl Db {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700));
             for suffix in ["", "-wal", "-shm"] {
                 let p = data_dir.join(format!("minidl.db{suffix}"));
-                let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600));
+                match std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
             }
         }
         Ok(db)
@@ -262,6 +272,11 @@ impl Db {
     fn migrate(&self) -> Result<()> {
         let mut conn = self.lock();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version > SCHEMA_VERSION {
+            bail!(
+                "database schema version {version} is newer than supported version {SCHEMA_VERSION}"
+            );
+        }
         // Each step runs in its own transaction (atomic — a crash mid-step rolls
         // back including the `user_version` bump, so re-running is safe).
         if version < 1 {
@@ -478,6 +493,21 @@ impl Db {
         Ok(rows)
     }
 
+    /// Whether any queued work remains, including deliberately paused and
+    /// scheduled rows. Completion actions must not fire while these exist.
+    pub fn has_unfinished_downloads(&self) -> Result<bool> {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT EXISTS(
+                SELECT 1 FROM downloads
+                WHERE status IN ('queued','active','waiting','paused','scheduled')
+            )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+    }
+
     /// Nonterminal aria2 rows whose saved session may be restored. Scheduled
     /// rows are included so their GID survives restart, but remain excluded from
     /// [`Self::running_rows`] so startup reconciliation does not unschedule them.
@@ -501,7 +531,12 @@ impl Db {
             None
         };
         conn.execute(
-            "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3",
+            "UPDATE downloads
+             SET status=?1,
+                 finished_at=?2,
+                 cookie=CASE WHEN ?1='complete' THEN NULL ELSE cookie END,
+                 extra_headers=CASE WHEN ?1='complete' THEN NULL ELSE extra_headers END
+             WHERE id=?3",
             params![status.as_str(), finished, id],
         )?;
         Ok(())
@@ -519,7 +554,12 @@ impl Db {
             None
         };
         let n = conn.execute(
-            "UPDATE downloads SET status=?1, finished_at=COALESCE(?2, finished_at) WHERE id=?3 AND status<>?1",
+            "UPDATE downloads
+             SET status=?1,
+                 finished_at=?2,
+                 cookie=CASE WHEN ?1='complete' THEN NULL ELSE cookie END,
+                 extra_headers=CASE WHEN ?1='complete' THEN NULL ELSE extra_headers END
+             WHERE id=?3 AND status<>?1",
             params![status.as_str(), finished, id],
         )?;
         Ok(n > 0)
@@ -745,6 +785,43 @@ impl Db {
         Ok(id)
     }
 
+    pub fn move_category(&self, id: i64, direction: i32) -> Result<()> {
+        if direction == 0 {
+            return Ok(());
+        }
+
+        let mut conn = self.lock();
+        let mut ids = {
+            let mut stmt = conn.prepare("SELECT id FROM categories ORDER BY priority, name")?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+        let Some(index) = ids.iter().position(|candidate| *candidate == id) else {
+            return Ok(());
+        };
+        let target = if direction < 0 {
+            index.checked_sub(1)
+        } else {
+            index.checked_add(1).filter(|target| *target < ids.len())
+        };
+        let Some(target) = target else {
+            return Ok(());
+        };
+        ids.swap(index, target);
+
+        let transaction = conn.transaction()?;
+        for (priority, category_id) in ids.into_iter().enumerate() {
+            transaction.execute(
+                "UPDATE categories SET priority=?1 WHERE id=?2",
+                params![priority as i64, category_id],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn delete_category(&self, id: i64) -> Result<()> {
         let conn = self.lock();
         conn.execute("DELETE FROM categories WHERE id=?1", params![id])?;
@@ -868,6 +945,23 @@ impl Db {
         )?;
         Ok(())
     }
+
+    /// Persist a complete settings draft in one SQLite transaction.
+    pub fn set_settings(&self, values: &[(String, String)]) -> Result<()> {
+        let mut conn = self.lock();
+        let transaction = conn.transaction()?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value=?2",
+            )?;
+            for (key, value) in values {
+                statement.execute(params![key, value])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -899,6 +993,30 @@ mod tests {
         let d = db.get(id).unwrap().unwrap();
         assert_eq!(d.status, DownloadStatus::Complete);
         assert!(d.finished_at.is_some());
+
+        db.set_status(id, DownloadStatus::Paused).unwrap();
+        let d = db.get(id).unwrap().unwrap();
+        assert_eq!(d.status, DownloadStatus::Paused);
+        assert!(d.finished_at.is_none());
+    }
+
+    #[test]
+    fn completion_discards_replay_credentials() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://example.org/private.zip".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                cookie: Some("session=secret".into()),
+                extra_headers: Some(r#"[["Authorization","Bearer secret"]]"#.into()),
+                ..Default::default()
+            })
+            .unwrap();
+        db.set_status(id, DownloadStatus::Complete).unwrap();
+        let row = db.get(id).unwrap().unwrap();
+        assert!(row.cookie.is_none());
+        assert!(row.extra_headers.is_none());
     }
 
     #[test]
@@ -932,7 +1050,8 @@ mod tests {
             DownloadInsertResult::Existing(first_id)
         );
 
-        db.set_error(first_id, None, Some("network failed")).unwrap();
+        db.set_error(first_id, None, Some("network failed"))
+            .unwrap();
         let retry = db.insert_download_deduplicated(&download).unwrap();
         assert!(matches!(retry, DownloadInsertResult::Inserted(id) if id != first_id));
         assert_eq!(db.list(None).unwrap().len(), 2);
@@ -986,9 +1105,7 @@ mod tests {
             ..Default::default()
         };
 
-        let first = db
-            .insert_download_with_duplicate_policy(&video)
-            .unwrap();
+        let first = db.insert_download_with_duplicate_policy(&video).unwrap();
         assert!(matches!(first, DownloadInsertResult::Inserted(_)));
         assert_eq!(
             db.insert_download_with_duplicate_policy(&video).unwrap(),
@@ -1039,6 +1156,24 @@ mod tests {
     }
 
     #[test]
+    fn category_order_moves_one_position_at_a_time() {
+        let db = Db::open_in_memory().unwrap();
+        let before = db.list_categories().unwrap();
+        let first = before[0].id;
+        let second = before[1].id;
+
+        db.move_category(second, -1).unwrap();
+        let moved = db.list_categories().unwrap();
+        assert_eq!(moved[0].id, second);
+        assert_eq!(moved[1].id, first);
+
+        db.move_category(second, -1).unwrap();
+        assert_eq!(db.list_categories().unwrap()[0].id, second);
+        db.move_category(second, 1).unwrap();
+        assert_eq!(db.list_categories().unwrap()[0].id, first);
+    }
+
+    #[test]
     fn v3_columns_roundtrip() {
         let db = Db::open_in_memory().unwrap();
         let pkg = db.insert_package("My batch", None, Some("/dl")).unwrap();
@@ -1075,6 +1210,58 @@ mod tests {
         db.delete(id).unwrap();
         db.delete_package_if_empty(pkg).unwrap();
         assert!(db.list_packages().unwrap().is_empty());
+    }
+
+    #[test]
+    fn legacy_v1_database_migrates_without_losing_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATION_1).unwrap();
+        conn.execute(
+            "INSERT INTO downloads (url, dir, created_at) VALUES (?1, ?2, ?3)",
+            params!["https://example.org/legacy.iso", "/downloads", 123_i64],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+
+        let db = Db::init(conn).unwrap();
+        let row = db.list(None).unwrap().pop().unwrap();
+        assert_eq!(row.url, "https://example.org/legacy.iso");
+        assert!(row.session_gid.is_none());
+        let version: i64 = db
+            .lock()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn legacy_v3_database_receives_session_identity_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATION_1).unwrap();
+        conn.execute_batch(MIGRATION_2).unwrap();
+        conn.execute_batch(MIGRATION_3).unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+
+        let db = Db::init(conn).unwrap();
+        let columns: Vec<String> = {
+            let conn = db.lock();
+            let mut statement = conn.prepare("PRAGMA table_info(downloads)").unwrap();
+            statement
+                .query_map([], |row| row.get(1))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        assert!(columns.iter().any(|column| column == "session_gid"));
+    }
+
+    #[test]
+    fn future_database_schema_is_rejected() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION + 1)
+            .unwrap();
+        let error = Db::init(conn).err().unwrap().to_string();
+        assert!(error.contains("newer than supported"));
     }
 
     #[test]

@@ -6,6 +6,7 @@
 **/dist
 **/.pnpm-store
 dist-ext
+dist-native
 
 # Distribution and local AUR build artifacts are never needed to build the
 # development image.

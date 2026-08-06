@@ -1,54 +1,46 @@
-# Mini Downloader build/dev container — Ubuntu 22.04 for a glibc/WebKitGTK floor that keeps
-# AppImage output runnable on older distros.
-FROM ubuntu:22.04
+# Native Linux build/dev container. Ubuntu 22.04 keeps the glibc floor usable
+# on older supported distributions without pulling in a web rendering engine.
+FROM ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
+
+ARG RUST_TOOLCHAIN=1.97.1
+ARG RUSTUP_INIT_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG YTDLP_VERSION=2026.07.04
+ARG YTDLP_SHA256=495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd
 
 ENV DEBIAN_FRONTEND=noninteractive \
     CARGO_HOME=/usr/local/cargo \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 
-# Tauri v2 system deps
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
-      build-essential curl wget file git ca-certificates pkg-config \
-      libwebkit2gtk-4.1-dev libssl-dev libgtk-3-dev \
-      libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
-      patchelf aria2 ffmpeg python3 \
+      build-essential curl git ca-certificates pkg-config sudo \
+      libfontconfig1-dev libwayland-dev libxkbcommon-dev \
+      libx11-dev libx11-xcb-dev libxcb1-dev libxcursor-dev \
+      libxrandr-dev libxi-dev \
+      aria2 ffmpeg python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# yt-dlp (latest standalone build, self-updatable)
-RUN curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-      -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
+RUN curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
+      "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp" \
+      -o /usr/local/bin/yt-dlp \
+    && echo "${YTDLP_SHA256}  /usr/local/bin/yt-dlp" | sha256sum -c - \
+    && chmod 0755 /usr/local/bin/yt-dlp
 
-# Node 22 + project-aligned JavaScript tooling.  Keep these majors in sync
-# with CI so the container catches the same lockfile and extension issues.
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource-setup.sh \
-    && bash /tmp/nodesource-setup.sh \
-    && rm /tmp/nodesource-setup.sh \
-    && apt-get install -y -qq nodejs && rm -rf /var/lib/apt/lists/* \
-    && npm install -g pnpm@11 web-ext@8
+RUN curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors \
+      --connect-timeout 15 --max-time 600 \
+      https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
+      -o /tmp/rustup-init \
+    && echo "${RUSTUP_INIT_SHA256}  /tmp/rustup-init" | sha256sum -c - \
+    && chmod 0755 /tmp/rustup-init \
+    && /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}" \
+    && rm -f /tmp/rustup-init
 
-# Rust stable. The project-local, lockfile-pinned Tauri CLI is installed by
-# pnpm during Dev Container creation and Compose builds.
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --default-toolchain stable
-
-# Docker creates named volumes as root; the Dev Container uses sudo once to
-# hand its dependency volume to the unprivileged developer user.
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends sudo \
-    && rm -rf /var/lib/apt/lists/*
-
-# The image remains root-by-default for the existing Compose workflow, while
-# the Dev Container attaches as this unprivileged user.  That keeps generated
-# workspace files owned by the developer rather than by root on Linux hosts.
-# pnpm's store stays in the container home too: a bind-mounted workspace is a
-# different filesystem, which would otherwise make pnpm create a host-local
-# store with container-specific metadata.
 RUN useradd --create-home --shell /bin/bash vscode \
-    && install -d -o vscode -g vscode /home/vscode/.config/pnpm \
-    && printf 'storeDir: /home/vscode/.pnpm-store\n' > /home/vscode/.config/pnpm/config.yaml \
     && printf 'vscode ALL=(root) NOPASSWD:ALL\n' > /etc/sudoers.d/vscode \
     && chmod 0440 /etc/sudoers.d/vscode \
-    && chown -R vscode:vscode "$CARGO_HOME" "$RUSTUP_HOME"
+    && mkdir -p /app/target \
+    && chown -R vscode:vscode "$CARGO_HOME" "$RUSTUP_HOME" /app
 
 WORKDIR /app
+USER vscode
 CMD ["bash"]

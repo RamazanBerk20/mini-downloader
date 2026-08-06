@@ -11,10 +11,7 @@ pub enum Msg {
 
 /// Translate `msg` for a locale tag (e.g. `"tr"`, `"zh-CN"`); unknown → English.
 pub fn tr(locale: &str, msg: Msg) -> &'static str {
-    let lang = locale
-        .split(|c| c == '-' || c == '_')
-        .next()
-        .unwrap_or("en");
+    let lang = locale.split(['-', '_']).next().unwrap_or("en");
     match msg {
         Msg::DownloadComplete => match lang {
             "tr" => "İndirme tamamlandı",

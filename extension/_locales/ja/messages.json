@@ -8,6 +8,8 @@
   "actionTitle": {
     "message": "Mini Downloader でダウンロード"
   },
+  "menuAllLinks": { "message": "Mini Downloader：ページ内のすべてのリンク" },
+  "menuAllImages": { "message": "Mini Downloader：ページ内のすべての画像" },
   "popupCatchDownloads": {
     "message": "ダウンロードを捕捉"
   },
@@ -29,14 +31,17 @@
   "popupSent": {
     "message": "送信済み"
   },
+  "popupSending": { "message": "送信中…" },
+  "popupFailed": { "message": "失敗 — 再試行" },
+  "popupRetryHint": { "message": "送信できませんでした。クリックして再試行してください。" },
   "optionsTitle": {
     "message": "Mini Downloader コネクターのオプション"
   },
   "optionsMinSize": {
-    "message": "捕捉する最小ファイルサイズ（バイト）"
+    "message": "捕捉する最小ファイルサイズ"
   },
   "optionsMinSizeHint": {
-    "message": "これより小さいダウンロードはブラウザーに任せます。既定値 1048576（1 MiB）。"
+    "message": "これより小さいダウンロードはブラウザーに残します。既定値：1 MB。"
   },
   "optionsDisabledHosts": {
     "message": "無効なサイト（1 行に 1 つのホスト名）"

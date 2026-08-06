@@ -15,6 +15,12 @@ use std::path::PathBuf;
 /// understand, so the extension and app can update out of lockstep safely.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Protocol spoken between the lightweight controller and disposable native
+/// UI clients. It is deliberately independent from [`PROTOCOL_VERSION`]: the
+/// browser connector and desktop UI can then evolve without forcing each
+/// other to update in lockstep.
+pub const CONTROL_PROTOCOL_VERSION: u32 = 2;
+
 /// Native-messaging host name — must equal the manifest `name` and the string
 /// the extension passes to `runtime.connectNative()` / `sendNativeMessage()`.
 pub const NATIVE_HOST_NAME: &str = "com.minidownloader.host";
@@ -251,11 +257,311 @@ impl BridgeReply {
     }
 
     pub fn accepted(job_id: i64) -> Self {
-        Self { ok: true, job_id: Some(job_id), error: None }
+        Self {
+            ok: true,
+            job_id: Some(job_id),
+            error: None,
+        }
     }
     pub fn rejected(error: impl Into<String>) -> Self {
-        Self { ok: false, job_id: None, error: Some(error.into()) }
+        Self {
+            ok: false,
+            job_id: None,
+            error: Some(error.into()),
+        }
     }
+}
+
+/// Persisted yt-dlp choices carried over the controller boundary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MediaOptions {
+    pub write_subs: bool,
+    pub sub_langs: String,
+    pub embed_subs: bool,
+    pub audio_only: bool,
+    pub audio_format: String,
+    pub embed_thumbnail: bool,
+}
+
+/// A shallow playlist entry selected by the user after a yt-dlp probe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistSelection {
+    pub url: String,
+    pub title: Option<String>,
+}
+
+/// One validated, atomic settings update from a native UI. Keeping the full
+/// draft in one request prevents a failed middle command from leaving half of
+/// the Settings drawer persisted.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SettingsUpdate {
+    pub proxy: String,
+    pub max_concurrent: u32,
+    pub split: u32,
+    pub connections: u32,
+    pub clipboard: bool,
+    pub theme: String,
+    pub auto_organize: bool,
+    pub prevent_duplicates: bool,
+    pub close_to_tray: bool,
+    pub autostart: bool,
+    pub handle_magnets: bool,
+    pub dht: bool,
+    pub sandbox: bool,
+    pub block_private: bool,
+    pub locale: String,
+    pub on_complete_action: String,
+    pub on_complete_confirmed: bool,
+    pub default_speed_limit: i64,
+}
+
+impl Default for SettingsUpdate {
+    fn default() -> Self {
+        Self {
+            proxy: String::new(),
+            max_concurrent: 5,
+            split: 16,
+            connections: 16,
+            clipboard: false,
+            theme: "system".into(),
+            auto_organize: true,
+            prevent_duplicates: true,
+            close_to_tray: true,
+            autostart: false,
+            handle_magnets: true,
+            dht: true,
+            sandbox: false,
+            block_private: false,
+            locale: "system".into(),
+            on_complete_action: "none".into(),
+            on_complete_confirmed: false,
+            default_speed_limit: 0,
+        }
+    }
+}
+
+/// Complete command surface for the native UI. Arguments stay strongly typed;
+/// successful results are serialized domain objects because those types live
+/// in `minidl-core`, which already depends on this small IPC crate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "command", content = "args", rename_all = "snake_case")]
+pub enum ControlCommand {
+    Ping,
+    Show,
+    Hide,
+    Quit,
+    Snapshot,
+    Subscribe,
+    IngestUrl {
+        url: String,
+        checksum: Option<String>,
+    },
+    IngestFile {
+        path: String,
+        kind: DownloadKind,
+    },
+    ListDownloads {
+        status: Option<String>,
+    },
+    Pause {
+        id: i64,
+    },
+    Resume {
+        id: i64,
+    },
+    Retry {
+        id: i64,
+    },
+    Remove {
+        id: i64,
+        delete_files: bool,
+    },
+    RemoveCompleted,
+    RemoveFailed,
+    PauseAll,
+    ResumeAll,
+    MoveInQueue {
+        id: i64,
+        direction: String,
+    },
+    SetQueuePosition {
+        id: i64,
+        position: i64,
+    },
+    SetGlobalSpeed {
+        download: i64,
+        upload: i64,
+    },
+    SetDownloadSpeed {
+        id: i64,
+        limit: i64,
+    },
+    OpenFile {
+        id: i64,
+    },
+    OpenContainingFolder {
+        id: i64,
+    },
+    ProbeMedia {
+        url: String,
+        playlist: bool,
+    },
+    AddMedia {
+        url: String,
+        format_id: Option<String>,
+        options: Option<MediaOptions>,
+    },
+    AddPlaylist {
+        entries: Vec<PlaylistSelection>,
+        package_name: String,
+        quality: Option<String>,
+        options: Option<MediaOptions>,
+    },
+    GrabLinks {
+        text: String,
+    },
+    AddLinks {
+        urls: Vec<String>,
+        package_name: Option<String>,
+    },
+    ListPackages,
+    ListCategories,
+    SaveCategory {
+        name: String,
+        dir: String,
+        rules: String,
+        priority: i64,
+    },
+    MoveCategory {
+        id: i64,
+        direction: i32,
+    },
+    DeleteCategory {
+        id: i64,
+    },
+    RestoreDefaultCategories,
+    ResetCategoryDir {
+        id: i64,
+    },
+    GetDownloadDetails {
+        id: i64,
+    },
+    SetTorrentFiles {
+        id: i64,
+        indices: Vec<u32>,
+    },
+    ScheduleDownload {
+        id: i64,
+        start_at: Option<i64>,
+    },
+    ListSchedules,
+    SaveSchedule {
+        id: Option<i64>,
+        name: Option<String>,
+        action: String,
+        days_mask: i64,
+        at_minute: i64,
+        speed_limit: Option<i64>,
+        enabled: bool,
+    },
+    DeleteSchedule {
+        id: i64,
+    },
+    GetSetting {
+        key: String,
+    },
+    SetSetting {
+        key: String,
+        value: String,
+    },
+    GetSystemLocale,
+    GetConnectorStatus,
+    SetHandleMagnets {
+        enabled: bool,
+    },
+    SetClipboardWatch {
+        enabled: bool,
+    },
+    GetEngineDefaults,
+    SetEngineDefaults {
+        split: u32,
+        connections: u32,
+    },
+    GetMaxConcurrent,
+    SetMaxConcurrent {
+        value: u32,
+    },
+    ApplyProxy {
+        value: String,
+    },
+    ApplySettings {
+        settings: SettingsUpdate,
+    },
+    CheckUpdate,
+    InstallUpdate {
+        asset_url: Option<String>,
+        page_url: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlRequest {
+    pub protocol_version: u32,
+    pub request_id: u64,
+    pub command: ControlCommand,
+}
+
+impl ControlRequest {
+    pub fn new(request_id: u64, command: ControlCommand) -> Self {
+        Self {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            command,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlError {
+    pub kind: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlReply {
+    pub request_id: u64,
+    pub result: Option<serde_json::Value>,
+    pub error: Option<ControlError>,
+}
+
+impl ControlReply {
+    pub fn success(request_id: u64, result: impl Serialize) -> Self {
+        Self {
+            request_id,
+            result: serde_json::to_value(result).ok(),
+            error: None,
+        }
+    }
+
+    pub fn failure(request_id: u64, kind: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            request_id,
+            result: None,
+            error: Some(ControlError {
+                kind: kind.into(),
+                message: message.into(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ControlEvent {
+    pub sequence: u64,
+    pub event: String,
+    pub payload: serde_json::Value,
 }
 
 /// Path of the Unix domain socket the app listens on and the native host
@@ -274,9 +580,27 @@ pub fn bridge_socket_path() -> PathBuf {
     }
 }
 
+/// Build a stable, opaque namespace for Windows pipes from the per-user data
+/// directory. Named-pipe names are machine-global, so a fixed name prevents
+/// two simultaneously signed-in users from running the app. The native host
+/// and controller independently resolve the same Known Folder path.
+#[cfg(windows)]
+fn windows_pipe_name(kind: &str) -> String {
+    // FNV-1a is intentionally implemented here instead of using
+    // `DefaultHasher`, whose output is not a stability guarantee. This is a
+    // namespace discriminator, not a secret or a cryptographic credential.
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in data_dir().to_string_lossy().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("minidownloader-{kind}-{hash:016x}")
+}
+
 /// Cross-platform local-socket name for the bridge: a filesystem Unix domain
-/// socket on Unix (user-private, chmod'able), the `\\.\pipe\minidownloader-bridge`
-/// named pipe on Windows (per-user DACL by default).
+/// socket on Unix (user-private and mode 0600), or a per-user namespaced Windows
+/// named pipe. Windows clients open the duplex pipe read/write and remote pipe
+/// clients are rejected by the transport.
 pub fn bridge_socket_name() -> std::io::Result<interprocess::local_socket::Name<'static>> {
     #[cfg(unix)]
     {
@@ -286,7 +610,33 @@ pub fn bridge_socket_name() -> std::io::Result<interprocess::local_socket::Name<
     #[cfg(windows)]
     {
         use interprocess::local_socket::{GenericNamespaced, ToNsName};
-        String::from("minidownloader-bridge").to_ns_name::<GenericNamespaced>()
+        windows_pipe_name("bridge").to_ns_name::<GenericNamespaced>()
+    }
+}
+
+/// Private socket used by native UI clients and later invocations. It is kept
+/// separate from the browser bridge so the stable extension protocol remains
+/// byte-for-byte compatible.
+#[cfg(unix)]
+pub fn control_socket_path() -> PathBuf {
+    match std::env::var_os("XDG_RUNTIME_DIR") {
+        Some(rt) => PathBuf::from(rt)
+            .join("minidownloader")
+            .join("control.sock"),
+        None => data_dir().join("control.sock"),
+    }
+}
+
+pub fn control_socket_name() -> std::io::Result<interprocess::local_socket::Name<'static>> {
+    #[cfg(unix)]
+    {
+        use interprocess::local_socket::{GenericFilePath, ToFsName};
+        control_socket_path().to_fs_name::<GenericFilePath>()
+    }
+    #[cfg(windows)]
+    {
+        use interprocess::local_socket::{GenericNamespaced, ToNsName};
+        windows_pipe_name("control").to_ns_name::<GenericNamespaced>()
     }
 }
 
@@ -294,13 +644,31 @@ pub fn bridge_socket_name() -> std::io::Result<interprocess::local_socket::Name<
 /// `%APPDATA%\minidownloader` on Windows). Shared by the app and the native
 /// host so the host can find where the app binary lives.
 pub fn data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| {
-            dirs::home_dir()
-                .unwrap_or_else(|| PathBuf::from("/tmp"))
-                .join(".local/share")
-        })
-        .join("minidownloader")
+    if let Some(directory) = dirs::data_dir() {
+        return directory.join("minidownloader");
+    }
+    if let Some(home) = dirs::home_dir() {
+        return home.join(".local/share/minidownloader");
+    }
+    #[cfg(unix)]
+    {
+        // A stable UID-specific fallback lets the app and native host rendezvous
+        // without sharing a predictable world-writable `/tmp/minidownloader`.
+        // Callers create it as 0700 and fail if another user pre-created it.
+        let uid = unsafe { libc::geteuid() };
+        std::env::temp_dir().join(format!("minidownloader-{uid}"))
+    }
+    #[cfg(not(unix))]
+    {
+        // Known Folders are available on supported Windows versions. Retain a
+        // stable last resort for restricted test/service environments.
+        let user = std::env::var("USERNAME")
+            .unwrap_or_else(|_| "current-user".into())
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || *character == '-')
+            .collect::<String>();
+        std::env::temp_dir().join(format!("minidownloader-{user}"))
+    }
 }
 
 /// File the app writes with the absolute path to its own executable, so the
@@ -357,5 +725,45 @@ mod tests {
         assert!(req.presence);
         assert_eq!(req.browser_family, Some(BrowserFamily::Chromium));
         assert!(!req.ping);
+    }
+
+    #[test]
+    fn control_request_round_trips_with_typed_arguments() {
+        let request = ControlRequest::new(
+            42,
+            ControlCommand::SetDownloadSpeed {
+                id: 9,
+                limit: 1_000_000,
+            },
+        );
+        let bytes = serde_json::to_vec(&request).unwrap();
+        let decoded: ControlRequest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(decoded.protocol_version, CONTROL_PROTOCOL_VERSION);
+        assert_eq!(decoded.request_id, 42);
+        assert!(matches!(
+            decoded.command,
+            ControlCommand::SetDownloadSpeed {
+                id: 9,
+                limit: 1_000_000
+            }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_socket_is_distinct_and_private_by_location() {
+        assert!(control_socket_path().ends_with("minidownloader/control.sock"));
+        assert_ne!(control_socket_path(), bridge_socket_path());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_pipe_names_are_stable_distinct_and_user_namespaced() {
+        let bridge = windows_pipe_name("bridge");
+        let control = windows_pipe_name("control");
+        assert_eq!(bridge, windows_pipe_name("bridge"));
+        assert_ne!(bridge, control);
+        assert!(bridge.starts_with("minidownloader-bridge-"));
+        assert_eq!(bridge.len(), "minidownloader-bridge-".len() + 16);
     }
 }

@@ -1,0 +1,858 @@
+export global Theme {
+    in-out property <bool> dark: true;
+
+    out property <color> canvas: dark ? #191919 : #f7f6f3;
+    out property <color> surface: dark ? #212121 : #ffffff;
+    out property <color> surface-2: dark ? #262626 : #f2f1ed;
+    out property <color> border: dark ? #303030 : #eaeaea;
+    out property <color> border-strong: dark ? #424242 : #dcdcd8;
+    out property <color> text: dark ? #e6e4e0 : #2f3437;
+    out property <color> strong: dark ? #f5f4f2 : #111111;
+    out property <color> muted: dark ? #9b9a97 : #787774;
+    out property <color> ink: dark ? #f2f1ee : #111111;
+    out property <color> ink-fg: dark ? #191919 : #ffffff;
+    out property <color> ink-hover: dark ? #deddd9 : #2b2b2b;
+    out property <color> ink-pressed: dark ? #c5c3bd : #444444;
+    out property <color> surface-pressed: dark ? #3a3a3a : #deddd8;
+    out property <color> active-bg: dark ? #273746 : #e1f3fe;
+    out property <color> active-fg: dark ? #86bdec : #1f6c9f;
+    out property <color> complete-bg: dark ? #26382a : #edf3ec;
+    out property <color> complete-fg: dark ? #84cb8e : #346538;
+    out property <color> error-bg: dark ? #45282a : #fdebec;
+    out property <color> error-fg: dark ? #ed9f9f : #9f2f2d;
+    out property <color> paused-bg: dark ? #403823 : #fbf3db;
+    out property <color> paused-fg: dark ? #d9bd70 : #956400;
+    out property <color> queued-bg: dark ? #2b2b2b : #efefee;
+    out property <color> queued-fg: dark ? #a6a5a2 : #6b6b69;
+}
+
+export component AppIcon inherits Path {
+    in property <string> name;
+    in property <brush> color: Theme.muted;
+
+    width: 18px;
+    height: 18px;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    fill: transparent;
+    stroke: root.color;
+    stroke-width: 1.75px;
+    stroke-line-cap: LineCap.round;
+    stroke-line-join: LineJoin.round;
+    commands: name == "add" ? "M12 5 L12 19 M5 12 L19 12" :
+        name == "heart" ? "M12 20 C10.8 19.2 3 14.5 3 9.2 C3 6.5 5 4.5 7.7 4.5 C9.4 4.5 11 5.4 12 6.8 C13 5.4 14.6 4.5 16.3 4.5 C19 4.5 21 6.5 21 9.2 C21 14.5 13.2 19.2 12 20 Z" :
+        name == "close" ? "M6 6 L18 18 M18 6 L6 18" :
+        name == "file" ? "M6 3 L14 3 L18 7 L18 21 L6 21 Z M14 3 L14 7 L18 7" :
+        name == "video" ? "M5 6 L14 6 A2 2 0 0 1 16 8 L16 16 A2 2 0 0 1 14 18 L5 18 A2 2 0 0 1 3 16 L3 8 A2 2 0 0 1 5 6 Z M16 10 L21 7 L21 17 L16 14 Z" :
+        name == "link" ? "M9.5 14.5 L14.5 9.5 M11 7 L12 6 A4 4 0 0 1 18 12 L17 13 M13 17 L12 18 A4 4 0 0 1 6 12 L7 11" :
+        name == "gear" ? "M15.2 12 A3.2 3.2 0 1 1 8.8 12 A3.2 3.2 0 1 1 15.2 12 M12 3 L12 5.2 M12 18.8 L12 21 M3 12 L5.2 12 M18.8 12 L21 12 M5.6 5.6 L7.2 7.2 M16.8 16.8 L18.4 18.4 M18.4 5.6 L16.8 7.2 M7.2 16.8 L5.6 18.4" :
+        name == "gauge" ? "M4 15 A8 8 0 0 1 20 15 M12 15 L16.5 11 M13.1 15 A1.1 1.1 0 1 1 10.9 15 A1.1 1.1 0 1 1 13.1 15" :
+        name == "play" ? "M8 5.5 L8 18.5 L18.5 12 Z" :
+        name == "pause" ? "M9 5 L9 19 M15 5 L15 19" :
+        name == "folder" ? "M3 7 A2 2 0 0 1 5 5 L8.5 5 L10.5 7 L19 7 A2 2 0 0 1 21 9 L21 17 A2 2 0 0 1 19 19 L5 19 A2 2 0 0 1 3 17 Z" :
+        name == "retry" ? "M20 12 A8 8 0 1 1 17.7 6.4 M20 4 L20 8 L16 8" :
+        name == "trash" ? "M4 7 L20 7 M9 7 L9 5 A1 1 0 0 1 10 4 L14 4 A1 1 0 0 1 15 5 L15 7 M6.5 7 L7.5 19.5 A1 1 0 0 0 8.5 20.4 L15.5 20.4 A1 1 0 0 0 16.5 19.5 L18 7" :
+        name == "search" ? "M17 11 A6 6 0 1 1 5 11 A6 6 0 1 1 17 11 M15.4 15.4 L20 20" :
+        name == "download" ? "M12 4 L12 15 M7 11 L12 16 L17 11 M5 20 L19 20" :
+        name == "magnet" ? "M6 4 L6 11 A6 6 0 0 0 18 11 L18 4 M6 8 L10 8 M14 8 L18 8" :
+        name == "check" ? "M5 13 L9 17 L19 7" :
+        name == "warning" ? "M12 4 L21 20 L3 20 Z M12 10 L12 14.5 M12 17.6 L12.01 17.6" :
+        name == "inbox" ? "M4 13 L6.2 4.8 A2 2 0 0 1 8.1 3.3 L15.9 3.3 A2 2 0 0 1 17.8 4.8 L20 13 L20 18 A2 2 0 0 1 18 20 L6 20 A2 2 0 0 1 4 18 Z M4 13 L8.5 13 L9.7 15.2 L14.3 15.2 L15.5 13 L20 13" :
+        name == "list" ? "M8 6 L21 6 M8 12 L21 12 M8 18 L21 18 M3.5 6 L3.51 6 M3.5 12 L3.51 12 M3.5 18 L3.51 18" :
+        name == "clock" ? "M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M12 8 L12 12.2 L14.8 14" :
+        name == "help" ? "M20.5 12 A8.5 8.5 0 1 1 3.5 12 A8.5 8.5 0 1 1 20.5 12 M9.6 9.5 A2.4 2.4 0 0 1 14.2 10.4 C14.2 12 12 12.4 12 13.8 M12 17.2 L12.01 17.2" :
+        name == "chevron-up" ? "M6 15 L12 9 L18 15" :
+        name == "chevron-down" ? "M6 9 L12 15 L18 9" :
+        name == "chevron-right" ? "M9 6 L15 12 L9 18" :
+        "";
+}
+
+export component IconSlot inherits Rectangle {
+    in property <string> name;
+    in property <brush> icon-color: Theme.muted;
+    in property <length> size: 16px;
+
+    width: root.size;
+    horizontal-stretch: 0;
+    background: transparent;
+    AppIcon {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: root.size;
+        height: root.size;
+        name: root.name;
+        color: root.icon-color;
+    }
+}
+
+export component UiButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon: "";
+    in property <bool> primary: false;
+    in property <bool> ghost: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    in property <bool> compact: false;
+    callback clicked;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.text;
+    accessible-action-default => { if root.enabled { touch.clicked(); } }
+
+    min-width: button-layout.min-width;
+    preferred-width: button-layout.min-width;
+    height: root.compact ? 34px : 38px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: focus.has-focus ? 2px : root.ghost && !touch.has-hover && !touch.pressed ? 0px : 1px;
+    border-color: focus.has-focus ? Theme.active-fg : root.primary ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.border-strong : Theme.border;
+    background: !root.enabled ? Theme.surface-2 : root.primary ?
+        (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 :
+        root.ghost ? transparent : Theme.surface;
+    opacity: root.enabled ? 1 : 0.55;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+
+    button-layout := HorizontalLayout {
+        y: touch.pressed ? 1px : 0px;
+        height: parent.height - self.y;
+        padding-left: root.compact ? 10px : 12px;
+        padding-right: root.compact ? 10px : 12px;
+        spacing: root.compact ? 6px : 7px;
+        alignment: center;
+        if root.icon != "": IconSlot {
+            name: root.icon;
+            size: root.compact ? 14px : 16px;
+            icon-color: root.primary ? Theme.ink-fg : root.danger ? Theme.error-fg : Theme.muted;
+        }
+        Text {
+            text: root.text;
+            color: root.primary ? Theme.ink-fg : root.danger ? Theme.error-fg : Theme.text;
+            font-size: root.compact ? 12px : 13px;
+            font-weight: root.primary ? 600 : 400;
+            vertical-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> label: icon;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    callback clicked;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-enabled: root.enabled;
+    accessible-label: root.label;
+    accessible-action-default => { if root.enabled { touch.clicked(); } }
+
+    width: 32px;
+    height: 32px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: focus.has-focus ? 2px : touch.has-hover || touch.pressed ? 1px : 0px;
+    border-color: focus.has-focus ? Theme.active-fg : touch.pressed ? Theme.border-strong : Theme.border;
+    background: touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 : transparent;
+    opacity: root.enabled ? 1 : 0.45;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+    AppIcon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0px);
+        name: root.icon;
+        width: 17px;
+        height: 17px;
+        color: root.danger && touch.has-hover ? Theme.error-fg : touch.has-hover ? Theme.strong : Theme.muted;
+    }
+    Tooltip {
+        text: @markdown("\{root.label}");
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component UiField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <string> icon: "";
+    in property <bool> enabled: true;
+    out property <bool> input-focused: input.has-focus;
+    callback accepted;
+    callback edited;
+    callback committed;
+    callback focus-input;
+
+    forward-focus: input;
+
+    min-width: 120px;
+    height: 38px;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-strong : Theme.border;
+    background: Theme.surface;
+    clip: true;
+
+    if root.icon != "": AppIcon {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        name: root.icon;
+        color: Theme.muted;
+    }
+    Text {
+        x: root.icon == "" ? 11px : 34px;
+        width: parent.width - self.x - 10px;
+        height: parent.height;
+        text: root.text == "" ? root.placeholder : "";
+        color: Theme.muted;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    input := TextInput {
+        x: root.icon == "" ? 11px : 34px;
+        width: parent.width - self.x - 10px;
+        height: parent.height;
+        text <=> root.text;
+        enabled: root.enabled;
+        single-line: true;
+        vertical-alignment: center;
+        color: Theme.text;
+        font-size: 13px;
+        selection-background-color: Theme.active-fg;
+        selection-foreground-color: Theme.canvas;
+        accepted => { root.accepted(); root.committed(); }
+        edited => { root.edited(); }
+        changed has-focus => {
+            if (!self.has-focus) {
+                root.committed();
+            }
+        }
+    }
+    focus-input => { input.focus(); }
+}
+
+export component UiTextArea inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    callback edited;
+
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-strong : Theme.border;
+    background: Theme.surface;
+    clip: true;
+    Text {
+        x: 11px;
+        y: 9px;
+        width: parent.width - 22px;
+        text: root.text == "" ? root.placeholder : "";
+        color: Theme.muted;
+        font-size: 13px;
+        wrap: word-wrap;
+    }
+    input := TextInput {
+        x: 11px;
+        y: 8px;
+        width: parent.width - 22px;
+        height: parent.height - 16px;
+        text <=> root.text;
+        color: Theme.text;
+        font-size: 13px;
+        wrap: word-wrap;
+        selection-background-color: Theme.active-fg;
+        selection-foreground-color: Theme.canvas;
+        edited => { root.edited(); }
+    }
+}
+
+export component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <string> count: "";
+    in property <bool> selected: false;
+    callback clicked;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text + " " + root.count;
+    accessible-action-default => { touch.clicked(); }
+
+    height: 34px;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Theme.active-fg;
+    background: touch.pressed ? Theme.surface-pressed : root.selected || touch.has-hover ? Theme.surface-2 : transparent;
+    animate background { duration: 90ms; easing: ease-out; }
+    nav-layout := HorizontalLayout {
+        y: touch.pressed ? 1px : 0px;
+        height: parent.height - self.y;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 9px;
+        IconSlot { name: root.icon; size: 16px; icon-color: root.selected ? Theme.strong : Theme.muted; }
+        Text { text: root.text; color: root.selected ? Theme.strong : Theme.text; font-size: 13px; font-weight: root.selected ? 600 : 400; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+        Text { text: root.count; color: Theme.muted; font-family: "Noto Sans Mono"; font-size: 10px; horizontal-alignment: right; vertical-alignment: center; }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component UiCheckBox inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <string> text: "";
+    in property <string> label: root.text;
+    callback toggled(bool);
+    forward-focus: focus;
+    accessible-role: checkbox;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { touch.clicked(); }
+
+    min-height: 26px;
+    min-width: 23px + check-label.preferred-width;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    background: transparent;
+    check-indicator := Rectangle {
+        x: 0px;
+        y: (parent.height - self.height) / 2;
+        width: 15px;
+        height: 15px;
+        border-radius: 3px;
+        border-width: focus.has-focus ? 2px : 1px;
+        border-color: focus.has-focus ? Theme.active-fg : root.checked ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) : Theme.border-strong;
+        background: root.checked ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+            touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 : transparent;
+        animate background, border-color { duration: 90ms; easing: ease-out; }
+        if root.checked: AppIcon { x: 2px; y: 2px; width: 11px; height: 11px; name: "check"; color: Theme.ink-fg; }
+    }
+    check-label := Text {
+        x: 23px;
+        width: parent.width - self.x;
+        height: parent.height;
+        text: root.text;
+        color: Theme.text;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; root.toggled(root.checked); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component UiSwitch inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <string> label: "";
+    callback toggled(bool);
+    forward-focus: focus;
+    accessible-role: checkbox;
+    accessible-label: root.label;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { touch.clicked(); }
+
+    width: 40px;
+    height: 22px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 11px;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.active-fg : root.checked ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) : Theme.border-strong;
+    background: root.checked ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.border : Theme.surface-2;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        y: 3px + (touch.pressed ? 1px : 0px);
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: root.checked ? Theme.ink-fg : Theme.muted;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.checked = !root.checked; root.toggled(root.checked); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component UiNumberField inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 2147483647;
+    in property <string> label: "";
+    callback changed(int);
+    private property <string> edit-text: root.value;
+
+    function commit() {
+        if (root.edit-text.is-float()) {
+            root.value = max(root.minimum, min(root.maximum, Math.round(root.edit-text.to-float())));
+            root.changed(root.value);
+        }
+        root.edit-text = root.value;
+    }
+
+    width: 110px;
+    height: 38px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-strong : Theme.border;
+    background: Theme.surface;
+    clip: true;
+
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text <=> root.edit-text;
+        single-line: true;
+        input-type: InputType.number;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        color: Theme.text;
+        font-family: "Noto Sans Mono";
+        font-size: 12px;
+        selection-background-color: Theme.active-fg;
+        selection-foreground-color: Theme.canvas;
+        accessible-label: root.label;
+        accepted => { root.commit(); }
+        changed has-focus => {
+            if (!self.has-focus) {
+                root.commit();
+            }
+        }
+    }
+}
+
+export component UiDecimalField inherits Rectangle {
+    in-out property <float> value: 0;
+    in property <float> minimum: 0;
+    in property <float> maximum: 2147483647;
+    in property <string> label: "";
+    callback changed(float);
+    private property <string> edit-text: root.value;
+
+    function commit() {
+        if (root.edit-text.is-float()) {
+            root.value = max(root.minimum, min(root.maximum, root.edit-text.to-float()));
+            root.changed(root.value);
+        }
+        root.edit-text = root.value;
+    }
+
+    width: 110px;
+    height: 38px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.border-strong : Theme.border;
+    background: Theme.surface;
+    clip: true;
+
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        text <=> root.edit-text;
+        single-line: true;
+        input-type: InputType.number;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        color: Theme.text;
+        font-family: "Noto Sans Mono";
+        font-size: 12px;
+        selection-background-color: Theme.active-fg;
+        selection-foreground-color: Theme.canvas;
+        accessible-label: root.label;
+        accepted => { root.commit(); }
+        changed has-focus => {
+            if (!self.has-focus) {
+                root.commit();
+            }
+        }
+    }
+}
+
+export component UiSlider inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <string> label: "";
+    callback changed(int);
+    forward-focus: focus;
+    accessible-role: AccessibleRole.slider;
+    accessible-label: root.label;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-set-value(v) => {
+        if v.is-float() {
+            root.value = max(root.minimum, min(root.maximum, Math.round(v.to-float())));
+            root.changed(root.value);
+        }
+    }
+    accessible-action-increment => {
+        root.value = min(root.maximum, root.value + root.step);
+        root.changed(root.value);
+    }
+    accessible-action-decrement => {
+        root.value = max(root.minimum, root.value - root.step);
+        root.changed(root.value);
+    }
+
+    height: 26px;
+    vertical-stretch: 0;
+    background: transparent;
+
+    slider := TouchArea {
+        mouse-cursor: pointer;
+
+        function update-value() {
+            root.value = max(root.minimum, min(root.maximum,
+                Math.round(root.minimum + (root.maximum - root.minimum) * self.mouse-x / self.width)));
+        }
+
+        Rectangle {
+            x: 7px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 14px;
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.border-strong;
+            Rectangle {
+                x: 0px;
+                width: parent.width * (root.value - root.minimum) / max(1, root.maximum - root.minimum);
+                height: parent.height;
+                border-radius: parent.border-radius;
+                background: Theme.strong;
+            }
+        }
+        Rectangle {
+            x: 1px + (parent.width - self.width - 2px) * (root.value - root.minimum) / max(1, root.maximum - root.minimum);
+            y: (parent.height - self.height) / 2;
+            width: 14px;
+            height: 14px;
+            border-radius: 7px;
+            border-width: focus.has-focus ? 3px : 2px;
+            border-color: focus.has-focus ? Theme.active-fg : Theme.strong;
+            background: Theme.canvas;
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                focus.focus();
+                self.update-value();
+            } else if (event.kind == PointerEventKind.up) {
+                root.changed(root.value);
+            }
+        }
+        moved => { self.update-value(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.RightArrow || event.text == Key.UpArrow {
+                root.value = min(root.maximum, root.value + root.step);
+                root.changed(root.value);
+                return accept;
+            }
+            if event.text == Key.LeftArrow || event.text == Key.DownArrow {
+                root.value = max(root.minimum, root.value - root.step);
+                root.changed(root.value);
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.value = root.minimum;
+                root.changed(root.value);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.value = root.maximum;
+                root.changed(root.value);
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component SettingsTab inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-checked: root.selected;
+    accessible-action-default => { touch.clicked(); }
+
+    height: 31px;
+    min-width: 54px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    border-radius: 6px;
+    border-width: focus.has-focus ? 2px : root.selected ? 1px : 0px;
+    border-color: focus.has-focus ? Theme.active-fg : root.selected ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.border-strong : transparent;
+    background: root.selected ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 : transparent;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+    Text {
+        x: 5px;
+        y: touch.pressed ? 1px : 0px;
+        width: parent.width - 10px;
+        height: parent.height - self.y;
+        text: root.text;
+        color: root.selected ? Theme.ink-fg : touch.has-hover ? Theme.strong : Theme.muted;
+        font-size: 10px;
+        font-weight: root.selected ? 600 : 500;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component UiStepper inherits Rectangle {
+    in-out property <int> value: 0;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <string> label: "";
+    callback changed(int);
+
+    width: 116px;
+    height: 38px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.surface;
+    clip: true;
+
+    Rectangle {
+        x: 33px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+    Rectangle {
+        x: parent.width - 34px;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border;
+    }
+    Text {
+        x: 34px;
+        width: parent.width - 68px;
+        height: parent.height;
+        text: root.value;
+        color: Theme.text;
+        font-family: "Noto Sans Mono";
+        font-size: 11px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Rectangle {
+        x: 0px;
+        width: 33px;
+        height: parent.height;
+        background: decrement.pressed ? Theme.surface-pressed : decrement.has-hover ? Theme.surface-2 : transparent;
+        animate background { duration: 90ms; easing: ease-out; }
+        Text { y: decrement.pressed ? 1px : 0px; width: parent.width; height: parent.height - self.y; text: "−"; color: Theme.muted; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
+        decrement := TouchArea {
+            mouse-cursor: pointer;
+            accessible-role: button;
+            accessible-label: "Decrease " + root.label;
+            clicked => {
+                root.value = max(root.minimum, root.value - root.step);
+                root.changed(root.value);
+            }
+        }
+    }
+    Rectangle {
+        x: parent.width - 33px;
+        width: 33px;
+        height: parent.height;
+        background: increment.pressed ? Theme.surface-pressed : increment.has-hover ? Theme.surface-2 : transparent;
+        animate background { duration: 90ms; easing: ease-out; }
+        Text { y: increment.pressed ? 1px : 0px; width: parent.width; height: parent.height - self.y; text: "+"; color: Theme.muted; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; }
+        increment := TouchArea {
+            mouse-cursor: pointer;
+            accessible-role: button;
+            accessible-label: "Increase " + root.label;
+            clicked => {
+                root.value = min(root.maximum, root.value + root.step);
+                root.changed(root.value);
+            }
+        }
+    }
+}
+
+export component OnboardCard inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    callback clicked;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { touch.clicked(); }
+
+    min-width: 206px;
+    max-width: 206px;
+    min-height: 85px;
+    max-height: 85px;
+    border-radius: 10px;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.active-fg : touch.pressed || touch.has-hover ? Theme.border-strong : Theme.border;
+    background: touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 : Theme.surface;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+    card-layout := VerticalLayout {
+        y: touch.pressed ? 1px : 0px;
+        height: parent.height - self.y;
+        padding: 12px;
+        spacing: 7px;
+        alignment: center;
+        Rectangle {
+            height: 20px;
+            horizontal-stretch: 1;
+            AppIcon {
+                x: (parent.width - self.width) / 2;
+                width: 20px;
+                height: 20px;
+                name: root.icon;
+                color: Theme.muted;
+            }
+        }
+        Text {
+            text: root.text;
+            color: Theme.text;
+            font-size: 13px;
+            horizontal-stretch: 1;
+            horizontal-alignment: center;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component SectionLabel inherits Text {
+    text: "SECTION";
+    color: Theme.muted;
+    font-family: "Noto Sans Mono";
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.4px;
+    vertical-alignment: center;
+}

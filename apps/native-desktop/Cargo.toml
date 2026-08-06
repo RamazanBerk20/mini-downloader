@@ -1,0 +1,38 @@
+[package]
+name = "minidl-native-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Low-memory native Mini Downloader desktop shell"
+
+[[bin]]
+name = "mini-downloader"
+path = "src/main.rs"
+
+[dependencies]
+minidl-app = { path = "../../crates/minidl-app" }
+minidl-core = { path = "../../crates/minidl-core" }
+minidl-ipc = { path = "../../crates/minidl-ipc" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "process", "signal"] }
+slint = { version = "1.17.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "accessibility", "compat-1-2", "unstable-winit-030"] }
+notify-rust = "4"
+sys-locale = "0.3"
+url = "2"
+arboard = { version = "3", default-features = false }
+open = "5"
+rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Keep the D-Bus stack on async-io. Mixing zbus' Tokio and async-io features in
+# this single dual-mode binary breaks AccessKit's dedicated executor thread.
+ksni = { version = "0.3.6", default-features = false, features = ["async-io"] }
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.24"
+windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+png = "0.18"
+slint-build = "1.17.1"

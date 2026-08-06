@@ -1,56 +1,48 @@
 #!/usr/bin/env bash
-# Mini Downloader dev environment setup — CachyOS / Arch-family
-# Installs everything needed to build the Rust+Tauri app, the aria2/yt-dlp/ffmpeg
-# engine, and the Firefox extension tooling.
+# Mini Downloader native development setup for Arch-family distributions.
+# Review before running: this updates the system and installs packages.
 set -euo pipefail
 
-echo "==> System update"
+printf '==> Updating packages\n'
 sudo pacman -Syu --noconfirm
 
-echo "==> Base build tools + git"
-sudo pacman -S --needed --noconfirm base-devel git openssl curl wget file
-
-echo "==> Tauri v2 Linux dependencies"
-# Tray icon uses libayatana-appindicator (maintained). If a Tauri build later
-# complains about appindicator, swap for the AUR pkg: paru -S libappindicator-gtk3
+printf '==> Installing native build/runtime dependencies\n'
 sudo pacman -S --needed --noconfirm \
-  webkit2gtk-4.1 \
-  gtk3 \
-  librsvg \
-  libayatana-appindicator \
-  appmenu-gtk-module \
-  patchelf
+  base-devel \
+  git \
+  rustup \
+  pkgconf \
+  fontconfig \
+  libxkbcommon \
+  wayland \
+  libx11 \
+  libxcursor \
+  libxrandr \
+  libxi \
+  libxcb \
+  xdg-utils \
+  appstream \
+  desktop-file-utils \
+  shellcheck \
+  zip \
+  unzip \
+  aria2 \
+  ffmpeg \
+  yt-dlp
 
-echo "==> Download engine + media tools"
-sudo pacman -S --needed --noconfirm aria2 yt-dlp ffmpeg
+rustup toolchain install 1.97.1 --profile minimal --component clippy,rustfmt
 
-echo "==> Node toolchain (frontend)"
-sudo pacman -S --needed --noconfirm nodejs npm pnpm
-
-echo "==> Rust toolchain (rustup)"
-if ! command -v rustup >/dev/null 2>&1; then
-  sudo pacman -S --needed --noconfirm rustup
+if ! command -v cargo-audit >/dev/null 2>&1; then
+  cargo install cargo-audit --locked --version 0.22.2
 fi
-rustup default stable
-rustup update stable
+if ! command -v cargo-about >/dev/null 2>&1; then
+  cargo install cargo-about --locked --version 0.9.1 --features cli
+fi
 
-echo "==> Tauri CLI (cargo) + Firefox extension tooling (web-ext)"
-cargo install tauri-cli --version "^2" --locked
-sudo npm install -g web-ext
-
-echo "==> Git identity"
-git config --global user.name  "RamazanBerk20"
-git config --global user.email "ramazanberksirin@protonmail.com"
-git config --global init.defaultBranch main
-
-echo
-echo "==> Installed versions:"
+printf '\n==> Installed versions\n'
 rustc --version
 cargo --version
-node --version
-pnpm --version
 aria2c --version | head -1
 yt-dlp --version
 ffmpeg -version | head -1
-cargo tauri --version || true
-echo "==> Done. Dev environment ready."
+printf '==> Native development environment ready.\n'

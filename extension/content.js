@@ -10,10 +10,14 @@
     for (const el of document.querySelectorAll("video, audio")) {
       const src = el.currentSrc || el.src;
       if (src && !/^blob:|^data:/i.test(src)) urls.add(src);
+      if (urls.size >= 100) break;
     }
-    for (const s of document.querySelectorAll("source[src]")) {
-      const src = s.src;
-      if (src && !/^blob:|^data:/i.test(src)) urls.add(src);
+    if (urls.size < 100) {
+      for (const s of document.querySelectorAll("source[src]")) {
+        const src = s.src;
+        if (src && !/^blob:|^data:/i.test(src)) urls.add(src);
+        if (urls.size >= 100) break;
+      }
     }
     if (urls.size) {
       b.runtime.sendMessage({ type: "ldm-media", urls: [...urls] }).catch(() => {});
@@ -29,6 +33,7 @@
     if (msg.what === "images") {
       for (const img of document.images) {
         if (img.src && !/^data:/i.test(img.src)) urls.add(img.src);
+        if (urls.size >= 200) break;
       }
     } else {
       for (const a of document.querySelectorAll("a[href]")) {
@@ -36,6 +41,7 @@
           const u = new URL(a.href);
           if (/^https?:$/.test(u.protocol) && FILE_RE.test(u.pathname)) urls.add(u.href);
         } catch {}
+        if (urls.size >= 200) break;
       }
     }
     sendResponse([...urls]);
@@ -49,5 +55,10 @@
     clearTimeout(timer);
     timer = setTimeout(collect, 800);
   });
-  obs.observe(document.documentElement, { childList: true, subtree: true });
+  obs.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["src"],
+    childList: true,
+    subtree: true,
+  });
 })();

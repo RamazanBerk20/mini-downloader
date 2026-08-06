@@ -1,5 +1,7 @@
 const b = globalThis.browser || globalThis.chrome;
 const t = (k) => globalThis.ldmI18n.t(k);
+const { SIZE_UNITS, displaySize, preferredSizeUnit, sizeToBytes, validSizeUnit } =
+  globalThis.ldmOptionsHelpers;
 // Keep the manual bridge test on the same browser-family wire contract as the
 // background heartbeat and captured jobs. This matters for supported forks
 // whose native-host launch arguments do not identify the calling browser.
@@ -7,11 +9,11 @@ const BROWSER_FAMILY = typeof globalThis.browser !== "undefined" ? "firefox" : "
 const DEFAULTS = {
   enabled: true,
   minSize: 1048576,
+  minSizeUnit: "MB",
   disabledHosts: [],
   blacklistExts: [],
   lang: "",
 };
-const MIB = 1048576;
 
 // Manual language override choices; "" follows the browser's UI language.
 // Native names, deliberately not translated.
@@ -34,11 +36,16 @@ function setStatus(el, text, state) {
   el.className = "status" + (state ? " status-" + state : "");
 }
 
-// Live hint next to the raw-bytes input; storage stays bytes.
-function updateMibHint() {
-  const bytes = parseInt(document.getElementById("minSize").value, 10) || 0;
-  const mib = Math.round((bytes / MIB) * 100) / 100;
-  document.getElementById("minSizeMiB").textContent = "= " + mib + " MiB";
+function sizeInBytes() {
+  const input = document.getElementById("minSize");
+  const unit = document.getElementById("minSizeUnit").value;
+  const value = input.valueAsNumber;
+  return sizeToBytes(value, unit);
+}
+
+function updateSizeStep() {
+  const unit = document.getElementById("minSizeUnit").value;
+  document.getElementById("minSize").step = unit === "B" ? "1" : "0.1";
 }
 
 let savedLang = "";
@@ -61,22 +68,32 @@ async function load() {
   sel.value = cfg.lang || "";
   savedLang = cfg.lang || "";
   document.getElementById("enabled").checked = cfg.enabled;
-  document.getElementById("minSize").value = cfg.minSize;
+  const bytes = Math.max(0, Number(cfg.minSize) || 0);
+  const sizeUnit = validSizeUnit(cfg.minSizeUnit) ? cfg.minSizeUnit : preferredSizeUnit(bytes);
+  document.getElementById("minSizeUnit").value = sizeUnit;
+  document.getElementById("minSizeUnit").dataset.previous = sizeUnit;
+  document.getElementById("minSize").value = displaySize(bytes, sizeUnit);
+  updateSizeStep();
   document.getElementById("disabledHosts").value = (cfg.disabledHosts || []).join("\n");
   document.getElementById("blacklistExts").value = (cfg.blacklistExts || []).join(", ");
-  updateMibHint();
 }
 
 async function save() {
+  const minSize = sizeInBytes();
+  if (minSize === null) {
+    const input = document.getElementById("minSize");
+    input.focus();
+    input.reportValidity();
+    return;
+  }
   const lang = document.getElementById("lang").value;
   const cfg = {
     enabled: document.getElementById("enabled").checked,
-    minSize: parseInt(document.getElementById("minSize").value, 10) || 0,
-    disabledHosts: document
-      .getElementById("disabledHosts")
-      .value.split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean),
+    minSize,
+    minSizeUnit: document.getElementById("minSizeUnit").value,
+    disabledHosts: globalThis.ldmBackgroundHelpers.normalizeDisabledHosts(
+      document.getElementById("disabledHosts").value.split("\n"),
+    ),
     // Normalized: lowercase, no leading dot — matches background.js lookups.
     blacklistExts: document
       .getElementById("blacklistExts")
@@ -97,7 +114,15 @@ async function save() {
 }
 
 document.getElementById("save").addEventListener("click", save);
-document.getElementById("minSize").addEventListener("input", updateMibHint);
+document.getElementById("minSizeUnit").addEventListener("change", (event) => {
+  const input = document.getElementById("minSize");
+  const previousUnit = event.target.dataset.previous || DEFAULTS.minSizeUnit;
+  const value = input.valueAsNumber;
+  const bytes = Number.isFinite(value) && value >= 0 ? value * SIZE_UNITS[previousUnit] : 0;
+  input.value = displaySize(bytes, event.target.value);
+  event.target.dataset.previous = event.target.value;
+  updateSizeStep();
+});
 
 // Native-host health check: confirm the bridge reaches the running app.
 document.getElementById("test").addEventListener("click", async () => {

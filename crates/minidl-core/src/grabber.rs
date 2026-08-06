@@ -22,9 +22,9 @@ fn split_candidates(text: &str) -> impl Iterator<Item = &str> {
 /// Host part of a URL (empty when there is none). Shared with category host
 /// rules and default package naming.
 pub fn host_of(url: &str) -> String {
-    url.splitn(2, "://")
-        .nth(1)
-        .map(|rest| rest.split(['/', '?', '#']).next().unwrap_or("").to_string())
+    url::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
         .unwrap_or_default()
 }
 
@@ -55,6 +55,7 @@ fn classify(token: &str) -> Option<ParsedLink> {
 
 /// Max URLs a single `[a-b]` / `{a..b}` pattern may expand to (runaway guard).
 const MAX_EXPAND: u64 = 1000;
+const MAX_LINKS: usize = 5_000;
 
 /// Expand one numeric range pattern in a token: `file[001-050].jpg` or
 /// `file{1..50}.jpg`. Leading zeros in the bound set zero-padding width. A
@@ -66,7 +67,11 @@ fn expand_pattern(token: &str) -> Vec<String> {
         let inner = &token[lo + 1..hi];
         let (a, b) = inner.split_once(sep)?;
         let (start, end) = (a.parse::<u64>().ok()?, b.parse::<u64>().ok()?);
-        let (from, to) = if start <= end { (start, end) } else { (end, start) };
+        let (from, to) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
         if to - from + 1 > MAX_EXPAND {
             return None;
         }
@@ -76,7 +81,11 @@ fn expand_pattern(token: &str) -> Vec<String> {
             0
         };
         let (prefix, suffix) = (&token[..lo], &token[hi + 1..]);
-        Some((from..=to).map(|n| format!("{prefix}{n:0>pad$}{suffix}")).collect())
+        Some(
+            (from..=to)
+                .map(|n| format!("{prefix}{n:0>pad$}{suffix}"))
+                .collect(),
+        )
     };
     try_range('[', ']', "-")
         .or_else(|| try_range('{', '}', ".."))
@@ -93,6 +102,9 @@ pub fn parse_links(text: &str) -> Vec<ParsedLink> {
             if let Some(link) = classify(&expanded) {
                 if seen.insert(link.url.clone()) {
                     out.push(link);
+                    if out.len() == MAX_LINKS {
+                        return out;
+                    }
                 }
             }
         }
@@ -116,16 +128,28 @@ mod tests {
         let links = parse_links(text);
         let urls: Vec<_> = links.iter().map(|l| l.url.as_str()).collect();
         assert!(urls.contains(&"https://example.com/a.zip"));
-        assert_eq!(urls.iter().filter(|u| **u == "https://example.com/a.zip").count(), 1);
+        assert_eq!(
+            urls.iter()
+                .filter(|u| **u == "https://example.com/a.zip")
+                .count(),
+            1
+        );
         assert!(urls.contains(&"https://tracker.org/x.torrent"));
-        assert!(urls.iter().any(|u| u.starts_with("magnet:?xt=urn:btih:ABC123")));
+        assert!(urls
+            .iter()
+            .any(|u| u.starts_with("magnet:?xt=urn:btih:ABC123")));
         assert!(urls.contains(&"http://site.net/file.bin"));
         assert!(!urls.iter().any(|u| u.contains("foo.bar")));
 
         let torrent = links.iter().find(|l| l.url.ends_with(".torrent")).unwrap();
         assert_eq!(torrent.kind, "torrent");
-        assert_eq!(links.iter().find(|l| l.kind == "magnet").is_some(), true);
+        assert!(links.iter().any(|l| l.kind == "magnet"));
         assert_eq!(host_of("https://example.com/a.zip"), "example.com");
+        assert_eq!(
+            host_of("https://user:secret@example.com:8443/a"),
+            "example.com"
+        );
+        assert_eq!(host_of("https://[2001:db8::1]:8443/a"), "[2001:db8::1]");
     }
 
     #[test]

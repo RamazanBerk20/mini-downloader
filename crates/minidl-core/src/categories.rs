@@ -35,7 +35,11 @@ pub enum Rule {
 /// `[{"match":"ext"|"mime"|"host","values":[...]}]`.
 pub fn parse_rules(rules: &str) -> Vec<Rule> {
     if let Ok(values) = serde_json::from_str::<Vec<String>>(rules) {
-        return if values.is_empty() { Vec::new() } else { vec![Rule::Ext(values)] };
+        return if values.is_empty() {
+            Vec::new()
+        } else {
+            vec![Rule::Ext(values)]
+        };
     }
     #[derive(serde::Deserialize)]
     struct RuleObj {
@@ -67,7 +71,10 @@ fn normalize_host(host: &str) -> String {
         rest.split_once(']').map(|(addr, _)| addr).unwrap_or(rest)
     } else {
         // A bare colon-suffix is a port (IPv6 literals are always bracketed in URLs).
-        h.rsplit_once(':').map(|(name, _)| name).filter(|n| !n.is_empty()).unwrap_or(h)
+        h.rsplit_once(':')
+            .map(|(name, _)| name)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(h)
     };
     h.to_lowercase()
 }
@@ -118,7 +125,13 @@ mod tests {
     use super::*;
 
     fn cat(name: &str, rules: &str) -> Category {
-        Category { id: 1, name: name.into(), dir: format!("~/{name}"), rules: rules.into(), priority: 0 }
+        Category {
+            id: 1,
+            name: name.into(),
+            dir: format!("~/{name}"),
+            rules: rules.into(),
+            priority: 0,
+        }
     }
 
     #[test]
@@ -135,30 +148,72 @@ mod tests {
             cat("Video", r#"["mkv","mp4"]"#),
             cat("Archives", r#"["zip","gz"]"#),
         ];
-        assert_eq!(classify("clip.mp4", None, None, &cats).unwrap().name, "Video");
-        assert_eq!(classify("a.tar.gz", None, None, &cats).unwrap().name, "Archives");
+        assert_eq!(
+            classify("clip.mp4", None, None, &cats).unwrap().name,
+            "Video"
+        );
+        assert_eq!(
+            classify("a.tar.gz", None, None, &cats).unwrap().name,
+            "Archives"
+        );
         assert!(classify("readme", None, None, &cats).is_none());
     }
 
     #[test]
     fn classify_by_mime_prefix() {
         let cats = vec![cat("Video", r#"[{"match":"mime","values":["video/"]}]"#)];
-        assert_eq!(classify("noext", Some("video/mp4"), None, &cats).unwrap().name, "Video");
+        assert_eq!(
+            classify("noext", Some("video/mp4"), None, &cats)
+                .unwrap()
+                .name,
+            "Video"
+        );
         assert!(classify("noext", Some("audio/mpeg"), None, &cats).is_none());
         assert!(classify("noext", None, None, &cats).is_none());
     }
 
     #[test]
     fn classify_by_host_suffix() {
-        let cats = vec![cat("Work", r#"[{"match":"host","values":[".example.com","files.org"]}]"#)];
-        assert_eq!(classify("x", None, Some("cdn.example.com"), &cats).unwrap().name, "Work");
-        assert_eq!(classify("x", None, Some("example.com"), &cats).unwrap().name, "Work");
-        assert_eq!(classify("x", None, Some("files.org"), &cats).unwrap().name, "Work");
-        assert_eq!(classify("x", None, Some("dl.files.org"), &cats).unwrap().name, "Work");
+        let cats = vec![cat(
+            "Work",
+            r#"[{"match":"host","values":[".example.com","files.org"]}]"#,
+        )];
+        assert_eq!(
+            classify("x", None, Some("cdn.example.com"), &cats)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            classify("x", None, Some("example.com"), &cats)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            classify("x", None, Some("files.org"), &cats).unwrap().name,
+            "Work"
+        );
+        assert_eq!(
+            classify("x", None, Some("dl.files.org"), &cats)
+                .unwrap()
+                .name,
+            "Work"
+        );
         assert!(classify("x", None, Some("notexample.com"), &cats).is_none());
         // Ports and userinfo from the raw URL authority must not break matching.
-        assert_eq!(classify("x", None, Some("nas.example.com:8080"), &cats).unwrap().name, "Work");
-        assert_eq!(classify("x", None, Some("user@files.org:21"), &cats).unwrap().name, "Work");
+        assert_eq!(
+            classify("x", None, Some("nas.example.com:8080"), &cats)
+                .unwrap()
+                .name,
+            "Work"
+        );
+        assert_eq!(
+            classify("x", None, Some("user@files.org:21"), &cats)
+                .unwrap()
+                .name,
+            "Work"
+        );
     }
 
     #[test]
@@ -168,9 +223,15 @@ mod tests {
             r#"[{"match":"ext","values":["mp4"]},{"match":"mime","values":["video/"]}]"#,
         )];
         assert_eq!(classify("a.mp4", None, None, &cats).unwrap().name, "Media");
-        assert_eq!(classify("b", Some("video/webm"), None, &cats).unwrap().name, "Media");
+        assert_eq!(
+            classify("b", Some("video/webm"), None, &cats).unwrap().name,
+            "Media"
+        );
         // Legacy flat array still parses as one Ext rule.
-        assert_eq!(parse_rules(r#"["mp4"]"#), vec![Rule::Ext(vec!["mp4".into()])]);
+        assert_eq!(
+            parse_rules(r#"["mp4"]"#),
+            vec![Rule::Ext(vec!["mp4".into()])]
+        );
         assert!(parse_rules("[]").is_empty());
         assert!(parse_rules("not json").is_empty());
     }
@@ -178,10 +239,7 @@ mod tests {
     #[test]
     fn priority_order_is_caller_provided() {
         // list_categories orders by priority — classify takes the first hit.
-        let cats = vec![
-            cat("First", r#"["mp4"]"#),
-            cat("Second", r#"["mp4"]"#),
-        ];
+        let cats = vec![cat("First", r#"["mp4"]"#), cat("Second", r#"["mp4"]"#)];
         assert_eq!(classify("a.mp4", None, None, &cats).unwrap().name, "First");
     }
 }

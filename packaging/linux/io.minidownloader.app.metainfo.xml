@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.minidownloader.app</id>
+  <name>Mini Downloader</name>
+  <summary>Fast, local-first download manager</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      Mini Downloader is a lightweight native download manager powered by
+      aria2 and yt-dlp. It supports segmented downloads, torrents, media
+      capture, scheduling, categories, and an optional browser connector.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.minidownloader.app.desktop</launchable>
+  <url type="homepage">https://github.com/RamazanBerk20/mini-downloader</url>
+  <url type="bugtracker">https://github.com/RamazanBerk20/mini-downloader/issues</url>
+  <developer id="io.github.ramazanberk20">
+    <name>RamazanBerk20</name>
+  </developer>
+  <releases>
+    <release version="3.0.0" date="2026-08-06">
+      <description>
+        <p>Native low-memory desktop release with hardened browser capture, scheduling, packaging, and accessibility.</p>
+      </description>
+    </release>
+  </releases>
+  <provides>
+    <binary>mini-downloader</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>

@@ -1,0 +1,3 @@
+# This bundle intentionally preserves upstream license text verbatim, including
+# source line endings and trailing spaces present in some dependency licenses.
+THIRD_PARTY_LICENSES.txt -whitespace
