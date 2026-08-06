@@ -509,7 +509,7 @@ fn windows_tray(
             };
 
             let menu_actions = actions.clone();
-            MenuEvent::set_event_handler(Some(move |event| {
+            MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
                 let action = match event.id.0.as_str() {
                     "show" => Some(TrayAction::Show),
                     "pause-all" => Some(TrayAction::PauseAll),
