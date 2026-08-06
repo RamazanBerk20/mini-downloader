@@ -329,11 +329,10 @@ pub fn set_autostart(_enabled: bool) -> Result<(), String> {
     Err("unsupported platform".into())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn desktop_entry_quotes_the_executable() {
         let (_, entry) = desktop_entry().unwrap();
@@ -346,7 +345,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn default_mime_association_is_inserted_and_replaced_without_duplicates() {
         let initial = "[Added Associations]\ntext/plain=editor.desktop;\n";
@@ -369,7 +367,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn atomic_user_configuration_write_is_private() {
         use std::os::unix::fs::PermissionsExt;
