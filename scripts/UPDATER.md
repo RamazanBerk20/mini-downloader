@@ -27,8 +27,11 @@ and removes the imported certificate. Bundled aria2 and yt-dlp binaries retain
 their upstream publisher identity and are verified against pinned SHA-256
 digests before packaging; they are never re-signed as Mini Downloader code.
 
-A public Windows release requires both signing secrets. The workflow fails
-closed when either is missing, so an unsigned installer cannot be published by
-accident. Never commit certificates or passwords. Cloud/HSM code-signing
-services should replace the import/sign step while retaining
-`verify-windows-signatures.ps1`.
+By default, a public Windows release requires both signing secrets and the
+workflow fails closed when either is missing. A maintainer may deliberately
+authorize one unsigned release with the manual `allow_unsigned_windows` input,
+or set the `ALLOW_UNSIGNED_WINDOWS=true` repository variable for a tag-triggered
+run and remove it after completion. That path adds a prominent release warning
+and `WINDOWS-UNSIGNED.txt`; it must never be treated as publisher-authenticated.
+Never commit certificates or passwords. Cloud/HSM code-signing services should
+replace the import/sign step while retaining `verify-windows-signatures.ps1`.

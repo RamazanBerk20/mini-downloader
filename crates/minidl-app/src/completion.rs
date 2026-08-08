@@ -174,7 +174,7 @@ pub fn organize(db: &Db, row: &Download, filename: &str) -> (String, String) {
             sidecar.push(".aria2");
             let _ = std::fs::remove_file(PathBuf::from(sidecar));
             let target = target.to_string_lossy().into_owned();
-            let _ = db.set_file_location(row.id, &moved_name, &target, category.id);
+            let _ = db.set_file_location(row.id, &moved_name, &target, Some(category.id));
             (target, moved_name)
         }
         Err(_) => (row.dir.clone(), filename),

@@ -9,6 +9,11 @@ on:
         description: Existing vX.Y.Z release tag
         required: true
         type: string
+      allow_unsigned_windows:
+        description: Publish Windows artifacts without Authenticode (release is visibly marked)
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
@@ -19,6 +24,7 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  ALLOW_UNSIGNED_WINDOWS: ${{ inputs.allow_unsigned_windows || vars.ALLOW_UNSIGNED_WINDOWS || 'false' }}
 
 jobs:
   prepare:
@@ -53,6 +59,10 @@ jobs:
             exit 1
           }
           target=$(git rev-parse HEAD)
+          release_notes="Native low-memory desktop release. Verify downloads against SHA256SUMS."
+          if [[ "$ALLOW_UNSIGNED_WINDOWS" == "true" ]]; then
+            release_notes+=$'\n\n> [!WARNING]\n> The Windows app and installer in this release are not Authenticode-signed. Windows may show an Unknown publisher warning. Verify SHA256SUMS before running them.'
+          fi
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             is_draft=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
               --json isDraft --jq .isDraft)
@@ -74,7 +84,7 @@ jobs:
               --title "Mini Downloader $RELEASE_TAG" \
               --draft \
               --generate-notes \
-              --notes "Native low-memory desktop release. Verify downloads against SHA256SUMS."
+              --notes "$release_notes"
           fi
 
   linux:
@@ -216,7 +226,7 @@ jobs:
           Copy-Item yt-dlp-source\yt-dlp\LICENSE "$stage\LICENSE.yt-dlp.txt"
 
       - id: signing
-        name: Detect Authenticode credentials
+        name: Require signing or explicit unsigned override
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -224,11 +234,24 @@ jobs:
         run: |
           $certificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
           $password = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
-          if (-not ($certificate -and $password)) {
+          $allowUnsigned = $env:ALLOW_UNSIGNED_WINDOWS -eq "true"
+          if ($certificate -xor $password) {
+            throw "Both Authenticode signing secrets are required when either is configured."
+          }
+          if ($certificate -and $password) {
+            "enabled=true" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "unsigned=false" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } elseif ($allowUnsigned) {
+            Write-Warning "Publishing explicitly authorized unsigned Windows artifacts."
+            "enabled=false" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "unsigned=true" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
             throw "Public Windows releases require both Authenticode signing secrets."
           }
-          "enabled=true" | Out-File `
-            -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Import Authenticode certificate
         if: ${{ steps.signing.outputs.enabled == 'true' }}
@@ -252,6 +275,19 @@ jobs:
           ./scripts/verify-windows-signatures.ps1 `
             -ArtifactDirectory dist-native `
             -StageDirectory dist-native\windows-stage
+
+      - name: Mark unsigned Windows artifacts
+        if: ${{ steps.signing.outputs.unsigned == 'true' }}
+        shell: pwsh
+        run: |
+          @"
+          WARNING: UNSIGNED WINDOWS BUILD
+
+          Mini Downloader's executables and NSIS installer in this release do
+          not have an Authenticode publisher signature. Windows may display an
+          Unknown publisher or SmartScreen warning. Verify these files against
+          the release SHA256SUMS before running them.
+          "@ | Set-Content -LiteralPath dist-native\WINDOWS-UNSIGNED.txt -Encoding utf8
 
       - name: Upload Windows packages
         shell: pwsh
@@ -303,7 +339,7 @@ jobs:
       - name: Package browser extensions
         run: |
           npm ci --prefix tools/extension-publisher --ignore-scripts --no-audit --no-fund
-          npm audit --prefix tools/extension-publisher --audit-level=moderate
+          node scripts/audit-extension-tools.mjs
           node --test extension/tests/*.test.js
           tools/extension-publisher/node_modules/.bin/web-ext lint --source-dir extension \
             --warnings-as-errors --no-config-discovery

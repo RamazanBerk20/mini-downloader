@@ -31,6 +31,94 @@ impl DownloadInsertResult {
     }
 }
 
+fn is_strong_transient_query_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    key.starts_with("x-amz-")
+        || key.starts_with("x-goog-")
+        || matches!(
+            key.as_str(),
+            "expires"
+                | "expiry"
+                | "exp"
+                | "signature"
+                | "sig"
+                | "token"
+                | "access_token"
+                | "auth"
+                | "auth_key"
+                | "md5"
+                | "policy"
+        )
+}
+
+fn is_transient_query_key(key: &str) -> bool {
+    is_strong_transient_query_key(key)
+        || matches!(
+            key.to_ascii_lowercase().as_str(),
+            // Companion fields used by common CDN signatures. These are only
+            // stripped when the URL also contains a strong signature field.
+            "h" | "hash"
+                | "key"
+                | "key-pair-id"
+                | "user_id"
+                | "sv"
+                | "spr"
+                | "st"
+                | "se"
+                | "sr"
+                | "sp"
+        )
+}
+
+/// Return the stable resource URL for a fully signed CDN query. Ordinary query
+/// strings are deliberately left alone: `download?id=1` and `download?id=2`
+/// can be different files. A query is stripped only when every field belongs
+/// to a known signing scheme and at least one high-confidence signature field
+/// is present.
+fn signed_source_base(source: &str) -> Option<String> {
+    let mut parsed = url::Url::parse(source).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let keys = parsed
+        .query_pairs()
+        .map(|(key, _)| key.into_owned())
+        .collect::<Vec<_>>();
+    if keys.is_empty()
+        || !keys.iter().any(|key| is_strong_transient_query_key(key))
+        || !keys.iter().all(|key| is_transient_query_key(key))
+    {
+        return None;
+    }
+    parsed.set_query(None);
+    parsed.set_fragment(None);
+    Some(parsed.to_string())
+}
+
+fn unsigned_source(source: &str) -> Option<String> {
+    let mut parsed = url::Url::parse(source).ok()?;
+    if parsed.query().is_some() {
+        return None;
+    }
+    parsed.set_fragment(None);
+    Some(parsed.to_string())
+}
+
+/// Compare download sources while tolerating short-lived CDN signatures.
+/// This is public so the desktop ingestion layer can compare a target file's
+/// recorded origin URL before deciding that it is already downloaded.
+pub fn duplicate_sources_match(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    match (signed_source_base(left), signed_source_base(right)) {
+        (Some(left), Some(right)) => left == right,
+        (Some(left), None) => unsigned_source(right).is_some_and(|right| left == right),
+        (None, Some(right)) => unsigned_source(left).is_some_and(|left| left == right),
+        (None, None) => false,
+    }
+}
+
 const MIGRATION_1: &str = r#"
 CREATE TABLE downloads (
     id              INTEGER PRIMARY KEY,
@@ -361,19 +449,38 @@ impl Db {
         conn: &Connection,
         d: &NewDownload,
     ) -> Result<DownloadInsertResult> {
-        let existing = conn
-            .query_row(
-                "SELECT id FROM downloads
-                 WHERE url=?1 AND kind=?2
-                   AND format_id IS ?3 AND media_opts IS ?4 AND checksum IS ?5
-                   AND status IN ('queued','active','waiting','paused','complete','scheduled')
-                 ORDER BY id DESC LIMIT 1",
-                params![d.url, d.kind, d.format_id, d.media_opts, d.checksum],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(id) = existing {
-            return Ok(DownloadInsertResult::Existing(id));
+        let signed_base = signed_source_base(&d.url);
+        let mut statement = conn.prepare(
+            "SELECT id, url FROM downloads
+             WHERE kind=?2
+               AND format_id IS ?3 AND media_opts IS ?4 AND checksum IS ?5
+               AND status IN ('queued','active','waiting','paused','complete','scheduled')
+               AND (
+                    url=?1
+                    OR (?6 IS NOT NULL AND (
+                        url=?6
+                        OR (instr(url, '?') > 0
+                            AND substr(url, 1, instr(url, '?') - 1)=?6)
+                    ))
+               )
+             ORDER BY id DESC",
+        )?;
+        let candidates = statement.query_map(
+            params![
+                d.url,
+                d.kind,
+                d.format_id,
+                d.media_opts,
+                d.checksum,
+                signed_base
+            ],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        for candidate in candidates {
+            let (id, source) = candidate?;
+            if duplicate_sources_match(&d.url, &source) {
+                return Ok(DownloadInsertResult::Existing(id));
+            }
         }
 
         Ok(DownloadInsertResult::Inserted(
@@ -544,7 +651,7 @@ impl Db {
 
     /// Flip status only if it actually differs; returns `true` when a row was
     /// changed. Used as an atomic finalize gate so a completion seen by both the
-    /// WebSocket consumer and the 1 Hz poller fires side effects (notify /
+    /// WebSocket consumer and the live poller fires side effects (notify /
     /// organize) exactly once — the loser's `UPDATE` matches no row.
     pub fn set_status_if_changed(&self, id: i64, status: DownloadStatus) -> Result<bool> {
         let conn = self.lock();
@@ -603,15 +710,15 @@ impl Db {
     }
 
     /// Atomically record the final filename and destination selected by category
-    /// auto-organize. A collision can change the filename (`file (1).zip`), so
-    /// persisting only the directory would leave the UI pointing at the wrong
-    /// path.
+    /// auto-organize, or the location of an existing file adopted by duplicate
+    /// prevention. The category is absent when the file remains in the default
+    /// download directory.
     pub fn set_file_location(
         &self,
         id: i64,
         filename: &str,
         dir: &str,
-        category_id: i64,
+        category_id: Option<i64>,
     ) -> Result<()> {
         let conn = self.lock();
         conn.execute(
@@ -1055,6 +1162,52 @@ mod tests {
         let retry = db.insert_download_deduplicated(&download).unwrap();
         assert!(matches!(retry, DownloadInsertResult::Inserted(id) if id != first_id));
         assert_eq!(db.list(None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn deduplicated_insert_recognizes_rotated_cdn_signatures_only() {
+        let db = Db::open_in_memory().unwrap();
+        let first = NewDownload {
+            url: "https://cdn.example/file.zip?md5=old&expires=100&user_id=7&h=stable".into(),
+            filename: Some("file.zip".into()),
+            dir: "/dl".into(),
+            kind: "http".into(),
+            ..Default::default()
+        };
+        let first_id = db
+            .insert_download_with_duplicate_policy(&first)
+            .unwrap()
+            .id();
+        let mut rotated = first.clone();
+        rotated.url = "https://cdn.example/file.zip?md5=new&expires=200&user_id=7&h=stable".into();
+        assert_eq!(
+            db.insert_download_with_duplicate_policy(&rotated).unwrap(),
+            DownloadInsertResult::Existing(first_id)
+        );
+
+        let mut semantic = first.clone();
+        semantic.url = "https://cdn.example/download?id=1".into();
+        assert!(matches!(
+            db.insert_download_with_duplicate_policy(&semantic).unwrap(),
+            DownloadInsertResult::Inserted(_)
+        ));
+        semantic.url = "https://cdn.example/download?id=2".into();
+        assert!(matches!(
+            db.insert_download_with_duplicate_policy(&semantic).unwrap(),
+            DownloadInsertResult::Inserted(_)
+        ));
+
+        let mut mixed = first;
+        mixed.url = "https://cdn.example/download?id=1&token=old".into();
+        let mixed_id = db
+            .insert_download_with_duplicate_policy(&mixed)
+            .unwrap()
+            .id();
+        mixed.url = "https://cdn.example/download?id=2&token=new".into();
+        assert_ne!(
+            db.insert_download_with_duplicate_policy(&mixed).unwrap(),
+            DownloadInsertResult::Existing(mixed_id)
+        );
     }
 
     #[test]

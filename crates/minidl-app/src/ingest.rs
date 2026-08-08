@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use minidl_core::aria2::{build_add_options, Engine, EngineDefaults};
-use minidl_core::db::{Db, DownloadInsertResult};
+use minidl_core::db::{duplicate_sources_match, Db, DownloadInsertResult};
 use minidl_core::ipc::{CaptureJob, DownloadKind};
 use minidl_core::model::{Download, DownloadStatus, NewDownload};
 use serde_json::Value;
@@ -301,6 +301,153 @@ fn free_space(_: &Path) -> Option<u64> {
     None
 }
 
+fn duplicate_prevention_enabled(db: &Db) -> bool {
+    db.get_setting("prevent_duplicate_downloads")
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some("false")
+}
+
+fn safe_capture_filename(filename: &str) -> Option<String> {
+    let filename = filename.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    (!filename.is_empty() && filename != "." && filename != "..").then(|| filename.to_owned())
+}
+
+#[cfg(unix)]
+fn recorded_origin(path: &Path) -> Option<String> {
+    xattr::get(path, "user.xdg.origin.url")
+        .ok()
+        .flatten()
+        .and_then(|value| String::from_utf8(value).ok())
+}
+
+#[cfg(not(unix))]
+fn recorded_origin(_: &Path) -> Option<String> {
+    None
+}
+
+struct ExistingFile {
+    path: std::path::PathBuf,
+    filename: String,
+    dir: String,
+    category_id: Option<i64>,
+    length: i64,
+}
+
+fn existing_file(db: &Db, download_dir: &Path, job: &CaptureJob) -> Option<ExistingFile> {
+    if job.kind != DownloadKind::Http || !duplicate_prevention_enabled(db) {
+        return None;
+    }
+    let filename = safe_capture_filename(job.filename.as_deref()?)?;
+    let mut targets = Vec::<(std::path::PathBuf, Option<i64>)>::new();
+    let auto_organize = db.get_setting("auto_organize").ok().flatten().as_deref() != Some("false");
+    if auto_organize {
+        let host = minidl_core::grabber::host_of(&job.url);
+        let categories = db.list_categories().unwrap_or_default();
+        if let Some(category) = minidl_core::categories::classify(
+            &filename,
+            job.mime.as_deref(),
+            (!host.is_empty()).then_some(host.as_str()),
+            &categories,
+        ) {
+            targets.push((
+                minidl_core::categories::expand(&category.dir),
+                Some(category.id),
+            ));
+        }
+    }
+    if !targets.iter().any(|(target, _)| target == download_dir) {
+        targets.push((download_dir.to_owned(), None));
+    }
+
+    targets.into_iter().find_map(|(dir, category_id)| {
+        let path = dir.join(&filename);
+        let metadata = std::fs::metadata(&path).ok()?;
+        if !metadata.is_file() {
+            return None;
+        }
+        let mut sidecar = path.as_os_str().to_owned();
+        sidecar.push(".aria2");
+        if Path::new(&sidecar).exists() {
+            return None;
+        }
+        let same_source = recorded_origin(&path)
+            .map(|origin| duplicate_sources_match(&job.url, &origin))
+            .unwrap_or_else(|| {
+                job.size
+                    .filter(|size| *size >= 0)
+                    .is_some_and(|size| u64::try_from(size).ok() == Some(metadata.len()))
+            });
+        if !same_source {
+            return None;
+        }
+        Some(ExistingFile {
+            path,
+            filename: filename.clone(),
+            dir: dir.to_string_lossy().into_owned(),
+            category_id,
+            length: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+        })
+    })
+}
+
+/// Adopt a matching finished file before starting aria2. Browser captures carry
+/// both the resolved filename and content length, and Mini Downloader records
+/// the origin URL as an xattr on Unix; either identity lets signed CDN links be
+/// recognized even after their short-lived query token changes.
+pub(crate) fn reuse_existing_file(
+    db: &Db,
+    download_dir: &Path,
+    job: &CaptureJob,
+    package_id: Option<i64>,
+) -> Result<Option<i64>, String> {
+    let Some(existing) = existing_file(db, download_dir, job) else {
+        return Ok(None);
+    };
+    debug_assert!(existing.path.is_file());
+    let inserted = db
+        .insert_download_with_duplicate_policy(&NewDownload {
+            url: job.url.clone(),
+            filename: Some(existing.filename.clone()),
+            dir: existing.dir.clone(),
+            kind: kind_name(job.kind).into(),
+            referrer: job.referrer.clone(),
+            category_id: existing.category_id,
+            user_agent: job.user_agent.clone(),
+            cookie: job.cookie.clone(),
+            extra_headers: (!job.extra_headers.is_empty())
+                .then(|| serde_json::to_string(&job.extra_headers).unwrap_or_default()),
+            page_url: job.page_url.clone(),
+            package_id,
+            mime: job.mime.clone(),
+            ..Default::default()
+        })
+        .map_err(|error| error.to_string())?;
+    let id = inserted.id();
+    let should_record_file = matches!(inserted, DownloadInsertResult::Inserted(_))
+        || db
+            .get(id)
+            .map_err(|error| error.to_string())?
+            .is_some_and(|row| row.status == DownloadStatus::Complete);
+    if !should_record_file {
+        return Ok(Some(id));
+    }
+    let record = (|| -> anyhow::Result<()> {
+        db.set_file_location(id, &existing.filename, &existing.dir, existing.category_id)?;
+        db.checkpoint_progress_by_id(id, existing.length, existing.length, 0)?;
+        db.set_status(id, DownloadStatus::Complete)?;
+        Ok(())
+    })();
+    if let Err(error) = record {
+        if matches!(inserted, DownloadInsertResult::Inserted(_)) {
+            let _ = db.delete(id);
+        }
+        return Err(error.to_string());
+    }
+    Ok(Some(id))
+}
+
 pub fn job_from_url(url: String) -> CaptureJob {
     CaptureJob {
         kind: if url.starts_with("magnet:") {
@@ -432,6 +579,11 @@ pub async fn ingest(
     let engine = engine.expect("non-stream downloads were checked above");
 
     let mut options = build_add_options(&job, &dir, &defaults);
+    if fetches && duplicate_prevention_enabled(db) {
+        // Aria2 otherwise silently creates `name (1).ext`. The explicit
+        // duplicate setting is authoritative: a collision must fail closed.
+        options.insert("auto-file-renaming".into(), Value::String("false".into()));
+    }
     if let Some(limit) = db
         .get_setting("default_speed_limit")
         .ok()
@@ -595,5 +747,50 @@ mod tests {
         job.extra_headers.clear();
         job.kind = DownloadKind::Magnet;
         assert!(validate_capture_job(&db, &job).await.is_err());
+    }
+
+    #[test]
+    fn reuses_an_existing_organized_file_before_engine_launch() {
+        let root = tempfile::tempdir().unwrap();
+        let downloads = root.path().join("downloads");
+        let archives = root.path().join("archives");
+        std::fs::create_dir_all(&downloads).unwrap();
+        std::fs::create_dir_all(&archives).unwrap();
+        let contents = b"already downloaded";
+        std::fs::write(archives.join("package.zip"), contents).unwrap();
+
+        let db = Db::open_in_memory().unwrap();
+        let category_id = db
+            .upsert_category("Archives", &archives.to_string_lossy(), r#"["zip"]"#, -100)
+            .unwrap();
+        let mut job = job_from_url(
+            "https://cdn.example/package.zip?md5=old&expires=100&user_id=7&h=value".into(),
+        );
+        job.filename = Some("package.zip".into());
+        job.size = Some(contents.len() as i64);
+
+        let id = reuse_existing_file(&db, &downloads, &job, None)
+            .unwrap()
+            .expect("matching file should be adopted");
+        let row = db.get(id).unwrap().unwrap();
+        assert_eq!(row.status, DownloadStatus::Complete);
+        assert_eq!(row.filename.as_deref(), Some("package.zip"));
+        assert_eq!(row.dir, archives.to_string_lossy());
+        assert_eq!(row.category_id, Some(category_id));
+        assert_eq!(row.completed_bytes, contents.len() as i64);
+
+        job.url = "https://cdn.example/package.zip?md5=new&expires=200&user_id=7&h=value".into();
+        assert_eq!(
+            reuse_existing_file(&db, &downloads, &job, None).unwrap(),
+            Some(id)
+        );
+        assert_eq!(db.list(None).unwrap().len(), 1);
+
+        db.set_setting("prevent_duplicate_downloads", "false")
+            .unwrap();
+        assert_eq!(
+            reuse_existing_file(&db, &downloads, &job, None).unwrap(),
+            None
+        );
     }
 }

@@ -32,8 +32,10 @@ On Arch-based distributions, use one of the AUR packages:
 
 Windows releases include a per-user NSIS installer and a portable `.zip`.
 `aria2c` and `yt-dlp` are bundled; install `ffmpeg` and add it to `PATH` for
-video/audio muxing. Official Windows releases are Authenticode-signed; verify
-both the publisher and `SHA256SUMS` before running them.
+video/audio muxing. Authenticode-signed releases establish the Mini Downloader
+publisher identity. If an exceptional release is unsigned, its release notes
+and `WINDOWS-UNSIGNED.txt` say so explicitly and Windows may show an Unknown
+publisher warning. Always verify `SHA256SUMS` before running a download.
 
 ## Features
 

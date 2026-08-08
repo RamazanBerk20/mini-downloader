@@ -44,6 +44,8 @@ const MAX_METADATA_FILE: u64 = 20 * 1024 * 1024;
 const MAX_INPUT_PATH: usize = 32 * 1024;
 const MAX_LINK_TEXT: usize = 1024 * 1024;
 const MAX_CATEGORY_RULES: usize = 64 * 1024;
+const LIVE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+const PROGRESS_CHECKPOINT_TICKS: u32 = 10;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadView {
@@ -325,6 +327,16 @@ impl Controller {
         ingest::validate_capture_job(&self.db, &job)
             .await
             .map_err(AppError::classify)?;
+        if let Some(id) =
+            ingest::reuse_existing_file(&self.db, &self.download_dir, &job, package_id)
+                .map_err(AppError::classify)?
+        {
+            self.events.emit(
+                "downloads:state",
+                json!({"id": id, "status": "complete", "reused": true}),
+            );
+            return Ok(id);
+        }
         let handle = if matches!(job.kind, DownloadKind::Hls | DownloadKind::Dash) {
             None
         } else {
@@ -415,7 +427,7 @@ impl Controller {
                     .await
                     .unwrap_or_default();
                 checkpoint_tick = checkpoint_tick.wrapping_add(1);
-                let checkpoint = checkpoint_tick.is_multiple_of(5);
+                let checkpoint = checkpoint_tick.is_multiple_of(PROGRESS_CHECKPOINT_TICKS);
                 let mut current = HashSet::with_capacity(active.len());
                 let mut ticks = Vec::with_capacity(active.len());
                 for item in &active {
@@ -477,7 +489,7 @@ impl Controller {
                 }
                 tokio::select! {
                     _ = stop.changed() => break,
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                    _ = tokio::time::sleep(LIVE_POLL_INTERVAL) => {}
                 }
             }
         });
@@ -1775,7 +1787,7 @@ impl Controller {
             num_pieces: 0,
             piece_length: 0,
             verified_length: 0,
-            files: Vec::new(),
+            files: stored_detail_file(&row).into_iter().collect(),
             peers: Vec::new(),
             live: false,
         };
@@ -1793,7 +1805,7 @@ impl Controller {
         details.num_pieces = value_i64(&status, "numPieces");
         details.piece_length = value_i64(&status, "pieceLength");
         details.verified_length = value_i64(&status, "verifiedLength");
-        details.files = status
+        let live_files = status
             .get("files")
             .and_then(Value::as_array)
             .into_iter()
@@ -1805,7 +1817,10 @@ impl Controller {
                 completed_length: value_i64(file, "completedLength"),
                 selected: value_string(file, "selected") != "false",
             })
-            .collect();
+            .collect::<Vec<_>>();
+        if !live_files.is_empty() {
+            details.files = live_files;
+        }
         if matches!(row.kind.as_str(), "torrent" | "magnet") {
             details.peers = engine
                 .rpc
@@ -1994,6 +2009,30 @@ fn deletion_target(dir: &Path, candidate: &Path) -> Option<PathBuf> {
     parent.starts_with(root).then(|| parent.join(name))
 }
 
+fn stored_detail_file(row: &Download) -> Option<DetailFile> {
+    if matches!(row.kind.as_str(), "torrent" | "magnet") {
+        return None;
+    }
+    let filename = row
+        .filename
+        .as_deref()
+        .map(str::trim)
+        .filter(|filename| !filename.is_empty())?;
+    let filename = Path::new(filename);
+    let path = if filename.is_absolute() {
+        filename.to_owned()
+    } else {
+        Path::new(&row.dir).join(filename)
+    };
+    Some(DetailFile {
+        index: 1,
+        path: path.to_string_lossy().into_owned(),
+        length: row.total_bytes.max(0),
+        completed_length: row.completed_bytes.max(0),
+        selected: true,
+    })
+}
+
 fn spawn_power_command(action: &str, command: Option<&str>) {
     #[cfg(unix)]
     let mut process = match action {
@@ -2136,5 +2175,39 @@ mod tests {
         assert_eq!(complete.payload["id"], id);
         assert_eq!(state.event, "downloads:state");
         assert_eq!(state.payload["status"], "complete");
+    }
+
+    #[tokio::test]
+    async fn stored_download_details_keep_the_completed_file_without_a_live_engine() {
+        let root = tempfile::tempdir().unwrap();
+        let downloads = root.path().join("downloads");
+        std::fs::create_dir_all(&downloads).unwrap();
+        let controller = Controller::open(root.path().join("data"), downloads.clone())
+            .await
+            .unwrap();
+        let id = controller
+            .db
+            .insert_download(&NewDownload {
+                url: "https://example.org/archive.zip".into(),
+                filename: Some("archive.zip".into()),
+                dir: downloads.to_string_lossy().into_owned(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        controller
+            .db
+            .checkpoint_progress_by_id(id, 54_000_000, 54_000_000, 0)
+            .unwrap();
+
+        let details = controller.details(id).await.unwrap();
+
+        assert_eq!(details.files.len(), 1);
+        assert_eq!(
+            details.files[0].path,
+            downloads.join("archive.zip").to_string_lossy()
+        );
+        assert_eq!(details.files[0].completed_length, 54_000_000);
+        assert_eq!(details.files[0].length, 54_000_000);
     }
 }

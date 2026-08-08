@@ -19,6 +19,62 @@ type SharedCatalog = Arc<RwLock<locale::Catalog>>;
 
 slint::include_modules!();
 
+#[derive(serde::Deserialize)]
+struct LiveDownloadBatch {
+    #[serde(default)]
+    updates: Vec<LiveDownloadUpdate>,
+}
+
+#[derive(serde::Deserialize)]
+struct LiveDownloadUpdate {
+    id: i64,
+    completed: i64,
+    total: i64,
+    dl_speed: i64,
+    ul_speed: i64,
+    connections: i64,
+    num_seeders: i64,
+}
+
+fn apply_live_downloads(
+    downloads: &mut [minidl_app::controller::DownloadView],
+    updates: &[LiveDownloadUpdate],
+) -> bool {
+    let updates = updates
+        .iter()
+        .map(|update| (update.id, update))
+        .collect::<HashMap<_, _>>();
+    let mut changed = false;
+    for row in downloads {
+        let Some(update) = updates.get(&row.id) else {
+            continue;
+        };
+        let values = (
+            update.completed.max(0),
+            update.total.max(0),
+            update.dl_speed.max(0),
+            update.ul_speed.max(0),
+            update.connections.max(0),
+            update.num_seeders.max(0),
+        );
+        changed |= (
+            row.completed_bytes,
+            row.total_bytes,
+            row.download_speed,
+            row.upload_speed,
+            row.connections,
+            row.num_seeders,
+        ) != values;
+        row.completed_bytes = values.0;
+        row.total_bytes = values.1;
+        row.download_speed = values.2;
+        row.upload_speed = values.3;
+        row.connections = values.4;
+        row.num_seeders = values.5;
+    }
+    changed
+}
+
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments
@@ -656,6 +712,7 @@ fn run_ui(runtime: &tokio::runtime::Runtime) -> Result<(), String> {
     let event_selection = selection.clone();
     let event_collapsed = collapsed_packages.clone();
     let refresh_in_flight = Arc::new(AtomicBool::new(false));
+    let live_update_pending = Arc::new(AtomicBool::new(false));
     runtime.spawn(async move {
         let _ = ControlClient::subscribe(move |event| {
             if matches!(event.event.as_str(), "ui:hide" | "app:quit") {
@@ -674,10 +731,58 @@ fn run_ui(runtime: &tokio::runtime::Runtime) -> Result<(), String> {
                 });
                 return;
             }
+            if event.event == "downloads:tick" {
+                let Ok(batch) = serde_json::from_value::<LiveDownloadBatch>(event.payload) else {
+                    return;
+                };
+                let changed = event_downloads
+                    .lock()
+                    .map(|mut downloads| apply_live_downloads(&mut downloads, &batch.updates))
+                    .unwrap_or(false);
+                if !changed || live_update_pending.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+                let weak = weak.clone();
+                let all_downloads = event_downloads.clone();
+                let filter = filter.clone();
+                let catalog = event_catalog.clone();
+                let selection = event_selection.clone();
+                let collapsed_packages = event_collapsed.clone();
+                let pending = live_update_pending.clone();
+                if slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        let downloads = all_downloads
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner())
+                            .clone();
+                        let catalog = catalog.read().unwrap_or_else(|error| error.into_inner());
+                        let selection = selection.lock().unwrap_or_else(|error| error.into_inner());
+                        let collapsed_packages = collapsed_packages
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        update_download_model(
+                            &ui,
+                            rows_from_downloads(
+                                &downloads,
+                                filter.load(Ordering::Relaxed),
+                                &ui.get_search_text(),
+                                &catalog,
+                                &selection,
+                                &collapsed_packages,
+                            ),
+                        );
+                    }
+                    pending.store(false, Ordering::Release);
+                })
+                .is_err()
+                {
+                    live_update_pending.store(false, Ordering::Release);
+                }
+                return;
+            }
             if !matches!(
                 event.event.as_str(),
-                "downloads:tick"
-                    | "downloads:state"
+                "downloads:state"
                     | "downloads:complete"
                     | "downloads:error"
                     | "downloads:reconciled"
@@ -727,7 +832,7 @@ fn run_ui(runtime: &tokio::runtime::Runtime) -> Result<(), String> {
                         &selection,
                         &collapsed_packages,
                     );
-                    ui.set_downloads(ModelRc::new(VecModel::from(rows)));
+                    update_download_model(&ui, rows);
                     ui.set_categories(ModelRc::new(VecModel::from(category_rows(
                         &snapshot.categories,
                         &snapshot.downloads,
@@ -1125,10 +1230,30 @@ fn install_callbacks(
                                     details.kind.as_str(),
                                     "torrent" | "magnet"
                                 ));
-                                ui.set_detail_text(format_details(&details).into());
+                                ui.set_detail_url(details.url.clone().into());
+                                ui.set_detail_dir(details.dir.clone().into());
+                                ui.set_detail_error(
+                                    details.error_message.clone().unwrap_or_default().into(),
+                                );
+                                ui.set_detail_peer_count(
+                                    details.peers.len().min(i32::MAX as usize) as i32,
+                                );
+                                ui.set_detail_pieces_text(
+                                    if details.num_pieces > 0 {
+                                        format!(
+                                            "{} × {}",
+                                            details.num_pieces,
+                                            format_bytes(details.piece_length)
+                                        )
+                                    } else {
+                                        String::new()
+                                    }
+                                    .into(),
+                                );
                                 ui.set_detail_files(ModelRc::new(VecModel::from(
                                     detail_file_rows(&details.files),
                                 )));
+                                ui.set_delete_confirm_id(0);
                                 ui.set_detail_visible(true);
                             }
                             Err(error) => ui.set_status_text(error.into()),
@@ -2564,11 +2689,20 @@ fn apply_i18n(ui: &MainWindow, catalog: &locale::Catalog) {
     set!(set_label_sc_close, "scClose");
     set!(set_label_hour, "hour");
     set!(set_label_minute, "minute");
+    set!(set_label_detail_files, "detailFiles");
+    set!(set_label_detail_peers, "detailPeers");
+    set!(set_label_detail_pieces, "detailPieces");
+    set!(set_label_detail_folder, "detailFolder");
     set!(set_label_apply_selection, "applySelection");
     set!(set_label_speed_limit, "speedLimit");
     set!(set_label_apply, "apply");
     set!(set_label_start_in_minutes, "startInMinutes");
-    set!(set_label_schedule_action, "scheduleAction");
+    ui.set_label_schedule_action(
+        catalog
+            .get("scheduleAction")
+            .trim_end_matches('\u{2026}')
+            .into(),
+    );
     set!(set_label_cancel_schedule, "scheduleCancel");
     set!(set_label_unlimited, "speedUnlimited");
     set!(set_label_global_speed, "globalSpeed");
@@ -2602,6 +2736,24 @@ fn snapshot_rows(
         selection,
         collapsed_packages,
     )
+}
+
+fn update_download_model(ui: &MainWindow, rows: Vec<DownloadRow>) {
+    let model = ui.get_downloads();
+    let same_identity = model.row_count() == rows.len()
+        && rows
+            .iter()
+            .enumerate()
+            .all(|(index, row)| model.row_data(index).is_some_and(|old| old.id == row.id));
+    if !same_identity {
+        ui.set_downloads(ModelRc::new(VecModel::from(rows)));
+        return;
+    }
+    for (index, row) in rows.into_iter().enumerate() {
+        if model.row_data(index).as_ref() != Some(&row) {
+            model.set_row_data(index, row);
+        }
+    }
 }
 
 fn clamp_id(id: i64) -> i32 {
@@ -3005,26 +3157,6 @@ fn detail_file_rows(files: &[minidl_app::controller::DetailFile]) -> Vec<DetailF
         .collect()
 }
 
-fn format_details(details: &minidl_app::controller::DownloadDetails) -> String {
-    let mut output = format!(
-        "{}\n{}\n{} files · {} peers · {} pieces",
-        details.url,
-        details.dir,
-        details.files.len(),
-        details.peers.len(),
-        details.num_pieces
-    );
-    if let Some(error) = details
-        .error_message
-        .as_deref()
-        .filter(|error| !error.is_empty())
-    {
-        output.push('\n');
-        output.push_str(error);
-    }
-    output
-}
-
 fn locale_code_from_name(name: &str) -> &'static str {
     match name {
         "English" => "en",
@@ -3183,5 +3315,55 @@ mod tests {
         assert_eq!(default_speed_mb_to_bytes(1.0), 1_000_000);
         assert_eq!(default_speed_bytes_to_mb(500_000), 0.5);
         assert_eq!(default_speed_bytes_to_mb(1_500_000), 1.5);
+    }
+
+    #[test]
+    fn live_ticks_update_the_ui_cache_without_a_database_snapshot() {
+        let mut downloads = vec![minidl_app::controller::DownloadView {
+            id: 7,
+            gid: Some("gid".into()),
+            url: "https://example.org/file".into(),
+            filename: Some("file".into()),
+            dir: "/tmp".into(),
+            status: minidl_core::model::DownloadStatus::Active,
+            kind: "http".into(),
+            total_bytes: 0,
+            completed_bytes: 0,
+            download_speed: 0,
+            upload_speed: 0,
+            connections: 0,
+            num_seeders: 0,
+            referrer: None,
+            info_hash: None,
+            error_code: None,
+            error_message: None,
+            category_id: None,
+            created_at: 0,
+            finished_at: None,
+            page_url: None,
+            format_id: None,
+            speed_limit: None,
+            package_id: None,
+            package_name: None,
+            mime: None,
+            checksum: None,
+            start_at: None,
+            media_opts: None,
+        }];
+        let update = LiveDownloadUpdate {
+            id: 7,
+            completed: 25,
+            total: 100,
+            dl_speed: 50,
+            ul_speed: 2,
+            connections: 4,
+            num_seeders: 3,
+        };
+
+        assert!(apply_live_downloads(&mut downloads, &[update]));
+        assert_eq!(downloads[0].completed_bytes, 25);
+        assert_eq!(downloads[0].total_bytes, 100);
+        assert_eq!(downloads[0].download_speed, 50);
+        assert_eq!(downloads[0].connections, 4);
     }
 }
