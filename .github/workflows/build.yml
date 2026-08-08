@@ -110,7 +110,7 @@ jobs:
       - name: Test and package extension
         run: |
           npm ci --prefix tools/extension-publisher --ignore-scripts --no-audit --no-fund
-          npm audit --prefix tools/extension-publisher --audit-level=moderate
+          node scripts/audit-extension-tools.mjs
           node --check extension/background-helpers.js
           node --check extension/background.js
           node --check extension/content.js
