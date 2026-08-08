@@ -74,18 +74,19 @@ if command -v fpm >/dev/null 2>&1; then
     --after-remove packaging/linux/postremove.sh
     --package "$artifact_dir"
     --chdir "$stage_dir"
-    .
   )
   fpm "${common[@]}" --output-type deb \
     --depends aria2 --depends libfontconfig1 --depends libx11-6 \
     --depends libx11-xcb1 --depends libxcb1 --depends libxcursor1 \
     --depends libxrandr2 --depends libxi6 --depends libxkbcommon0 \
-    --depends libxkbcommon-x11-0 --depends libwayland-client0
+    --depends libxkbcommon-x11-0 --depends libwayland-client0 \
+    .
   fpm "${common[@]}" --output-type rpm \
     --depends aria2 --depends fontconfig --depends libX11 \
     --depends libX11-xcb --depends libxcb --depends libXcursor \
     --depends libXrandr --depends libXi --depends libxkbcommon \
-    --depends wayland-libs
+    --depends wayland-libs \
+    .
 fi
 
 if command -v linuxdeploy >/dev/null 2>&1; then
