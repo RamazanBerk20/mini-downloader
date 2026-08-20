@@ -44,8 +44,6 @@ test("application, browser manifests, and native-host IDs stay synchronized", ()
   const versionSurfaces = [
     ["Firefox manifest", firefox.version],
     ["Chromium manifest", chromium.version],
-    ["archived desktop package", json("apps/desktop/package.json").version],
-    ["archived Tauri config", json("apps/desktop/src-tauri/tauri.conf.json").version],
     ["extension publisher package", json("tools/extension-publisher/package.json").version],
     ["extension publisher lockfile", json("tools/extension-publisher/package-lock.json").version],
     [

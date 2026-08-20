@@ -1,0 +1,69 @@
+export struct DownloadRow {
+    id: int,
+    name: string,
+    url: string,
+    kind: string,
+    status: string,
+    status-display: string,
+    progress: float,
+    progress-text: string,
+    speed-text: string,
+    eta-text: string,
+    meta-text: string,
+    running: bool,
+    resumable: bool,
+    selected: bool,
+    package-id: int,
+    package-name: string,
+    package-first: bool,
+    package-collapsed: bool,
+    package-count-text: string,
+    package-progress: float,
+    package-meta-text: string,
+    package-running: bool,
+    package-resumable: bool,
+}
+
+export struct CategoryRow {
+    id: int,
+    name: string,
+    dir: string,
+    rules: string,
+    priority: int,
+    count: int,
+}
+
+export struct ScheduleRow {
+    id: int,
+    name: string,
+    summary: string,
+    action: string,
+    days: int,
+    minute: int,
+    speed: int,
+    enabled: bool,
+}
+
+export struct LinkChoice {
+    url: string,
+    kind: string,
+    host: string,
+    selected: bool,
+}
+
+export struct MediaChoice {
+    url: string,
+    format-id: string,
+    title: string,
+    label: string,
+    selected: bool,
+    playlist: bool,
+}
+
+export struct DetailFileRow {
+    index: int,
+    name: string,
+    progress: float,
+    meta: string,
+    selected: bool,
+}

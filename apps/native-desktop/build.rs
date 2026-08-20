@@ -1,8 +1,8 @@
 fn main() {
     const ICON_SIZE: u32 = 32;
-    const ICON_PNG: &[u8] = include_bytes!("../desktop/src-tauri/icons/32x32.png");
+    const ICON_PNG: &[u8] = include_bytes!("../../assets/icons/32x32.png");
 
-    println!("cargo:rerun-if-changed=../desktop/src-tauri/icons/32x32.png");
+    println!("cargo:rerun-if-changed=../../assets/icons/32x32.png");
 
     let decoder = png::Decoder::new(std::io::Cursor::new(ICON_PNG));
     let mut reader = decoder.read_info().expect("decode canonical app icon");
@@ -31,5 +31,5 @@ fn main() {
     std::fs::write(out_dir.join("app-icon.rgba"), &rgba).expect("write canonical RGBA app icon");
     std::fs::write(out_dir.join("app-icon.argb"), &argb).expect("write canonical ARGB app icon");
 
-    slint_build::compile("ui/restored.slint").expect("compile native UI");
+    slint_build::compile("ui/main-window.slint").expect("compile native UI");
 }

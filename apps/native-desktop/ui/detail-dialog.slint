@@ -1,0 +1,378 @@
+import { ScrollView } from "std-widgets.slint";
+import { DetailFileRow } from "models.slint";
+import { IconButton, Theme, UiButton, UiCheckBox, UiNumberField } from "ui-kit.slint";
+
+export component DetailDialog inherits Rectangle {
+        in property <length> available-width;
+        in property <length> available-height;
+        in property <[DetailFileRow]> detail-files;
+        in-out property <bool> detail-visible;
+        in property <string> detail-url;
+        in property <string> detail-dir;
+        in property <string> detail-error;
+        in property <int> detail-peer-count;
+        in property <string> detail-pieces-text;
+        in property <int> detail-id;
+        in property <bool> detail-is-torrent;
+        in-out property <int> detail-speed-kb;
+        in-out property <int> detail-delay-minutes;
+        in-out property <int> delete-confirm-id;
+        in property <string> label-details;
+        in property <string> label-move-up;
+        in property <string> label-move-down;
+        in property <string> label-close;
+        in property <string> label-detail-folder;
+        in property <string> label-detail-files;
+        in property <string> label-detail-peers;
+        in property <string> label-detail-pieces;
+        in property <string> label-failed;
+        in property <string> label-apply-selection;
+        in property <string> label-speed-limit;
+        in property <string> label-apply;
+        in property <string> label-start-in-minutes;
+        in property <string> label-schedule-action;
+        in property <string> label-cancel-schedule;
+        in property <string> label-confirm-delete;
+        in property <string> label-remove-delete;
+        callback move-in-queue(int, string);
+        callback apply-torrent-files(int);
+        callback toggle-detail-file(int, bool);
+        callback set-download-speed(int, int);
+        callback schedule-download(int, int);
+        callback unschedule-download(int);
+        callback remove-delete(int);
+
+        x: (root.available-width - self.width) / 2;
+        y: (root.available-height - self.height) / 2;
+        width: min(680px, root.available-width - 48px);
+        height: min(
+            root.available-height - 48px,
+            344px
+                + (root.detail-error != "" ? 26px : 0px)
+                + (root.detail-files.length > 0 ? 104px : 0px)
+                + (root.detail-files.length > 1 ? 57px : 0px)
+                + (root.detail-files.length > 2 ? 57px : 0px)
+        );
+        background: Theme.surface;
+        border-color: Theme.border;
+        border-width: 1px;
+        border-radius: 12px;
+        VerticalLayout {
+            padding: 18px;
+            spacing: 9px;
+            HorizontalLayout {
+                height: 32px;
+                Text { text: root.label-details; color: Theme.strong; font-size: 21px; font-weight: 700; horizontal-stretch: 1; }
+                IconButton { icon: "chevron-up"; label: root.label-move-up; clicked => { root.move-in-queue(root.detail-id, "up"); } }
+                IconButton { icon: "chevron-down"; label: root.label-move-down; clicked => { root.move-in-queue(root.detail-id, "down"); } }
+                IconButton {
+                    icon: "close";
+                    label: root.label-close;
+                    clicked => {
+                        root.detail-visible = false;
+                        root.delete-confirm-id = 0;
+                    }
+                }
+            }
+
+            Rectangle {
+                height: root.detail-error == "" ? 82px : 108px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface-2;
+
+                Text {
+                    x: 12px;
+                    y: 8px;
+                    width: 68px;
+                    height: 18px;
+                    text: "URL";
+                    color: Theme.muted;
+                    font-family: "Noto Sans Mono";
+                    font-size: 9px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                }
+                Text {
+                    x: 84px;
+                    y: 8px;
+                    width: parent.width - self.x - 12px;
+                    height: 18px;
+                    text: root.detail-url;
+                    color: Theme.text;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Text {
+                    x: 12px;
+                    y: 31px;
+                    width: 68px;
+                    height: 18px;
+                    text: root.label-detail-folder;
+                    color: Theme.muted;
+                    font-family: "Noto Sans Mono";
+                    font-size: 9px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Text {
+                    x: 84px;
+                    y: 31px;
+                    width: parent.width - self.x - 12px;
+                    height: 18px;
+                    text: root.detail-dir;
+                    color: Theme.text;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                Text {
+                    x: 12px;
+                    y: 55px;
+                    width: parent.width - 24px;
+                    height: 17px;
+                    text: root.label-detail-files + "  " + root.detail-files.length
+                        + (root.detail-is-torrent ? "     ·     " + root.label-detail-peers + "  " + root.detail-peer-count : "")
+                        + (root.detail-pieces-text != "" ? "     ·     " + root.label-detail-pieces + "  " + root.detail-pieces-text : "");
+                    color: Theme.muted;
+                    font-family: "Noto Sans Mono";
+                    font-size: 9px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if root.detail-error != "": Text {
+                    x: 12px;
+                    y: 79px;
+                    width: parent.width - 24px;
+                    height: 19px;
+                    text: root.label-failed + "  ·  " + root.detail-error;
+                    color: Theme.error-fg;
+                    font-size: 10px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            if root.detail-files.length > 0: HorizontalLayout {
+                height: 34px;
+                Text {
+                    text: root.label-detail-files + "  (" + root.detail-files.length + ")";
+                    color: Theme.strong;
+                    font-size: 12px;
+                    font-weight: 600;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+                if root.detail-is-torrent: UiButton {
+                    compact: true;
+                    text: root.label-apply-selection;
+                    primary: true;
+                    clicked => { root.apply-torrent-files(root.detail-id); }
+                }
+            }
+
+            if root.detail-files.length > 0: ScrollView {
+                height: root.detail-files.length > 2 ? 166px : root.detail-files.length > 1 ? 109px : 52px;
+                vertical-stretch: 0;
+                VerticalLayout {
+                    spacing: 5px;
+                    for file[index] in root.detail-files: Rectangle {
+                        height: 52px;
+                        border-radius: 6px;
+                        border-width: 1px;
+                        border-color: Theme.border;
+                        background: Theme.surface-2;
+
+                        if root.detail-is-torrent: UiCheckBox {
+                            x: 10px;
+                            y: 13px;
+                            width: 23px;
+                            height: 26px;
+                            checked: file.selected;
+                            label: file.name;
+                            toggled(value) => { root.toggle-detail-file(index, value); }
+                        }
+                        Text {
+                            x: root.detail-is-torrent ? 42px : 12px;
+                            y: 6px;
+                            width: parent.width - self.x - 152px;
+                            height: 19px;
+                            text: file.name;
+                            color: Theme.text;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Text {
+                            x: parent.width - 140px;
+                            y: 6px;
+                            width: 128px;
+                            height: 19px;
+                            text: file.meta;
+                            color: Theme.muted;
+                            font-family: "Noto Sans Mono";
+                            font-size: 9px;
+                            horizontal-alignment: right;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        Rectangle {
+                            x: root.detail-is-torrent ? 42px : 12px;
+                            y: 35px;
+                            width: parent.width - self.x - 12px;
+                            height: 4px;
+                            border-radius: 2px;
+                            background: Theme.border;
+                            Rectangle {
+                                x: 0px;
+                                width: max(0px, min(parent.width, parent.width * file.progress));
+                                height: parent.height;
+                                horizontal-stretch: 0;
+                                border-radius: 2px;
+                                background: Theme.active-fg;
+                                animate width { duration: 160ms; easing: linear; }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 58px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface-2;
+                HorizontalLayout {
+                    padding-left: 11px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    Text {
+                        text: root.label-speed-limit;
+                        color: Theme.text;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    speed-control-shell := Rectangle {
+                        min-width: speed-controls.min-width;
+                        preferred-width: speed-controls.min-width;
+                        max-width: speed-controls.min-width;
+                        height: parent.height;
+                        horizontal-stretch: 0;
+                        speed-controls := HorizontalLayout {
+                            y: 12px;
+                            height: 34px;
+                            spacing: 8px;
+                            UiNumberField {
+                                width: 104px;
+                                height: 34px;
+                                value <=> root.detail-speed-kb;
+                                minimum: 0;
+                                maximum: 1000000;
+                                label: root.label-speed-limit;
+                            }
+                            Text {
+                                width: 31px;
+                                text: "KB/s";
+                                color: Theme.muted;
+                                font-family: "Noto Sans Mono";
+                                font-size: 9px;
+                                vertical-alignment: center;
+                            }
+                            UiButton {
+                                compact: true;
+                                text: root.label-apply;
+                                clicked => { root.set-download-speed(root.detail-id, root.detail-speed-kb); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 58px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface-2;
+                HorizontalLayout {
+                    padding-left: 11px;
+                    padding-right: 10px;
+                    spacing: 8px;
+                    Text {
+                        text: root.label-start-in-minutes;
+                        color: Theme.text;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                    schedule-control-shell := Rectangle {
+                        min-width: schedule-controls.min-width;
+                        preferred-width: schedule-controls.min-width;
+                        max-width: schedule-controls.min-width;
+                        height: parent.height;
+                        horizontal-stretch: 0;
+                        schedule-controls := HorizontalLayout {
+                            y: 12px;
+                            height: 34px;
+                            spacing: 8px;
+                            UiNumberField {
+                                width: 48px;
+                                height: 34px;
+                                value <=> root.detail-delay-minutes;
+                                minimum: 1;
+                                maximum: 1000000;
+                                label: root.label-start-in-minutes;
+                            }
+                            UiButton {
+                                compact: true;
+                                text: root.label-schedule-action;
+                                clicked => { root.schedule-download(root.detail-id, root.detail-delay-minutes); }
+                            }
+                            UiButton {
+                                compact: true;
+                                text: root.label-cancel-schedule;
+                                ghost: true;
+                                clicked => { root.unschedule-download(root.detail-id); }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 42px;
+                Rectangle {
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.border;
+                }
+                HorizontalLayout {
+                    y: 5px;
+                    height: 34px;
+                    Rectangle { horizontal-stretch: 1; }
+                    UiButton {
+                        compact: true;
+                        text: root.delete-confirm-id == root.detail-id ? root.label-confirm-delete : root.label-remove-delete;
+                        icon: "trash";
+                        danger: true;
+                        clicked => {
+                            if root.delete-confirm-id == root.detail-id {
+                                root.remove-delete(root.detail-id);
+                                root.delete-confirm-id = 0;
+                                root.detail-visible = false;
+                            } else {
+                                root.delete-confirm-id = root.detail-id;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }

@@ -1,0 +1,272 @@
+import { DownloadRow } from "models.slint";
+import { AppIcon, IconButton, IconSlot, Theme, UiCheckBox } from "ui-kit.slint";
+
+export component DownloadCard inherits Rectangle {
+    in property <DownloadRow> data;
+    in property <string> label-pause;
+    in property <string> label-resume;
+    in property <string> label-retry;
+    in property <string> label-open-file;
+    in property <string> label-folder;
+    in property <string> label-details;
+    in property <string> label-remove;
+    in property <string> label-copy-url;
+    callback pause(int);
+    callback resume(int);
+    callback retry(int);
+    callback open-file(int);
+    callback open-folder(int);
+    callback show-details(int);
+    callback remove(int);
+    callback copy-url(string);
+    callback toggle-selected(int, bool);
+    callback key-action(int, string);
+
+    height: 94px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: keyboard.has-focus ? Theme.strong : card-touch.has-hover ? Theme.border-strong : Theme.border;
+    background: card-touch.pressed ? Theme.surface-pressed : card-touch.has-hover ? Theme.surface-2 : Theme.surface;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+
+    keyboard := FocusScope {
+        width: 0px;
+        height: 0px;
+        focus-on-tab-navigation: true;
+        accessible-role: list-item;
+        accessible-label: root.data.name;
+        key-pressed(event) => {
+            if event.text == Key.Space {
+                root.key-action(root.data.id, "toggle");
+                return accept;
+            }
+            if event.text == Key.Delete || event.text == Key.Backspace {
+                root.key-action(root.data.id, "remove");
+                return accept;
+            }
+            if event.text == Key.Return {
+                root.key-action(root.data.id, "open");
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    card-touch := TouchArea {
+        enabled: root.data.status == "complete";
+        mouse-cursor: pointer;
+        clicked => { root.open-file(root.data.id); }
+    }
+
+    VerticalLayout {
+        padding-top: 11px;
+        padding-bottom: 10px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 7px;
+
+        HorizontalLayout {
+            spacing: 9px;
+            UiCheckBox {
+                checked: root.data.selected;
+                label: root.data.name;
+                toggled(value) => { root.toggle-selected(root.data.id, value); }
+            }
+            IconSlot {
+                name: root.data.kind == "video" || root.data.kind == "hls" || root.data.kind == "dash" ? "video" :
+                    root.data.kind == "magnet" || root.data.kind == "torrent" ? "magnet" : "file";
+                size: 16px;
+                icon-color: Theme.muted;
+            }
+            Text {
+                text: root.data.name;
+                color: Theme.strong;
+                font-size: 14px;
+                font-weight: 600;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            status-pill := Rectangle {
+                min-width: status-label.preferred-width + 16px;
+                horizontal-stretch: 0;
+                height: 20px;
+                border-radius: 10px;
+                background: root.data.status == "complete" ? Theme.complete-bg :
+                    root.data.status == "error" ? Theme.error-bg :
+                    root.data.status == "paused" || root.data.status == "scheduled" ? Theme.paused-bg :
+                    root.data.running ? Theme.active-bg : Theme.queued-bg;
+                status-label := Text {
+                    x: 8px;
+                    width: parent.width - 16px;
+                    height: parent.height;
+                    text: root.data.status-display.to-uppercase();
+                    color: root.data.status == "complete" ? Theme.complete-fg :
+                        root.data.status == "error" ? Theme.error-fg :
+                        root.data.status == "paused" || root.data.status == "scheduled" ? Theme.paused-fg :
+                        root.data.running ? Theme.active-fg : Theme.queued-fg;
+                    font-family: "Noto Sans Mono";
+                    font-size: 9px;
+                    font-weight: 600;
+                    letter-spacing: 0.5px;
+                    vertical-alignment: center;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            height: 6px;
+            border-radius: 3px;
+            background: Theme.surface-2;
+            Rectangle {
+                x: 0px;
+                width: max(0px, min(parent.width, parent.width * root.data.progress));
+                height: parent.height;
+                horizontal-stretch: 0;
+                border-radius: 3px;
+                background: root.data.status == "complete" ? Theme.complete-fg :
+                    root.data.status == "error" ? Theme.error-fg :
+                    root.data.status == "paused" || root.data.status == "scheduled" ? Theme.paused-fg :
+                    root.data.running ? Theme.active-fg : Theme.strong;
+                animate width { duration: 400ms; easing: linear; }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.data.meta-text
+                    + (root.data.speed-text == "" ? "" : " · " + root.data.speed-text)
+                    + (root.data.eta-text == "" ? "" : " · " + root.data.eta-text);
+                color: Theme.muted;
+                font-family: "Noto Sans Mono";
+                font-size: 10px;
+                horizontal-stretch: 1;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+            action-rail := Rectangle {
+                // HorizontalLayout.min-width already includes its own padding.
+                // Adding it again left six surplus pixels on the right edge.
+                min-width: action-layout.min-width;
+                preferred-width: action-layout.min-width;
+                horizontal-stretch: 0;
+                height: 32px;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Theme.border;
+                background: Theme.surface;
+                TouchArea { }
+                action-layout := HorizontalLayout {
+                    padding-left: 3px;
+                    padding-right: 3px;
+                    padding-top: 2px;
+                    padding-bottom: 2px;
+                    spacing: 2px;
+                    if root.data.running: IconButton { icon: "pause"; label: root.label-pause; width: 28px; height: 28px; clicked => { root.pause(root.data.id); } }
+                    if root.data.resumable: IconButton { icon: "play"; label: root.label-resume; width: 28px; height: 28px; clicked => { root.resume(root.data.id); } }
+                    if root.data.status == "error": IconButton { icon: "retry"; label: root.label-retry; width: 28px; height: 28px; clicked => { root.retry(root.data.id); } }
+                    if root.data.status == "complete": IconButton { icon: "folder"; label: root.label-folder; width: 28px; height: 28px; clicked => { root.open-folder(root.data.id); } }
+                    IconButton { icon: "chevron-down"; label: root.label-details; width: 28px; height: 28px; clicked => { root.show-details(root.data.id); } }
+                    IconButton { icon: "link"; label: root.label-copy-url; width: 28px; height: 28px; clicked => { root.copy-url(root.data.url); } }
+                    IconButton { icon: "trash"; label: root.label-remove; danger: true; width: 28px; height: 28px; clicked => { root.remove(root.data.id); } }
+                }
+            }
+        }
+    }
+}
+
+export component PackageHeader inherits Rectangle {
+    in property <DownloadRow> data;
+    in property <string> label-pause;
+    in property <string> label-resume;
+    in property <string> label-remove;
+    in property <string> label-collapse;
+    in property <string> label-expand;
+    callback toggle(int);
+    callback action(int, string);
+
+    height: 66px;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.border-strong;
+    background: Theme.surface-2;
+
+    IconButton {
+        x: 9px;
+        y: 8px;
+        icon: root.data.package-collapsed ? "chevron-right" : "chevron-down";
+        label: root.data.package-collapsed ? root.label-expand : root.label-collapse;
+        clicked => { root.toggle(root.data.package-id); }
+    }
+    Text {
+        x: 48px;
+        y: 8px;
+        width: parent.width - 200px;
+        height: 20px;
+        text: root.data.package-name;
+        color: Theme.strong;
+        font-size: 13px;
+        font-weight: 700;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Text {
+        x: 48px;
+        y: 29px;
+        width: parent.width - 200px;
+        height: 18px;
+        text: root.data.package-count-text + " · " + root.data.package-meta-text;
+        color: Theme.muted;
+        font-family: "Noto Sans Mono";
+        font-size: 9px;
+        overflow: elide;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        x: 48px;
+        y: 51px;
+        width: parent.width - 62px;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.border;
+        Rectangle {
+            x: 0px;
+            width: max(0px, min(parent.width, parent.width * root.data.package-progress));
+            height: parent.height;
+            horizontal-stretch: 0;
+            border-radius: 2px;
+            background: Theme.active-fg;
+            animate width { duration: 400ms; easing: linear; }
+        }
+    }
+    if root.data.package-running: IconButton {
+        x: parent.width - 104px;
+        y: 8px;
+        width: 28px;
+        height: 28px;
+        icon: "pause";
+        label: root.label-pause;
+        clicked => { root.action(root.data.package-id, "pause"); }
+    }
+    if root.data.package-resumable: IconButton {
+        x: parent.width - 72px;
+        y: 8px;
+        width: 28px;
+        height: 28px;
+        icon: "play";
+        label: root.label-resume;
+        clicked => { root.action(root.data.package-id, "resume"); }
+    }
+    IconButton {
+        x: parent.width - 40px;
+        y: 8px;
+        width: 28px;
+        height: 28px;
+        icon: "trash";
+        danger: true;
+        label: root.label-remove;
+        clicked => { root.action(root.data.package-id, "remove"); }
+    }
+}

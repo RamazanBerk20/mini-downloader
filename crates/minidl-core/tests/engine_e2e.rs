@@ -1,5 +1,7 @@
-//! End-to-end engine test against a real aria2c. Ignored by default (needs
-//! network + `aria2c` on PATH). Run with:
+//! End-to-end engine tests against a real aria2c and a deterministic loopback
+//! HTTP fixture. Ignored by default because `aria2c` must be on PATH.
+//!
+//! Run with:
 //!   cargo test -p minidl-core --test engine_e2e -- --ignored --nocapture
 
 use std::time::Duration;
@@ -9,10 +11,15 @@ use minidl_core::aria2::{
 };
 use minidl_core::ipc::{CaptureJob, DownloadKind};
 
-fn job(url: &str) -> CaptureJob {
+#[path = "../../../test-support/loopback_http.rs"]
+mod loopback_http;
+
+use loopback_http::LoopbackHttp;
+
+fn job(url: &str, filename: &str) -> CaptureJob {
     CaptureJob {
         url: url.into(),
-        filename: Some("e2e.bin".into()),
+        filename: Some(filename.into()),
         referrer: None,
         user_agent: None,
         cookie: None,
@@ -29,48 +36,59 @@ fn job(url: &str) -> CaptureJob {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "requires aria2c on PATH"]
 async fn download_completes_with_notification() {
-    let dir = std::env::temp_dir().join(format!("ldm-e2e-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let fixture = LoopbackHttp::start(512 * 1_024).await;
+    let root = tempfile::tempdir().expect("temporary e2e directory");
+    let downloads = root.path().join("downloads");
+    let data = root.path().join("data");
+    std::fs::create_dir_all(&downloads).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
 
     let engine = Engine::launch(LaunchOptions {
         aria2c_path: None,
-        download_dir: dir.clone(),
-        data_dir: dir.clone(),
-        max_concurrent: 5,
+        download_dir: downloads.clone(),
+        data_dir: data,
+        max_concurrent: 2,
         ..Default::default()
     })
     .await
     .expect("engine launch");
-
     assert!(engine.rpc.get_version().await.is_ok());
 
     let mut events = engine.subscribe();
-
-    let j = job("https://speed.cloudflare.com/__down?bytes=1048576");
-    let opts = build_add_options(&j, dir.to_str().unwrap(), &EngineDefaults::default());
+    let capture = job(&fixture.url, "e2e.bin");
+    let options = build_add_options(
+        &capture,
+        downloads.to_str().unwrap(),
+        &EngineDefaults {
+            split: 1,
+            max_connection_per_server: 1,
+            ..Default::default()
+        },
+    );
     let gid = engine
         .rpc
         .add_uri(
-            std::slice::from_ref(&j.url),
-            serde_json::Value::Object(opts),
+            std::slice::from_ref(&capture.url),
+            serde_json::Value::Object(options),
         )
         .await
-        .expect("addUri");
+        .expect("add loopback URI");
 
-    // Prefer the WebSocket completion notification; fall back to polling.
-    let completed = tokio::time::timeout(Duration::from_secs(45), async {
+    let completed = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             tokio::select! {
-                ev = events.recv() => {
-                    if let Ok(Aria2Event::Complete(g)) = ev {
-                        if g == gid { break true; }
+                event = events.recv() => {
+                    if let Ok(Aria2Event::Complete(completed_gid)) = event {
+                        if completed_gid == gid { break true; }
                     }
                 }
-                _ = tokio::time::sleep(Duration::from_millis(500)) => {
-                    let st = engine.rpc.tell_status(&gid, STATUS_KEYS).await.unwrap();
-                    if st.get("status").and_then(|s| s.as_str()) == Some("complete") { break true; }
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    let status = engine.rpc.tell_status(&gid, STATUS_KEYS).await.unwrap();
+                    if status.get("status").and_then(|value| value.as_str()) == Some("complete") {
+                        break true;
+                    }
                 }
             }
         }
@@ -79,78 +97,69 @@ async fn download_completes_with_notification() {
     .unwrap_or(false);
 
     engine.shutdown().await;
-
-    assert!(completed, "download did not complete in time");
-    let file = dir.join("e2e.bin");
-    assert!(file.exists(), "file missing: {}", file.display());
-    let size = std::fs::metadata(&file).unwrap().len();
-    assert_eq!(size, 1_048_576, "unexpected size");
-
-    let _ = std::fs::remove_dir_all(&dir);
+    assert!(completed, "loopback download did not complete in time");
+    assert_eq!(
+        std::fs::read(downloads.join("e2e.bin")).unwrap(),
+        fixture.payload.as_slice()
+    );
+    fixture.shutdown();
 }
 
-/// Requires `aria2c` on PATH. A saved session must be inert at cold startup,
-/// then resume normally when the user explicitly asks it to. This protects the
-/// app-opening path without sacrificing aria2's partial-file continuation.
+/// A saved session must be inert at cold startup, then resume normally after
+/// an explicit user action.
 #[tokio::test]
-#[ignore]
+#[ignore = "requires aria2c on PATH"]
 async fn restored_session_stays_paused_until_explicit_resume() {
-    let dir = std::env::temp_dir().join(format!("ldm-paused-session-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    const GID: &str = "0000000000000001";
+
+    let fixture = LoopbackHttp::start(384 * 1_024).await;
+    let root = tempfile::tempdir().expect("temporary e2e directory");
+    let downloads = root.path().join("downloads");
+    let data = root.path().join("data");
+    std::fs::create_dir_all(&downloads).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
     std::fs::write(
-        dir.join("aria2.session"),
-        concat!(
-            "https://speed.cloudflare.com/__down?bytes=1048576\n",
-            " gid=0000000000000001\n",
-            " out=must-not-exist\n",
-        ),
+        data.join("aria2.session"),
+        format!("{}\n gid={GID}\n out=restored.bin\n", fixture.url),
     )
     .unwrap();
 
     let engine = Engine::launch(LaunchOptions {
         aria2c_path: None,
-        download_dir: dir.clone(),
-        data_dir: dir.clone(),
-        max_concurrent: 5,
+        download_dir: downloads.clone(),
+        data_dir: data,
+        max_concurrent: 2,
         ..Default::default()
     })
     .await
     .expect("engine launch");
 
-    tokio::time::sleep(Duration::from_millis(750)).await;
-    assert!(!dir.join("must-not-exist").exists());
-    assert!(!dir.join("must-not-exist.aria2").exists());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!downloads.join("restored.bin").exists());
+    assert!(!downloads.join("restored.bin.aria2").exists());
 
-    engine
-        .rpc
-        .unpause("0000000000000001")
-        .await
-        .expect("explicit resume");
-    let completed = tokio::time::timeout(Duration::from_secs(45), async {
+    engine.rpc.unpause(GID).await.expect("explicit resume");
+    let completed = tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             let status = engine
                 .rpc
-                .tell_status("0000000000000001", STATUS_KEYS)
+                .tell_status(GID, STATUS_KEYS)
                 .await
                 .unwrap_or_default();
             if status.get("status").and_then(|value| value.as_str()) == Some("complete") {
                 break true;
             }
-            tokio::time::sleep(Duration::from_millis(250)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     })
     .await
     .unwrap_or(false);
-    assert!(
-        completed,
-        "explicitly resumed session did not complete in time"
-    );
-    assert_eq!(
-        std::fs::metadata(dir.join("must-not-exist")).unwrap().len(),
-        1_048_576
-    );
 
     engine.shutdown().await;
-    let _ = std::fs::remove_dir_all(&dir);
+    assert!(completed, "explicitly resumed session did not complete");
+    assert_eq!(
+        std::fs::read(downloads.join("restored.bin")).unwrap(),
+        fixture.payload.as_slice()
+    );
+    fixture.shutdown();
 }

@@ -1,0 +1,218 @@
+import { AppIcon, Theme, UiButton, UiSwitch } from "ui-kit.slint";
+
+export component SettingsToggleRow inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked: false;
+    callback changed(bool);
+
+    height: 48px;
+    horizontal-stretch: 1;
+    background: transparent;
+    Text {
+        x: 0px;
+        width: parent.width - 58px;
+        height: parent.height;
+        text: root.text;
+        color: Theme.text;
+        font-size: 13px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    UiSwitch {
+        x: parent.width - self.width;
+        y: (parent.height - self.height) / 2;
+        checked <=> root.checked;
+        label: root.text;
+        toggled(value) => { root.changed(value); }
+    }
+}
+
+export component SettingsHint inherits Text {
+    in property <string> value: "";
+    text: root.value;
+    color: Theme.muted;
+    font-size: 11px;
+    wrap: word-wrap;
+    vertical-alignment: top;
+    min-height: self.preferred-height;
+}
+
+export component DayChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+    callback clicked;
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-checked: root.selected;
+    accessible-action-default => { touch.clicked(); }
+
+    height: 29px;
+    min-width: 39px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    border-radius: 6px;
+    border-width: focus.has-focus ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.active-fg : root.selected ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.border-strong : Theme.border;
+    background: root.selected ? (touch.pressed ? Theme.ink-pressed : touch.has-hover ? Theme.ink-hover : Theme.ink) :
+        touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 : Theme.surface;
+    animate background, border-color { duration: 90ms; easing: ease-out; }
+    Text {
+        x: 4px;
+        y: touch.pressed ? 1px : 0px;
+        width: parent.width - 8px;
+        height: parent.height - self.y;
+        text: root.text;
+        color: root.selected ? Theme.ink-fg : Theme.text;
+        font-family: "Noto Sans Mono";
+        font-size: 10px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}
+
+export component BrowserStatus inherits Rectangle {
+    in property <string> text;
+    in property <int> state: 0;
+
+    height: 22px;
+    width: label.preferred-width + 14px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: root.state == 1 ? Theme.complete-fg : root.state == 2 ? Theme.active-fg : root.state == 3 ? Theme.paused-fg : Theme.border;
+    background: root.state == 1 ? Theme.complete-bg : root.state == 2 ? Theme.active-bg : root.state == 3 ? Theme.paused-bg : Theme.surface-2;
+    label := Text {
+        x: 7px;
+        width: parent.width - 14px;
+        height: parent.height;
+        text: root.text;
+        color: root.state == 1 ? Theme.complete-fg : root.state == 2 ? Theme.active-fg : root.state == 3 ? Theme.paused-fg : Theme.muted;
+        font-size: 10px;
+        vertical-alignment: center;
+        horizontal-alignment: center;
+    }
+}
+
+export component BrowserStoreCard inherits Rectangle {
+    in property <string> browser;
+    in property <string> status-text;
+    in property <int> status-state: 0;
+    in property <string> hint;
+    in property <string> button-text;
+    callback install();
+
+    height: 82px;
+    border-radius: 7px;
+    border-width: 1px;
+    border-color: Theme.border;
+    background: Theme.surface;
+
+    Text {
+        x: 12px;
+        y: 9px;
+        width: 72px;
+        height: 24px;
+        text: root.browser;
+        color: Theme.strong;
+        font-size: 13px;
+        font-weight: 600;
+        vertical-alignment: center;
+    }
+    BrowserStatus {
+        x: 86px;
+        y: 10px;
+        state: root.status-state;
+        text: root.status-text;
+    }
+    Text {
+        x: 12px;
+        y: 37px;
+        width: parent.width - install-button.width - 34px;
+        height: 35px;
+        text: root.hint;
+        color: Theme.muted;
+        font-size: 10px;
+        wrap: word-wrap;
+        vertical-alignment: top;
+    }
+    install-button := UiButton {
+        x: parent.width - self.width - 10px;
+        y: 24px;
+        width: min(164px, parent.width - 20px);
+        text: root.button-text;
+        icon: "link";
+        primary: true;
+        compact: true;
+        clicked => { root.install(); }
+    }
+}
+
+export component SponsorButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    forward-focus: focus;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { touch.clicked(); }
+
+    width: label.preferred-width + 43px;
+    height: 38px;
+    border-radius: 6px;
+    border-width: focus.has-focus ? 2px : 0px;
+    border-color: Theme.active-fg;
+    background: touch.pressed ? Theme.surface-pressed : touch.has-hover ? Theme.surface-2 : transparent;
+    animate background { duration: 90ms; easing: ease-out; }
+
+    AppIcon {
+        x: 9px;
+        y: (parent.height - self.height) / 2 + (touch.pressed ? 1px : 0px);
+        width: 16px;
+        height: 16px;
+        name: "heart";
+        color: Theme.dark ? #c9788d : #b0526b;
+    }
+    label := Text {
+        x: 32px;
+        y: touch.pressed ? 1px : 0px;
+        width: self.preferred-width;
+        height: parent.height - self.y;
+        text: root.text;
+        color: touch.has-hover ? Theme.text : Theme.muted;
+        font-size: 12px;
+        font-weight: 500;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if event.text == Key.Space || event.text == Key.Return {
+                touch.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

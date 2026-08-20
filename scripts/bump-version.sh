@@ -23,7 +23,6 @@ sed -i -E \
   's/^version = "[0-9]+\.[0-9]+\.[0-9]+"/version = "'"$version"'"/' \
   Cargo.toml
 sed -i -E 's/"version": "[0-9]+\.[0-9]+\.[0-9]+"/"version": "'"$version"'"/' \
-  apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json \
   extension/manifest.json extension/manifest.chrome.json
 npm version --prefix tools/extension-publisher --no-git-tag-version \
   --allow-same-version "$version" >/dev/null

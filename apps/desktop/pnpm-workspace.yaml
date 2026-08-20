@@ -1,6 +1,0 @@
-# esbuild's postinstall just verifies its platform binary — allow it.
-allowBuilds:
-  esbuild: true
-
-overrides:
-  postcss: 8.5.24

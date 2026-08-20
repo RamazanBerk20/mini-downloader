@@ -123,9 +123,15 @@ Build, test, and run:
 
 ```sh
 cargo test --workspace --locked
+cargo test -p minidl-core --test engine_e2e -- --ignored
+cargo test -p minidl-app --test controller_e2e -- --ignored
 cargo run -p minidl-native-desktop
 cargo build --release -p minidl-native-desktop -p minidl-native-host
 ```
+
+The ignored E2E tests require `aria2c`; they use a deterministic loopback HTTP
+fixture and never depend on an external download host. Canonical app locales
+and icons live under `assets/` and are shared by the native build and packaging.
 
 Create native Linux artifacts with `./scripts/package-linux.sh`. It always
 creates the portable tarball and additionally creates deb/rpm/AppImage packages

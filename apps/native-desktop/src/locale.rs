@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-const EN: &str = include_str!("../../desktop/src/locales/en.ts");
-const TR: &str = include_str!("../../desktop/src/locales/tr.ts");
-const ES: &str = include_str!("../../desktop/src/locales/es.ts");
-const FR: &str = include_str!("../../desktop/src/locales/fr.ts");
-const DE: &str = include_str!("../../desktop/src/locales/de.ts");
-const RU: &str = include_str!("../../desktop/src/locales/ru.ts");
-const AR: &str = include_str!("../../desktop/src/locales/ar.ts");
-const ZH: &str = include_str!("../../desktop/src/locales/zh.ts");
-const JA: &str = include_str!("../../desktop/src/locales/ja.ts");
-const KO: &str = include_str!("../../desktop/src/locales/ko.ts");
+const EN: &str = include_str!("../../../assets/locales/en.json");
+const TR: &str = include_str!("../../../assets/locales/tr.json");
+const ES: &str = include_str!("../../../assets/locales/es.json");
+const FR: &str = include_str!("../../../assets/locales/fr.json");
+const DE: &str = include_str!("../../../assets/locales/de.json");
+const RU: &str = include_str!("../../../assets/locales/ru.json");
+const AR: &str = include_str!("../../../assets/locales/ar.json");
+const ZH: &str = include_str!("../../../assets/locales/zh.json");
+const JA: &str = include_str!("../../../assets/locales/ja.json");
+const KO: &str = include_str!("../../../assets/locales/ko.json");
 
 pub fn normalize(raw: &str) -> &'static str {
     match raw
@@ -54,24 +54,7 @@ fn source(locale: &str) -> &'static str {
 }
 
 fn parse(source: &str) -> HashMap<String, String> {
-    source
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.starts_with("//") || line.starts_with("export ") || line == "};" {
-                return None;
-            }
-            let (key, value) = line.split_once(':')?;
-            let key = key.trim().trim_matches('"');
-            let value = value.trim().strip_suffix(',').unwrap_or(value.trim());
-            if key.is_empty() || !value.starts_with('"') {
-                return None;
-            }
-            serde_json::from_str::<String>(value)
-                .ok()
-                .map(|value| (key.to_owned(), value))
-        })
-        .collect()
+    serde_json::from_str(source).expect("bundled locale catalog is valid JSON")
 }
 
 pub struct Catalog {

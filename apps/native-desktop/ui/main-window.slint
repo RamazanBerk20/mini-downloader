@@ -1,0 +1,1292 @@
+import { ComboBox, Palette, ScrollView, SpinBox } from "std-widgets.slint";
+import { AppIcon, IconButton, IconSlot, NavItem, OnboardCard, SectionLabel, SettingsTab, Theme, UiButton, UiCheckBox, UiDecimalField, UiField, UiNumberField, UiSlider, UiStepper, UiSwitch, UiTextArea } from "ui-kit.slint";
+import { CategoryRow, DetailFileRow, DownloadRow, LinkChoice, MediaChoice, ScheduleRow } from "models.slint";
+import { DownloadCard, PackageHeader } from "downloads.slint";
+import { BrowserStatus, BrowserStoreCard, DayChip, SettingsHint, SettingsToggleRow, SponsorButton } from "settings.slint";
+import { LinkDialog, MediaDialog, ShortcutsDialog } from "dialogs.slint";
+import { DetailDialog } from "detail-dialog.slint";
+export component MainWindow inherits Window {
+    title: "Mini Downloader";
+    icon: @image-url("../../../assets/icons/32x32.png");
+    preferred-width: 1000px;
+    preferred-height: 680px;
+    min-width: 720px;
+    min-height: 480px;
+    default-font-family: "Noto Sans";
+    default-font-size: 14px;
+    background: Theme.canvas;
+
+    in property <[DownloadRow]> downloads;
+    in property <[CategoryRow]> categories;
+    in property <[ScheduleRow]> schedules;
+    in property <[LinkChoice]> grabbed-links;
+    in property <[MediaChoice]> media-choices;
+    in property <[DetailFileRow]> detail-files;
+    in-out property <string> page-title: "All downloads";
+    in-out property <string> status-text: "";
+    in property <string> memory-text: "";
+    in property <int> count-all: 0;
+    in property <int> count-active: 0;
+    in property <int> count-paused: 0;
+    in property <int> count-scheduled: 0;
+    in property <int> count-completed: 0;
+    in property <int> count-failed: 0;
+    in property <int> selected-count: 0;
+    in property <string> selected-text: "";
+    in-out property <string> url-text: "";
+    in-out property <string> search-text: "";
+    in-out property <string> checksum-text: "";
+    in-out property <bool> show-add-options: false;
+    in-out property <int> global-speed-index: 0;
+    in-out property <string> link-text: "";
+    in-out property <string> link-package: "";
+    in-out property <string> media-url: "";
+    in-out property <string> media-title: "";
+    in-out property <string> media-entries-text: "";
+    in-out property <bool> media-is-playlist: false;
+    in-out property <bool> media-probe-playlist: false;
+    in-out property <string> media-quality: "best";
+    in-out property <bool> media-audio-only: false;
+    in-out property <bool> media-subtitles: false;
+    in-out property <bool> media-embed-subtitles: false;
+    in-out property <string> media-sub-langs: "en";
+    in-out property <string> media-audio-format: "mp3";
+    in-out property <bool> media-thumbnail: false;
+    in-out property <string> proxy-text: "";
+    in-out property <int> max-concurrent: 5;
+    in-out property <int> split-count: 16;
+    in-out property <int> connection-count: 16;
+    in-out property <bool> clipboard-watch: false;
+    in-out property <bool> auto-organize: true;
+    in-out property <bool> prevent-duplicates: true;
+    in-out property <bool> close-to-tray: true;
+    in-out property <bool> autostart: false;
+    in-out property <bool> handle-magnets: true;
+    in-out property <bool> dht-enabled: true;
+    in-out property <bool> sandbox-children: false;
+    in-out property <bool> block-private-ips: true;
+    in-out property <string> locale-choice: "System Default";
+    in-out property <string> on-complete-action: "none";
+    in-out property <string> on-complete-command: "";
+    in-out property <bool> on-complete-confirmed: false;
+    in-out property <float> default-speed-mb: 0;
+    in-out property <string> update-text: "";
+    in-out property <string> update-page: "";
+    in-out property <string> update-asset: "";
+    in-out property <string> connector-text: "";
+    in-out property <string> theme-choice: "system";
+    in property <bool> system-dark: true;
+    in property <bool> rtl: false;
+    in property <bool> dark: root.theme-choice == "dark" || (root.theme-choice == "system" && root.system-dark);
+    in-out property <int> firefox-state: 0;
+    in-out property <int> chromium-state: 0;
+    in-out property <int> current-page: 0;
+    in-out property <int> settings-section: 0;
+    in-out property <int> status-filter: 0;
+    in-out property <bool> detail-visible: false;
+    in-out property <string> detail-url: "";
+    in-out property <string> detail-dir: "";
+    in-out property <string> detail-error: "";
+    in-out property <int> detail-peer-count: 0;
+    in-out property <string> detail-pieces-text: "";
+    in-out property <int> detail-id: 0;
+    in-out property <bool> detail-is-torrent: false;
+    in-out property <int> detail-speed-kb: 0;
+    in-out property <int> detail-delay-minutes: 10;
+    in-out property <int> delete-confirm-id: 0;
+    in-out property <string> category-name: "";
+    in-out property <string> category-dir: "";
+    in-out property <string> category-rules: "";
+    in-out property <string> category-mime: "";
+    in-out property <string> category-host: "";
+    in-out property <string> schedule-name: "";
+    in-out property <int> schedule-id: 0;
+    in-out property <string> schedule-action: "pause_all";
+    in-out property <int> schedule-hour: 22;
+    in-out property <int> schedule-minute: 0;
+    in-out property <int> schedule-days: 127;
+    in-out property <int> schedule-speed: 512000;
+    out property <bool> shortcut-blocked: root.current-page != 0 || root.detail-visible || add-field.input-focused || search-field.input-focused;
+
+    in property <string> nav-downloads: "All downloads";
+    in property <string> nav-links: "Grab links";
+    in property <string> nav-media: "Grab video";
+    in property <string> nav-settings: "Settings";
+    in property <string> label-filters: "STATUS";
+    in property <string> label-categories: "CATEGORIES";
+    in property <string> label-all: "All";
+    in property <string> label-active: "Active";
+    in property <string> label-paused: "Paused";
+    in property <string> label-scheduled: "Scheduled";
+    in property <string> label-completed: "Completed";
+    in property <string> label-failed: "Failed";
+    in property <string> label-pause-all: "Pause all";
+    in property <string> label-resume-all: "Resume all";
+    in property <string> label-clear-completed: "Clear completed";
+    in property <string> label-clear-failed: "Clear failed";
+    in property <string> label-search: "Search";
+    in property <string> label-add-placeholder: "Paste a URL or magnet link";
+    in property <string> label-checksum: "SHA-256 checksum (optional)";
+    in property <string> label-add: "Add";
+    in property <string> label-pause: "Pause";
+    in property <string> label-resume: "Resume";
+    in property <string> label-retry: "Retry";
+    in property <string> label-open-file: "Open file";
+    in property <string> label-folder: "Open folder";
+    in property <string> label-details: "Details";
+    in property <string> label-remove: "Remove";
+    in property <string> label-remove-delete: "Remove + delete files";
+    in property <string> label-confirm-delete: "Confirm: delete files";
+    in property <string> label-copy-url: "Copy URL";
+    in property <string> label-close: "Close";
+    in property <string> label-empty-title: "No downloads yet";
+    in property <string> label-empty-sub: "Paste a URL above, or capture one from your browser.";
+    in property <string> label-no-match-title: "No matching downloads";
+    in property <string> label-no-match-sub: "Try another filter or search.";
+    in property <string> label-onboard-paste: "Paste a URL";
+    in property <string> label-onboard-video: "Grab a video";
+    in property <string> label-onboard-links: "Grab links";
+    in property <string> label-onboard-browser: "Set up browser capture";
+    in property <string> label-link-title: "Grab links";
+    in property <string> label-link-placeholder: "Paste text, a link list, or HTML";
+    in property <string> label-extract-links: "Extract links";
+    in property <string> label-media-title: "Grab video";
+    in property <string> label-media-placeholder: "Video page URL (YouTube, etc.)";
+    in property <string> label-best-quality: "Best quality";
+    in property <string> label-general: "General";
+    in property <string> label-language: "Language";
+    in property <string> label-extensions: "Extensions";
+    in property <string> label-scheduler: "Scheduler";
+    in property <string> label-updates: "Updates";
+    in property <string> label-clipboard: "Watch clipboard for links";
+    in property <string> label-auto-organize: "Auto-organize finished files";
+    in property <string> label-prevent-duplicates: "Prevent duplicate downloads";
+    in property <string> label-close-tray: "Close to tray";
+    in property <string> label-autostart: "Start on login";
+    in property <string> label-handle-magnets: "Handle magnet links";
+    in property <string> label-dht: "BitTorrent DHT";
+    in property <string> label-sandbox: "Sandbox helper processes";
+    in property <string> label-block-private: "Block private/local addresses";
+    in property <string> label-theme: "Theme";
+    in property <string> label-theme-system: "System Default";
+    in property <string> label-theme-light: "Light";
+    in property <string> label-theme-dark: "Dark";
+    in property <string> label-on-complete: "When the queue finishes";
+    in property <string> label-oc-none: "Do nothing";
+    in property <string> label-oc-quit: "Quit app";
+    in property <string> label-oc-sleep: "Sleep";
+    in property <string> label-oc-shutdown: "Shut down";
+    in property <string> label-oc-custom: "Run a command…";
+    in property <string> label-oc-placeholder: "Command to run when all downloads finish";
+    in property <string> label-oc-warning: "This command runs with your user account when the queue is empty. Only use a command you trust.";
+    in property <string> label-oc-confirm: "I understand that this command will run on my computer.";
+    in property <string> label-network: "Network & privacy";
+    in property <string> label-proxy-title: "Proxy";
+    in property <string> label-proxy: "http://host:port or socks5://host:port";
+    in property <string> label-prevent-duplicates-hint: "Reuses an existing download with the same URL and type. Turn this off to allow numbered copies.";
+    in property <string> label-magnets-hint: "Updates the system association immediately.";
+    in property <string> label-restart-hint: "DHT and sandbox changes take effect after the app restarts.";
+    in property <string> label-connections: "Connections";
+    in property <string> label-max-concurrent: "Max simultaneous downloads";
+    in property <string> label-segments: "Segments per file";
+    in property <string> label-conn-server: "Connections per server";
+    in property <string> label-default-speed: "Default speed limit (MB/s)";
+    in property <string> label-connections-hint: "Higher = faster on servers that allow multiple connections. Applies to new downloads.";
+    in property <string> label-extension-hint: "Install Mini Downloader Connector in the browser you use to capture downloads.";
+    in property <string> label-firefox-hint: "Firefox, Firefox ESR, LibreWolf, Waterfox, Zen, and similar browsers.";
+    in property <string> label-chromium-hint: "Chrome, Chromium, Edge, Brave, Vivaldi, Opera, and similar browsers.";
+    in property <string> label-extension-note: "Store links open in your default browser. Open the relevant link in the browser you use.";
+    in property <string> label-browser-checking: "Checking browser…";
+    in property <string> label-browser-connected: "Connected";
+    in property <string> label-browser-installed: "Installed — open browser to connect";
+    in property <string> label-browser-needs-extension: "Extension not installed";
+    in property <string> label-browser-not-found: "Browser not detected";
+    in property <string> label-get-firefox: "Get for Firefox";
+    in property <string> label-get-chrome: "Get for Chrome";
+    in property <string> label-sched-pause: "Pause all";
+    in property <string> label-sched-resume: "Resume all";
+    in property <string> label-sched-speed: "Set speed limit";
+    in property <string> label-sched-add: "Add rule";
+    in property <string> label-day-mon: "Mon";
+    in property <string> label-day-tue: "Tue";
+    in property <string> label-day-wed: "Wed";
+    in property <string> label-day-thu: "Thu";
+    in property <string> label-day-fri: "Fri";
+    in property <string> label-day-sat: "Sat";
+    in property <string> label-day-sun: "Sun";
+    in property <string> label-add-category: "Add category";
+    in property <string> label-cat-name: "Name";
+    in property <string> label-cat-folder: "Folder";
+    in property <string> label-cat-rules: "Extensions (comma-separated)";
+    in property <string> label-cat-mime: "MIME types, e.g. video/,audio/";
+    in property <string> label-cat-host: "Hosts, e.g. .example.com";
+    in property <string> label-move-up: "Move up";
+    in property <string> label-move-down: "Move down";
+    in property <string> label-browse-folder: "Browse folder";
+    in property <string> label-restore-defaults: "Restore defaults";
+    in property <string> label-check-updates: "Check for updates";
+    in property <string> label-update-install: "Install";
+    in property <string> label-update-view: "View release";
+    in property <string> label-save: "Save settings";
+    in property <string> label-sponsor: "Sponsor Mini Downloader";
+    in property <string> label-package-collapse: "Collapse package";
+    in property <string> label-package-expand: "Expand package";
+    in property <string> label-add-file: "Add a .torrent or .metalink file";
+    in property <string> label-shortcuts: "Keyboard shortcuts";
+    in property <string> label-checksum-placeholder: "64 hexadecimal characters";
+    in property <string> label-onboard-hint: "Ctrl N to add · ? for shortcuts";
+    in property <string> label-link-help: "Paste text containing URLs or numeric ranges such as file[001-100].zip.";
+    in property <string> label-package-name: "Package name";
+    in property <string> label-select-all: "Select all";
+    in property <string> label-select-none: "Select none";
+    in property <string> label-add-selected: "Add selected";
+    in property <string> label-media-help: "Download video, HLS/DASH streams, subtitles and audio through yt-dlp.";
+    in property <string> label-probe: "Probe";
+    in property <string> label-playlist: "Playlist";
+    in property <string> label-audio-only: "Audio only";
+    in property <string> label-subtitles: "Subtitles";
+    in property <string> label-thumbnail: "Thumbnail";
+    in property <string> label-embed-subtitles: "Embed";
+    in property <string> label-add-playlist: "Add selected";
+    in property <string> label-sc-focus-add: "Focus the add field";
+    in property <string> label-sc-search: "Search";
+    in property <string> label-sc-filter: "Switch status filter";
+    in property <string> label-sc-select-all: "Select all";
+    in property <string> label-sc-pause-resume: "Pause/resume focused download";
+    in property <string> label-sc-remove: "Remove focused download";
+    in property <string> label-sc-open: "Open file (completed)";
+    in property <string> label-sc-close: "Close dialogs";
+    in property <string> label-hour: "Hour";
+    in property <string> label-minute: "Minute";
+    in property <string> label-detail-files: "Files";
+    in property <string> label-detail-peers: "Peers";
+    in property <string> label-detail-pieces: "Pieces";
+    in property <string> label-detail-folder: "Folder";
+    in property <string> label-apply-selection: "Apply selection";
+    in property <string> label-speed-limit: "Speed limit";
+    in property <string> label-apply: "Apply";
+    in property <string> label-start-in-minutes: "Start in minutes";
+    in property <string> label-schedule-action: "Schedule";
+    in property <string> label-cancel-schedule: "Cancel schedule";
+    in property <string> label-unlimited: "Unlimited";
+    in property <string> label-global-speed: "Global speed limit";
+
+    callback add-url(string, string);
+    callback pick-file();
+    callback copy-url(string);
+    callback set-global-speed(int);
+    callback pause(int);
+    callback resume(int);
+    callback retry(int);
+    callback open-file(int);
+    callback remove(int);
+    callback remove-delete(int);
+    callback toggle-selected(int, bool);
+    callback bulk-action(string);
+    callback select-visible(bool);
+    callback toggle-package(int);
+    callback package-action(int, string);
+    callback open-folder(int);
+    callback show-details(int);
+    callback filter-changed(int);
+    callback refresh();
+    callback pause-all();
+    callback resume-all();
+    callback remove-completed();
+    callback remove-failed();
+    callback grab-links(string);
+    callback toggle-grabbed(int, bool);
+    callback select-grabbed(bool);
+    callback add-grabbed();
+    callback add-media(string);
+    callback probe-media(string, bool);
+    callback add-media-choice(string, string);
+    callback toggle-media-choice(int, bool);
+    callback select-media-choices(bool);
+    callback add-playlist();
+    callback toggle-detail-file(int, bool);
+    callback apply-torrent-files(int);
+    callback move-in-queue(int, string);
+    callback set-download-speed(int, int);
+    callback schedule-download(int, int);
+    callback unschedule-download(int);
+    callback save-category(string, string, string, int);
+    callback move-category(int, int);
+    callback save-new-category(string, string, string, string, string);
+    callback browse-category(string, string, int);
+    callback browse-new-category-dir();
+    callback delete-category(int);
+    callback reset-category(int);
+    callback restore-categories();
+    callback save-schedule(int, string, string, int, int, int, bool);
+    callback delete-schedule(int);
+    callback save-settings(string, int, int, int, bool, string, bool, bool, bool, bool, bool, bool, bool, bool, string, string, string, bool, float);
+    callback open-external(string);
+    callback check-update();
+    callback install-update(string, string);
+
+    function persist-settings() {
+        root.save-settings(
+            root.proxy-text, root.max-concurrent, root.split-count, root.connection-count,
+            root.clipboard-watch, root.theme-choice, root.auto-organize, root.prevent-duplicates,
+            root.close-to-tray, root.autostart, root.handle-magnets, root.dht-enabled,
+            root.sandbox-children, root.block-private-ips, root.locale-choice,
+            root.on-complete-action, root.on-complete-command, root.on-complete-confirmed,
+            root.default-speed-mb
+        );
+    }
+
+    public function focus-add-input() {
+        root.current-page = 0;
+        add-field.focus-input();
+    }
+
+    public function focus-search-input() {
+        root.current-page = 0;
+        search-field.focus-input();
+    }
+
+    public function activate-status-filter(value: int) {
+        root.status-filter = value;
+        root.page-title = value == 1 ? root.label-active : value == 2 ? root.label-paused :
+            value == 3 ? root.label-scheduled : value == 4 ? root.label-completed :
+            value == 5 ? root.label-failed : root.nav-downloads;
+        root.filter-changed(value);
+    }
+
+    pure function day-selected(bit: int) -> bool {
+        Math.mod(Math.floor(root.schedule-days / bit), 2) == 1
+    }
+
+    function toggle-day(bit: int) {
+        root.schedule-days = root.day-selected(bit) ? root.schedule-days - bit : root.schedule-days + bit;
+    }
+
+    pure function browser-state-label(state: int) -> string {
+        state == 1 ? root.label-browser-connected :
+        state == 2 ? root.label-browser-installed :
+        state == 3 ? root.label-browser-needs-extension :
+        state == 4 ? root.label-browser-not-found : root.label-browser-checking
+    }
+
+    changed dark => { Theme.dark = root.dark; }
+    changed theme-choice => {
+        Palette.color-scheme = root.theme-choice == "dark" ? ColorScheme.dark :
+            root.theme-choice == "light" ? ColorScheme.light : ColorScheme.unknown;
+    }
+
+    Rectangle {
+
+        sidebar := Rectangle {
+            x: root.rtl ? parent.width - self.width : 0px;
+            width: 232px;
+            height: parent.height;
+            background: Theme.canvas;
+            border-width: 0px;
+            Rectangle { x: root.rtl ? 0px : parent.width - 1px; width: 1px; height: parent.height; background: Theme.border; }
+            VerticalLayout {
+                padding-top: 18px;
+                padding-bottom: 12px;
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 18px;
+
+                Text {
+                    text: "Mini Downloader";
+                    color: Theme.strong;
+                    font-size: 21px;
+                    font-weight: 700;
+                    letter-spacing: -0.4px;
+                }
+
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        spacing: 1px;
+                        SectionLabel { text: root.label-filters.to-uppercase(); height: 24px; }
+                        NavItem { text: root.label-all; icon: "list"; count: root.count-all; selected: root.status-filter == 0; clicked => { root.status-filter = 0; root.page-title = root.nav-downloads; root.filter-changed(0); } }
+                        NavItem { text: root.label-active; icon: "download"; count: root.count-active; selected: root.status-filter == 1; clicked => { root.status-filter = 1; root.page-title = root.label-active; root.filter-changed(1); } }
+                        NavItem { text: root.label-paused; icon: "pause"; count: root.count-paused; selected: root.status-filter == 2; clicked => { root.status-filter = 2; root.page-title = root.label-paused; root.filter-changed(2); } }
+                        NavItem { text: root.label-scheduled; icon: "clock"; count: root.count-scheduled; selected: root.status-filter == 3; clicked => { root.status-filter = 3; root.page-title = root.label-scheduled; root.filter-changed(3); } }
+                        NavItem { text: root.label-completed; icon: "check"; count: root.count-completed; selected: root.status-filter == 4; clicked => { root.status-filter = 4; root.page-title = root.label-completed; root.filter-changed(4); } }
+                        NavItem { text: root.label-failed; icon: "warning"; count: root.count-failed; selected: root.status-filter == 5; clicked => { root.status-filter = 5; root.page-title = root.label-failed; root.filter-changed(5); } }
+                        Rectangle { height: 16px; }
+                        if root.categories.length > 0: SectionLabel { text: root.label-categories.to-uppercase(); height: 24px; }
+                        for category in root.categories: NavItem {
+                            text: category.name;
+                            icon: "folder";
+                            count: category.count;
+                            selected: root.status-filter == 1000 + category.id;
+                            clicked => { root.status-filter = 1000 + category.id; root.page-title = category.name; root.filter-changed(root.status-filter); }
+                        }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.border;
+                    }
+                    HorizontalLayout {
+                        height: 40px;
+                        spacing: 8px;
+                        IconSlot { name: "gauge"; size: 16px; icon-color: Theme.muted; }
+                        speed-picker := Rectangle {
+                            forward-focus: speed-focus;
+                            accessible-role: button;
+                            accessible-label: root.label-global-speed;
+                            accessible-action-default => { speed-touch.clicked(); }
+                            horizontal-stretch: 1;
+                            height: 40px;
+                            background: speed-touch.pressed ? Theme.surface-pressed : speed-touch.has-hover ? Theme.surface-2 : Theme.surface;
+                            border-color: speed-focus.has-focus ? Theme.active-fg : speed-touch.pressed ? Theme.border-strong : Theme.border;
+                            border-width: speed-focus.has-focus ? 2px : 1px;
+                            border-radius: 7px;
+                            animate background, border-color { duration: 90ms; easing: ease-out; }
+                            speed-layout := HorizontalLayout {
+                                y: speed-touch.pressed ? 1px : 0px;
+                                height: parent.height - self.y;
+                                padding-left: 10px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                Text {
+                                    text: root.global-speed-index == 0 ? root.label-unlimited :
+                                        root.global-speed-index == 1 ? "500 KB/s" :
+                                        root.global-speed-index == 2 ? "1 MB/s" :
+                                        root.global-speed-index == 3 ? "5 MB/s" : "10 MB/s";
+                                    color: Theme.text;
+                                    font-size: 12px;
+                                    horizontal-stretch: 1;
+                                    vertical-alignment: center;
+                                }
+                                IconSlot { name: "chevron-down"; size: 14px; icon-color: Theme.muted; }
+                            }
+                            speed-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                root.global-speed-index = Math.mod(root.global-speed-index + 1, 5);
+                                root.set-global-speed(root.global-speed-index == 0 ? 0 : root.global-speed-index == 1 ? 500000 : root.global-speed-index == 2 ? 1000000 : root.global-speed-index == 3 ? 5000000 : 10000000);
+                                }
+                            }
+                            speed-focus := FocusScope {
+                                x: 0px;
+                                width: 0px;
+                                key-pressed(event) => {
+                                    if event.text == Key.Space || event.text == Key.Return {
+                                        speed-touch.clicked();
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+                            }
+                        }
+                    }
+                    NavItem { text: root.nav-settings; icon: "gear"; clicked => { root.settings-section = 0; root.current-page = 3; } }
+                }
+            }
+        }
+
+        main-pane := Rectangle {
+            x: root.rtl ? 0px : sidebar.width;
+            width: parent.width - sidebar.width;
+            height: parent.height;
+            background: Theme.canvas;
+            VerticalLayout {
+                spacing: 0px;
+
+                HorizontalLayout {
+                    height: 64px;
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    padding-top: 13px;
+                    padding-bottom: 13px;
+                    spacing: 10px;
+                    Text {
+                        text: root.page-title;
+                        color: Theme.strong;
+                        font-size: 27px;
+                        font-weight: 700;
+                        letter-spacing: -0.5px;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                        vertical-alignment: center;
+                    }
+                    search-field := UiField {
+                        text <=> root.search-text;
+                        placeholder: root.label-search;
+                        icon: "search";
+                        width: root.width < 900px ? 140px : 190px;
+                        edited => { root.filter-changed(root.status-filter); }
+                    }
+                    if root.count-completed > 0: IconButton { icon: "check"; label: root.label-clear-completed; clicked => { root.remove-completed(); } }
+                    if root.count-failed > 0: IconButton { icon: "warning"; label: root.label-clear-failed; danger: true; clicked => { root.remove-failed(); } }
+                    IconButton { icon: "file"; label: root.label-add-file; clicked => { root.pick-file(); } }
+                    IconButton { icon: "video"; label: root.nav-media; clicked => { root.current-page = 2; } }
+                    IconButton { icon: "link"; label: root.nav-links; clicked => { root.current-page = 1; } }
+                    IconButton { icon: "help"; label: root.label-shortcuts; clicked => { root.current-page = 4; } }
+                }
+
+                HorizontalLayout {
+                    height: 54px;
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    padding-bottom: 12px;
+                    spacing: 8px;
+                    add-field := UiField {
+                        text <=> root.url-text;
+                        placeholder: root.label-add-placeholder;
+                        horizontal-stretch: 1;
+                        accepted => { if root.url-text != "" { root.add-url(root.url-text, root.checksum-text); } }
+                    }
+                    IconButton {
+                        icon: root.show-add-options ? "chevron-up" : "chevron-down";
+                        label: root.label-checksum;
+                        clicked => { root.show-add-options = !root.show-add-options; }
+                    }
+                    UiButton {
+                        text: root.label-add;
+                        icon: "add";
+                        primary: true;
+                        clicked => { if root.url-text != "" { root.add-url(root.url-text, root.checksum-text); } }
+                    }
+                }
+
+                if root.show-add-options: HorizontalLayout {
+                    height: 46px;
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    padding-bottom: 8px;
+                    spacing: 10px;
+                    Text { text: root.label-checksum; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                    UiField { text <=> root.checksum-text; placeholder: root.label-checksum-placeholder; horizontal-stretch: 1; }
+                }
+
+                if root.status-text != "": HorizontalLayout {
+                    height: 38px;
+                    padding-left: 22px;
+                    padding-right: 28px;
+                    status-banner := Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 7px;
+                        background: Theme.error-bg;
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 5px;
+                            spacing: 9px;
+                            IconSlot { name: "warning"; size: 16px; icon-color: Theme.error-fg; }
+                            Text { text: root.status-text; color: Theme.error-fg; font-size: 12px; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+                            Rectangle {
+                                width: 28px;
+                                horizontal-stretch: 0;
+                                background: transparent;
+                                IconButton {
+                                    y: (parent.height - self.height) / 2;
+                                    icon: "close";
+                                    label: root.label-close;
+                                    danger: true;
+                                    width: 28px;
+                                    height: 28px;
+                                    clicked => { root.status-text = ""; }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.selected-count > 0: HorizontalLayout {
+                    height: 46px;
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    padding-top: 6px;
+                    padding-bottom: 6px;
+                    spacing: 7px;
+                    Text {
+                        text: root.selected-text;
+                        color: Theme.strong;
+                        font-size: 12px;
+                        font-weight: 600;
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                    }
+                    UiButton { text: root.label-resume; icon: "play"; ghost: true; clicked => { root.bulk-action("resume"); } }
+                    UiButton { text: root.label-pause; icon: "pause"; ghost: true; clicked => { root.bulk-action("pause"); } }
+                    UiButton { text: root.label-remove; icon: "trash"; danger: true; ghost: true; clicked => { root.bulk-action("remove"); } }
+                    UiButton { text: root.label-close; ghost: true; clicked => { root.bulk-action("clear"); } }
+                }
+
+                content := ScrollView {
+                    vertical-stretch: 1;
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                    vertical-scrollbar-policy: ScrollBarPolicy.as-needed;
+                    viewport-width: self.visible-width;
+                    // Flickable cannot infer content populated by a `for` loop.
+                    // Bind the viewport explicitly so wheel, touchpad and thumb
+                    // scrolling remain available for long download queues.
+                    viewport-height: root.downloads.length > 0
+                        ? max(self.visible-height, downloads-content.preferred-height)
+                        : self.visible-height;
+                    if root.downloads.length == 0: VerticalLayout {
+                        padding-top: 50px;
+                        padding-left: 22px;
+                        padding-right: 22px;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            Rectangle { horizontal-stretch: 1; }
+                            AppIcon { name: "inbox"; width: 56px; height: 56px; color: Theme.border-strong; }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        Rectangle { height: 14px; }
+                        Text {
+                            text: root.count-all == 0 ? root.label-empty-title : root.label-no-match-title;
+                            color: Theme.strong;
+                            font-size: 25px;
+                            font-weight: 700;
+                            letter-spacing: -0.4px;
+                            horizontal-alignment: center;
+                        }
+                        Text {
+                            text: root.count-all == 0 ? root.label-empty-sub : root.label-no-match-sub;
+                            color: Theme.muted;
+                            font-size: 14px;
+                            horizontal-alignment: center;
+                        }
+                        Rectangle { height: 15px; }
+                        if root.count-all == 0: HorizontalLayout {
+                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                min-width: 420px;
+                                max-width: 420px;
+                                min-height: 178px;
+                                max-height: 178px;
+                                GridLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 8px;
+                                    OnboardCard { row: 0; col: 0; text: root.label-onboard-paste; icon: "add"; clicked => { add-field.focus-input(); } }
+                                    OnboardCard { row: 0; col: 1; text: root.label-onboard-video; icon: "video"; clicked => { root.current-page = 2; } }
+                                    OnboardCard { row: 1; col: 0; text: root.label-onboard-links; icon: "link"; clicked => { root.current-page = 1; } }
+                                    OnboardCard { row: 1; col: 1; text: root.label-onboard-browser; icon: "download"; clicked => { root.settings-section = 4; root.current-page = 3; } }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if root.count-all == 0: Rectangle { height: 14px; }
+                        if root.count-all == 0: Text {
+                            text: root.label-onboard-hint;
+                            color: Theme.muted;
+                            font-family: "Noto Sans Mono";
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                    downloads-content := VerticalLayout {
+                        visible: root.downloads.length > 0;
+                        width: content.visible-width;
+                        padding-left: 22px;
+                        // Leave a calm gutter for the Fluent scrollbar's
+                        // expanding hover state instead of covering card actions.
+                        padding-right: 28px;
+                        padding-bottom: 18px;
+                        spacing: 9px;
+                        for row in root.downloads: VerticalLayout {
+                            spacing: 7px;
+                            if row.package-first: PackageHeader {
+                                data: row;
+                                label-pause: root.label-pause;
+                                label-resume: root.label-resume;
+                                label-remove: root.label-remove;
+                                label-collapse: root.label-package-collapse;
+                                label-expand: root.label-package-expand;
+                                toggle(id) => { root.toggle-package(id); }
+                                action(id, value) => { root.package-action(id, value); }
+                            }
+                            if !row.package-collapsed: DownloadCard {
+                                data: row;
+                                label-pause: root.label-pause;
+                                label-resume: root.label-resume;
+                                label-retry: root.label-retry;
+                                label-open-file: root.label-open-file;
+                                label-folder: root.label-folder;
+                                label-details: root.label-details;
+                                label-remove: root.label-remove;
+                                label-copy-url: root.label-copy-url;
+                                pause(id) => { root.pause(id); }
+                                resume(id) => { root.resume(id); }
+                                retry(id) => { root.retry(id); }
+                                open-file(id) => { root.open-file(id); }
+                                open-folder(id) => { root.open-folder(id); }
+                                show-details(id) => { root.show-details(id); }
+                                remove(id) => { root.remove(id); }
+                                copy-url(url) => { root.copy-url(url); }
+                                toggle-selected(id, value) => { root.toggle-selected(id, value); }
+                                key-action(id, action) => {
+                                    if action == "toggle" {
+                                        if row.running { root.pause(id); }
+                                        else if row.resumable { root.resume(id); }
+                                    } else if action == "remove" {
+                                        root.remove(id);
+                                    } else if action == "open" {
+                                        if row.status == "complete" { root.open-file(id); }
+                                        else { root.show-details(id); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.current-page != 0 || root.detail-visible: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        background: #00000066;
+        TouchArea {
+            clicked => {
+                root.current-page = 0;
+                root.detail-visible = false;
+                root.delete-confirm-id = 0;
+            }
+        }
+    }
+
+    if root.current-page == 1: LinkDialog {
+        available-width: root.width;
+        available-height: root.height;
+        grabbed-links: root.grabbed-links;
+        link-text <=> root.link-text;
+        link-package <=> root.link-package;
+        label-link-title: root.label-link-title;
+        label-close: root.label-close;
+        label-link-help: root.label-link-help;
+        label-link-placeholder: root.label-link-placeholder;
+        label-extract-links: root.label-extract-links;
+        label-package-name: root.label-package-name;
+        label-select-all: root.label-select-all;
+        label-select-none: root.label-select-none;
+        label-add-selected: root.label-add-selected;
+        close => { root.current-page = 0; }
+        grab-links(text) => { root.grab-links(text); }
+        select-grabbed(value) => { root.select-grabbed(value); }
+        toggle-grabbed(index, value) => { root.toggle-grabbed(index, value); }
+        add-grabbed => { root.add-grabbed(); }
+    }
+
+    if root.current-page == 2: MediaDialog {
+        available-width: root.width;
+        available-height: root.height;
+        media-choices: root.media-choices;
+        media-url <=> root.media-url;
+        media-title <=> root.media-title;
+        media-entries-text <=> root.media-entries-text;
+        media-is-playlist <=> root.media-is-playlist;
+        media-probe-playlist <=> root.media-probe-playlist;
+        media-quality <=> root.media-quality;
+        media-audio-only <=> root.media-audio-only;
+        media-subtitles <=> root.media-subtitles;
+        media-embed-subtitles <=> root.media-embed-subtitles;
+        media-sub-langs <=> root.media-sub-langs;
+        media-audio-format <=> root.media-audio-format;
+        media-thumbnail <=> root.media-thumbnail;
+        label-media-title: root.label-media-title;
+        label-close: root.label-close;
+        label-media-help: root.label-media-help;
+        label-media-placeholder: root.label-media-placeholder;
+        label-probe: root.label-probe;
+        label-best-quality: root.label-best-quality;
+        label-playlist: root.label-playlist;
+        label-audio-only: root.label-audio-only;
+        label-subtitles: root.label-subtitles;
+        label-thumbnail: root.label-thumbnail;
+        label-embed-subtitles: root.label-embed-subtitles;
+        label-select-all: root.label-select-all;
+        label-select-none: root.label-select-none;
+        label-add: root.label-add;
+        label-add-playlist: root.label-add-playlist;
+        close => { root.current-page = 0; }
+        probe-media(url, playlist) => { root.probe-media(url, playlist); }
+        add-media(url) => { root.add-media(url); }
+        select-media-choices(value) => { root.select-media-choices(value); }
+        toggle-media-choice(index, value) => { root.toggle-media-choice(index, value); }
+        add-media-choice(url, format-id) => { root.add-media-choice(url, format-id); }
+        add-playlist => { root.add-playlist(); }
+    }
+
+    if root.current-page == 4: ShortcutsDialog {
+        available-width: root.width;
+        available-height: root.height;
+        label-shortcuts: root.label-shortcuts;
+        label-close: root.label-close;
+        label-sc-focus-add: root.label-sc-focus-add;
+        label-sc-search: root.label-sc-search;
+        label-sc-filter: root.label-sc-filter;
+        label-sc-select-all: root.label-sc-select-all;
+        label-sc-pause-resume: root.label-sc-pause-resume;
+        label-sc-remove: root.label-sc-remove;
+        label-sc-open: root.label-sc-open;
+        label-sc-close: root.label-sc-close;
+        close => { root.current-page = 0; }
+    }
+
+    if root.current-page == 3: Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: #00000066;
+        TouchArea { clicked => { root.current-page = 0; } }
+    }
+
+    // The original settings interaction: a single continuous, compact drawer
+    // with a sticky one-line section navigator and immediately persisted edits.
+    if root.current-page == 3: Rectangle {
+        x: root.rtl ? 0px : parent.width - self.width;
+        y: 0px;
+        width: min(600px, parent.width - 32px);
+        height: parent.height;
+        background: Theme.canvas;
+        Rectangle { x: root.rtl ? parent.width - 1px : 0px; y: 0px; width: 1px; height: parent.height; background: Theme.border-strong; }
+        TouchArea { }
+        settings-jump := Timer {
+            interval: 16ms;
+            triggered => {
+                if (root.settings-section == 1) { settings-scroll.viewport-y = -network-section.y; }
+                else if (root.settings-section == 2) { settings-scroll.viewport-y = -language-section.y; }
+                else if (root.settings-section == 3) { settings-scroll.viewport-y = -connections-section.y; }
+                else if (root.settings-section == 4) { settings-scroll.viewport-y = -extensions-section.y; }
+                else if (root.settings-section == 5) { settings-scroll.viewport-y = -scheduler-section.y; }
+                else if (root.settings-section == 6) { settings-scroll.viewport-y = -categories-section.y; }
+                else if (root.settings-section == 7) { settings-scroll.viewport-y = -updates-section.y; }
+                else { settings-scroll.viewport-y = 0px; }
+                self.stop();
+            }
+        }
+
+        VerticalLayout {
+            padding-top: 14px;
+            padding-bottom: 0px;
+            padding-left: 20px;
+            padding-right: 20px;
+            spacing: 0px;
+
+            HorizontalLayout {
+                height: 42px;
+                Text {
+                    text: root.nav-settings;
+                    color: Theme.strong;
+                    font-size: 23px;
+                    font-weight: 700;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+                IconButton { icon: "close"; label: root.label-close; clicked => { root.current-page = 0; } }
+            }
+
+            Rectangle {
+                height: 72px;
+                vertical-stretch: 0;
+                GridLayout {
+                    spacing: 5px;
+                    SettingsTab { row: 0; col: 0; text: root.label-general; selected: root.settings-section == 0; clicked => { root.settings-section = 0; settings-scroll.viewport-y = -general-section.y; } }
+                    SettingsTab { row: 0; col: 1; text: root.label-network; selected: root.settings-section == 1; clicked => { root.settings-section = 1; settings-scroll.viewport-y = -network-section.y; } }
+                    SettingsTab { row: 0; col: 2; text: root.label-language; selected: root.settings-section == 2; clicked => { root.settings-section = 2; settings-scroll.viewport-y = -language-section.y; } }
+                    SettingsTab { row: 0; col: 3; text: root.label-connections; selected: root.settings-section == 3; clicked => { root.settings-section = 3; settings-scroll.viewport-y = -connections-section.y; } }
+                    SettingsTab { row: 1; col: 0; text: root.label-extensions; selected: root.settings-section == 4; clicked => { root.settings-section = 4; settings-scroll.viewport-y = -extensions-section.y; } }
+                    SettingsTab { row: 1; col: 1; text: root.label-scheduler; selected: root.settings-section == 5; clicked => { root.settings-section = 5; settings-scroll.viewport-y = -scheduler-section.y; } }
+                    SettingsTab { row: 1; col: 2; text: root.label-categories; selected: root.settings-section == 6; clicked => { root.settings-section = 6; settings-scroll.viewport-y = -categories-section.y; } }
+                    SettingsTab { row: 1; col: 3; text: root.label-updates; selected: root.settings-section == 7; clicked => { root.settings-section = 7; settings-scroll.viewport-y = -updates-section.y; } }
+                }
+            }
+            Rectangle { height: 1px; background: Theme.border; }
+
+            settings-scroll := ScrollView {
+                vertical-stretch: 1;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                viewport-width: self.visible-width;
+                // Track the actual viewport value instead of the ScrollView's
+                // gesture callback. Some wheel/scrollbar paths can change
+                // viewport-y without emitting `scrolled`, which left the tab
+                // highlight behind after fast jumps.
+                changed viewport-y => {
+                    if (-self.viewport-y >= settings-content.height - self.visible-height - 2px) {
+                        root.settings-section = 7;
+                    } else if (-self.viewport-y + 42px >= updates-section.y) {
+                        root.settings-section = 7;
+                    } else if (-self.viewport-y + 42px >= categories-section.y) {
+                        root.settings-section = 6;
+                    } else if (-self.viewport-y + 42px >= scheduler-section.y) {
+                        root.settings-section = 5;
+                    } else if (-self.viewport-y + 42px >= extensions-section.y) {
+                        root.settings-section = 4;
+                    } else if (-self.viewport-y + 42px >= connections-section.y) {
+                        root.settings-section = 3;
+                    } else if (-self.viewport-y + 42px >= language-section.y) {
+                        root.settings-section = 2;
+                    } else if (-self.viewport-y + 42px >= network-section.y) {
+                        root.settings-section = 1;
+                    } else {
+                        root.settings-section = 0;
+                    }
+                }
+
+                settings-content := VerticalLayout {
+                    width: settings-scroll.visible-width;
+                    padding-right: 10px;
+                    spacing: 0px;
+
+                    general-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 0px;
+                        SectionLabel { text: root.label-general.to-uppercase(); height: 28px; }
+                        SettingsToggleRow { text: root.label-auto-organize; checked <=> root.auto-organize; changed => { root.persist-settings(); } }
+                        SettingsToggleRow { text: root.label-prevent-duplicates; checked <=> root.prevent-duplicates; changed => { root.persist-settings(); } }
+                        SettingsHint { height: 47px; value: root.label-prevent-duplicates-hint; }
+                        SettingsToggleRow { text: root.label-clipboard; checked <=> root.clipboard-watch; changed => { root.persist-settings(); } }
+                        SettingsToggleRow { text: root.label-close-tray; checked <=> root.close-to-tray; changed => { root.persist-settings(); } }
+                        SettingsToggleRow { text: root.label-autostart; checked <=> root.autostart; changed => { root.persist-settings(); } }
+                        Rectangle {
+                            height: 48px;
+                            Text { x: 0px; width: parent.width - 244px; height: parent.height; text: root.label-theme; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                            ComboBox {
+                                x: parent.width - 230px;
+                                y: 7px;
+                                width: 230px;
+                                height: 34px;
+                                model: [root.label-theme-system, root.label-theme-light, root.label-theme-dark];
+                                current-value: root.theme-choice == "light" ? root.label-theme-light : root.theme-choice == "dark" ? root.label-theme-dark : root.label-theme-system;
+                                selected(value) => {
+                                    root.theme-choice = value == root.label-theme-light ? "light" : value == root.label-theme-dark ? "dark" : "system";
+                                    root.persist-settings();
+                                }
+                            }
+                        }
+                        Rectangle {
+                            height: 48px;
+                            Text { x: 0px; width: parent.width - 244px; height: parent.height; text: root.label-on-complete; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                            ComboBox {
+                                x: parent.width - 230px;
+                                y: 7px;
+                                width: 230px;
+                                height: 34px;
+                                model: [root.label-oc-none, root.label-oc-quit, root.label-oc-sleep, root.label-oc-shutdown, root.label-oc-custom];
+                                current-value: root.on-complete-action == "quit" ? root.label-oc-quit :
+                                    root.on-complete-action == "sleep" ? root.label-oc-sleep :
+                                    root.on-complete-action == "shutdown" ? root.label-oc-shutdown :
+                                    root.on-complete-action == "run:" ? root.label-oc-custom : root.label-oc-none;
+                                selected(value) => {
+                                    root.on-complete-action = value == root.label-oc-quit ? "quit" :
+                                        value == root.label-oc-sleep ? "sleep" :
+                                        value == root.label-oc-shutdown ? "shutdown" :
+                                        value == root.label-oc-custom ? "run:" : "none";
+                                    if (root.on-complete-action != "run:") { root.persist-settings(); }
+                                }
+                            }
+                        }
+                        if root.on-complete-action == "run:": VerticalLayout {
+                            spacing: 7px;
+                            UiField {
+                                text <=> root.on-complete-command;
+                                placeholder: root.label-oc-placeholder;
+                                edited => { root.on-complete-confirmed = false; }
+                                committed => { root.persist-settings(); }
+                            }
+                            SettingsHint { height: 33px; value: root.label-oc-warning; }
+                            UiCheckBox { text: root.label-oc-confirm; checked <=> root.on-complete-confirmed; toggled => { root.persist-settings(); } }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    network-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 0px;
+                        SectionLabel { text: root.label-network.to-uppercase(); height: 28px; }
+                        Rectangle {
+                            height: 48px;
+                            Text { x: 0px; width: parent.width - 324px; height: parent.height; text: root.label-proxy-title; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                            UiField { x: parent.width - 306px; y: 5px; width: 306px; text <=> root.proxy-text; placeholder: root.label-proxy; committed => { root.persist-settings(); } }
+                        }
+                        SettingsToggleRow { text: root.label-handle-magnets; checked <=> root.handle-magnets; changed => { root.persist-settings(); } }
+                        SettingsHint { height: 42px; value: root.label-magnets-hint; }
+                        SettingsToggleRow { text: root.label-dht; checked <=> root.dht-enabled; changed => { root.persist-settings(); } }
+                        SettingsToggleRow { text: root.label-sandbox; checked <=> root.sandbox-children; changed => { root.persist-settings(); } }
+                        SettingsToggleRow { text: root.label-block-private; checked <=> root.block-private-ips; changed => { root.persist-settings(); } }
+                        SettingsHint { height: 32px; value: root.label-restart-hint; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    language-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 0px;
+                        SectionLabel { text: root.label-language.to-uppercase(); height: 28px; }
+                        Rectangle {
+                            height: 48px;
+                            Text { x: 0px; width: parent.width - 254px; height: parent.height; text: root.label-language; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                            ComboBox {
+                                x: parent.width - 240px;
+                                y: 7px;
+                                width: 240px;
+                                height: 34px;
+                                model: [root.label-theme-system, "English", "Türkçe", "Español", "Français", "Deutsch", "Русский", "العربية", "中文", "日本語", "한국어"];
+                                current-value: root.locale-choice;
+                                selected(value) => { root.locale-choice = value; root.persist-settings(); }
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    connections-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 1px;
+                        SectionLabel { text: root.label-connections.to-uppercase(); height: 28px; }
+                        HorizontalLayout {
+                            height: 30px;
+                            Text { text: root.label-conn-server; color: Theme.text; font-size: 13px; horizontal-stretch: 1; vertical-alignment: center; }
+                            Text { text: root.connection-count; color: Theme.muted; font-family: "Noto Sans Mono"; font-size: 11px; vertical-alignment: center; }
+                        }
+                        UiSlider { value <=> root.connection-count; minimum: 1; maximum: 16; label: root.label-conn-server; changed => { root.persist-settings(); } }
+                        HorizontalLayout {
+                            height: 30px;
+                            Text { text: root.label-segments; color: Theme.text; font-size: 13px; horizontal-stretch: 1; vertical-alignment: center; }
+                            Text { text: root.split-count; color: Theme.muted; font-family: "Noto Sans Mono"; font-size: 11px; vertical-alignment: center; }
+                        }
+                        UiSlider { value <=> root.split-count; minimum: 1; maximum: 32; label: root.label-segments; changed => { root.persist-settings(); } }
+                        HorizontalLayout {
+                            height: 30px;
+                            Text { text: root.label-max-concurrent; color: Theme.text; font-size: 13px; horizontal-stretch: 1; vertical-alignment: center; }
+                            Text { text: root.max-concurrent; color: Theme.muted; font-family: "Noto Sans Mono"; font-size: 11px; vertical-alignment: center; }
+                        }
+                        UiSlider { value <=> root.max-concurrent; minimum: 1; maximum: 20; label: root.label-max-concurrent; changed => { root.persist-settings(); } }
+                        Rectangle {
+                            height: 47px;
+                            Text { x: 0px; width: parent.width - 128px; height: parent.height; text: root.label-default-speed; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                            UiDecimalField { x: parent.width - 110px; y: 5px; value <=> root.default-speed-mb; minimum: 0; label: root.label-default-speed; changed => { root.persist-settings(); } }
+                        }
+                        SettingsHint { height: 35px; value: root.label-connections-hint; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    extensions-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 8px;
+                        SectionLabel { text: root.label-extensions.to-uppercase(); height: 28px; }
+                        SettingsHint { height: 32px; value: root.label-extension-hint; }
+                        BrowserStoreCard {
+                            browser: "Firefox";
+                            status-state: root.firefox-state;
+                            status-text: root.browser-state-label(root.firefox-state);
+                            hint: root.label-firefox-hint;
+                            button-text: root.label-get-firefox;
+                            install => { root.open-external("https://addons.mozilla.org/firefox/addon/mini-downloader-connector/"); }
+                        }
+                        BrowserStoreCard {
+                            browser: "Chrome";
+                            status-state: root.chromium-state;
+                            status-text: root.browser-state-label(root.chromium-state);
+                            hint: root.label-chromium-hint;
+                            button-text: root.label-get-chrome;
+                            install => { root.open-external("https://chromewebstore.google.com/detail/mini-downloader-connector/hhaobmkdgijodfieadeeanjmnneckafj"); }
+                        }
+                        SettingsHint { height: 31px; value: root.label-extension-note; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    scheduler-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 7px;
+                        SectionLabel { text: root.label-scheduler.to-uppercase(); height: 28px; }
+                        for schedule in root.schedules: Rectangle {
+                            height: 52px;
+                            border-radius: 7px;
+                            border-width: 1px;
+                            border-color: Theme.border;
+                            background: Theme.surface;
+                            opacity: schedule.enabled ? 1 : 0.55;
+                            AppIcon { x: 10px; y: 17px; width: 16px; height: 16px; name: "clock"; color: Theme.muted; }
+                            Text {
+                                x: 35px;
+                                y: 5px;
+                                width: parent.width - 132px;
+                                height: 21px;
+                                text: schedule.action == "pause_all" ? root.label-sched-pause : schedule.action == "resume_all" ? root.label-sched-resume : root.label-sched-speed;
+                                color: Theme.strong;
+                                font-size: 12px;
+                                font-weight: 600;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            Text { x: 35px; y: 25px; width: parent.width - 132px; height: 19px; text: schedule.summary; color: Theme.muted; font-size: 10px; vertical-alignment: center; overflow: elide; }
+                            UiSwitch { x: parent.width - 84px; y: 15px; checked: schedule.enabled; label: schedule.summary; toggled(value) => { root.save-schedule(schedule.id, schedule.name, schedule.action, schedule.days, schedule.minute, schedule.speed, value); } }
+                            IconButton { x: parent.width - 36px; y: 10px; icon: "trash"; danger: true; label: root.label-remove; clicked => { root.delete-schedule(schedule.id); } }
+                        }
+                        Rectangle { height: 5px; }
+                        HorizontalLayout {
+                            height: 38px;
+                            spacing: 7px;
+                            ComboBox {
+                                width: 214px;
+                                model: [root.label-sched-pause, root.label-sched-resume, root.label-sched-speed];
+                                current-value: root.schedule-action == "resume_all" ? root.label-sched-resume : root.schedule-action == "set_speed" ? root.label-sched-speed : root.label-sched-pause;
+                                selected(value) => { root.schedule-action = value == root.label-sched-resume ? "resume_all" : value == root.label-sched-speed ? "set_speed" : "pause_all"; }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            Rectangle {
+                                width: 108px;
+                                height: 38px;
+                                horizontal-stretch: 0;
+                                UiNumberField { x: 0px; y: 3px; width: 48px; height: 32px; value <=> root.schedule-hour; minimum: 0; maximum: 23; label: root.label-hour; }
+                                Text { x: 48px; width: 12px; height: parent.height; text: ":"; color: Theme.muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                                UiNumberField { x: 60px; y: 3px; width: 48px; height: 32px; value <=> root.schedule-minute; minimum: 0; maximum: 59; label: root.label-minute; }
+                            }
+                            if root.schedule-action == "set_speed": UiNumberField { width: 102px; value <=> root.schedule-speed; minimum: 0; label: root.label-sched-speed; }
+                        }
+                        HorizontalLayout {
+                            height: 29px;
+                            spacing: 5px;
+                            DayChip { text: root.label-day-mon; selected: root.day-selected(1); clicked => { root.toggle-day(1); } }
+                            DayChip { text: root.label-day-tue; selected: root.day-selected(2); clicked => { root.toggle-day(2); } }
+                            DayChip { text: root.label-day-wed; selected: root.day-selected(4); clicked => { root.toggle-day(4); } }
+                            DayChip { text: root.label-day-thu; selected: root.day-selected(8); clicked => { root.toggle-day(8); } }
+                            DayChip { text: root.label-day-fri; selected: root.day-selected(16); clicked => { root.toggle-day(16); } }
+                            DayChip { text: root.label-day-sat; selected: root.day-selected(32); clicked => { root.toggle-day(32); } }
+                            DayChip { text: root.label-day-sun; selected: root.day-selected(64); clicked => { root.toggle-day(64); } }
+                        }
+                        UiButton {
+                            width: 126px;
+                            text: root.label-sched-add;
+                            icon: "add";
+                            clicked => {
+                                root.save-schedule(0, "", root.schedule-action, root.schedule-days, root.schedule-hour * 60 + root.schedule-minute, root.schedule-speed, true);
+                            }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    categories-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 17px;
+                        spacing: 7px;
+                        SectionLabel { text: root.label-categories.to-uppercase(); height: 28px; }
+                        for category[index] in root.categories: Rectangle {
+                            height: 48px;
+                            Text { x: 0px; width: 88px; height: parent.height; text: category.name; color: Theme.strong; font-size: 12px; font-weight: 600; vertical-alignment: center; overflow: elide; }
+                            dir-field := UiField { x: 96px; y: 5px; width: parent.width - 276px; text: category.dir; placeholder: root.label-cat-folder; committed => { root.save-category(category.name, self.text, category.rules, category.priority); } }
+                            IconButton { x: parent.width - 172px; y: 8px; icon: "chevron-up"; label: root.label-move-up; enabled: index > 0; clicked => { root.move-category(category.id, -1); } }
+                            IconButton { x: parent.width - 140px; y: 8px; icon: "chevron-down"; label: root.label-move-down; enabled: index + 1 < root.categories.length; clicked => { root.move-category(category.id, 1); } }
+                            IconButton { x: parent.width - 108px; y: 8px; icon: "folder"; label: root.label-browse-folder; clicked => { root.browse-category(category.name, category.rules, category.priority); } }
+                            IconButton { x: parent.width - 72px; y: 8px; icon: "retry"; label: root.label-restore-defaults; clicked => { root.reset-category(category.id); } }
+                            IconButton { x: parent.width - 36px; y: 8px; icon: "trash"; danger: true; label: root.label-remove; clicked => { root.delete-category(category.id); } }
+                        }
+                        Rectangle { height: 7px; }
+                        SettingsHint { height: 21px; value: root.label-add-category; }
+                        HorizontalLayout {
+                            height: 38px;
+                            spacing: 7px;
+                            UiField { width: 130px; text <=> root.category-name; placeholder: root.label-cat-name; }
+                            UiField { horizontal-stretch: 1; text <=> root.category-dir; placeholder: root.label-cat-folder; }
+                            IconButton { icon: "folder"; label: root.label-browse-folder; height: 38px; clicked => { root.browse-new-category-dir(); } }
+                        }
+                        UiField { text <=> root.category-rules; placeholder: root.label-cat-rules; }
+                        UiField { text <=> root.category-mime; placeholder: root.label-cat-mime; }
+                        UiField { text <=> root.category-host; placeholder: root.label-cat-host; }
+                        HorizontalLayout {
+                            height: 38px;
+                            spacing: 7px;
+                            UiButton {
+                                width: 150px;
+                                text: root.label-add-category;
+                                icon: "add";
+                                clicked => {
+                                    root.save-new-category(root.category-name, root.category-dir, root.category-rules, root.category-mime, root.category-host);
+                                    root.category-name = "";
+                                    root.category-dir = "";
+                                    root.category-rules = "";
+                                    root.category-mime = "";
+                                    root.category-host = "";
+                                }
+                            }
+                            UiButton { width: 168px; text: root.label-restore-defaults; icon: "retry"; ghost: true; clicked => { root.restore-categories(); } }
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+
+                    updates-section := VerticalLayout {
+                        padding-top: 17px;
+                        padding-bottom: 22px;
+                        spacing: 9px;
+                        SectionLabel { text: root.label-updates.to-uppercase(); height: 28px; }
+                        HorizontalLayout {
+                            height: 34px;
+                            spacing: 8px;
+                            UiButton { compact: true; text: root.label-check-updates; icon: "download"; clicked => { root.check-update(); } }
+                            if root.update-page != "": UiButton { compact: true; text: root.update-asset == "" ? root.label-update-view : root.label-update-install; icon: root.update-asset == "" ? "link" : "download"; primary: true; clicked => { root.install-update(root.update-asset, root.update-page); } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        if root.update-text != "": SettingsHint { height: 36px; value: root.update-text; }
+                    }
+                    Rectangle { height: 1px; background: Theme.border; }
+                    Rectangle {
+                        height: 58px;
+                        SponsorButton {
+                            x: 0px;
+                            y: 10px;
+                            text: root.label-sponsor;
+                            clicked => { root.open-external("https://github.com/sponsors/RamazanBerk20"); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.detail-visible: DetailDialog {
+        available-width: root.width;
+        available-height: root.height;
+        detail-files: root.detail-files;
+        detail-visible <=> root.detail-visible;
+        detail-url: root.detail-url;
+        detail-dir: root.detail-dir;
+        detail-error: root.detail-error;
+        detail-peer-count: root.detail-peer-count;
+        detail-pieces-text: root.detail-pieces-text;
+        detail-id: root.detail-id;
+        detail-is-torrent: root.detail-is-torrent;
+        detail-speed-kb <=> root.detail-speed-kb;
+        detail-delay-minutes <=> root.detail-delay-minutes;
+        delete-confirm-id <=> root.delete-confirm-id;
+        label-details: root.label-details;
+        label-move-up: root.label-move-up;
+        label-move-down: root.label-move-down;
+        label-close: root.label-close;
+        label-detail-folder: root.label-detail-folder;
+        label-detail-files: root.label-detail-files;
+        label-detail-peers: root.label-detail-peers;
+        label-detail-pieces: root.label-detail-pieces;
+        label-failed: root.label-failed;
+        label-apply-selection: root.label-apply-selection;
+        label-speed-limit: root.label-speed-limit;
+        label-apply: root.label-apply;
+        label-start-in-minutes: root.label-start-in-minutes;
+        label-schedule-action: root.label-schedule-action;
+        label-cancel-schedule: root.label-cancel-schedule;
+        label-confirm-delete: root.label-confirm-delete;
+        label-remove-delete: root.label-remove-delete;
+        move-in-queue(id, direction) => { root.move-in-queue(id, direction); }
+        apply-torrent-files(id) => { root.apply-torrent-files(id); }
+        toggle-detail-file(index, value) => { root.toggle-detail-file(index, value); }
+        set-download-speed(id, speed) => { root.set-download-speed(id, speed); }
+        schedule-download(id, delay) => { root.schedule-download(id, delay); }
+        unschedule-download(id) => { root.unschedule-download(id); }
+        remove-delete(id) => { root.remove-delete(id); }
+    }
+
+}

@@ -9,7 +9,7 @@ use std::io::Write as _;
 const DESKTOP_ID: &str = "io.minidownloader.app.desktop";
 
 #[cfg(unix)]
-const USER_ICON_PNG: &[u8] = include_bytes!("../../../apps/desktop/src-tauri/icons/128x128.png");
+const USER_ICON_PNG: &[u8] = include_bytes!("../../../assets/icons/128x128.png");
 
 pub(crate) fn executable() -> Result<PathBuf, String> {
     let current = std::env::current_exe().map_err(|error| error.to_string())?;

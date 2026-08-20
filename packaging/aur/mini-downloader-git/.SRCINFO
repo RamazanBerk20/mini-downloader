@@ -1,6 +1,6 @@
 pkgbase = mini-downloader-git
 	pkgdesc = Lightweight native download manager (aria2 + yt-dlp, browser capture) — git build
-	pkgver = 3.0.0
+	pkgver = 3.1.0
 	pkgrel = 1
 	url = https://github.com/RamazanBerk20/mini-downloader
 	arch = x86_64
@@ -25,6 +25,7 @@ pkgbase = mini-downloader-git
 	provides = mini-downloader
 	conflicts = mini-downloader
 	conflicts = mini-downloader-bin
+	options = !lto
 	source = mini-downloader-git::git+https://github.com/RamazanBerk20/mini-downloader.git
 	sha256sums = SKIP
 

@@ -1,6 +1,6 @@
 /* ============================================================================
    Mini Downloader Connector — shared extension UI (popup + options).
-   Tokens mirror the desktop app design system (apps/desktop/src/app.css):
+   Tokens mirror the native desktop app design system:
    warm monochrome, flat components, muted pastel status.
    System fonts only — the extension ships zero external assets (strict CSP).
    ============================================================================ */

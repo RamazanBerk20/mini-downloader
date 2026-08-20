@@ -1,0 +1,217 @@
+import { ComboBox, ScrollView } from "std-widgets.slint";
+import { LinkChoice, MediaChoice } from "models.slint";
+import { IconButton, Theme, UiButton, UiCheckBox, UiField, UiTextArea } from "ui-kit.slint";
+
+export component LinkDialog inherits Rectangle {
+        in property <length> available-width;
+        in property <length> available-height;
+        in property <[LinkChoice]> grabbed-links;
+        in-out property <string> link-text;
+        in-out property <string> link-package;
+        in property <string> label-link-title;
+        in property <string> label-close;
+        in property <string> label-link-help;
+        in property <string> label-link-placeholder;
+        in property <string> label-extract-links;
+        in property <string> label-package-name;
+        in property <string> label-select-all;
+        in property <string> label-select-none;
+        in property <string> label-add-selected;
+        callback close();
+        callback grab-links(string);
+        callback select-grabbed(bool);
+        callback toggle-grabbed(int, bool);
+        callback add-grabbed();
+        x: (root.available-width - self.width) / 2;
+        y: (root.available-height - self.height) / 2;
+        width: min(560px, root.available-width - 48px);
+        height: min(560px, root.available-height - 48px);
+        background: Theme.surface;
+        border-color: Theme.border;
+        border-width: 1px;
+        border-radius: 12px;
+        VerticalLayout {
+            padding: 20px;
+            spacing: 11px;
+            HorizontalLayout {
+                Text { text: root.label-link-title; color: Theme.strong; font-size: 22px; font-weight: 700; horizontal-stretch: 1; }
+                IconButton { icon: "close"; label: root.label-close; clicked => { root.close(); } }
+            }
+            Text { text: root.label-link-help; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+            UiTextArea { text <=> root.link-text; placeholder: root.label-link-placeholder; height: 130px; }
+            UiButton { text: root.label-extract-links; icon: "link"; primary: true; clicked => { root.grab-links(root.link-text); } }
+            if root.grabbed-links.length > 0: HorizontalLayout {
+                UiField { text <=> root.link-package; placeholder: root.label-package-name; horizontal-stretch: 1; }
+                UiButton { text: root.label-select-all; ghost: true; clicked => { root.select-grabbed(true); } }
+                UiButton { text: root.label-select-none; ghost: true; clicked => { root.select-grabbed(false); } }
+            }
+            if root.grabbed-links.length > 0: ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 4px;
+                    for link[index] in root.grabbed-links: Rectangle {
+                        height: 38px;
+                        border-radius: 6px;
+                        background: Theme.surface-2;
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            padding-right: 8px;
+                            spacing: 8px;
+                            UiCheckBox { checked: link.selected; toggled(value) => { root.toggle-grabbed(index, value); } }
+                            Text { text: link.kind.to-uppercase(); color: Theme.active-fg; font-family: "Noto Sans Mono"; font-size: 9px; width: 48px; }
+                            Text { text: link.url; color: Theme.text; font-family: "Noto Sans Mono"; font-size: 10px; horizontal-stretch: 1; overflow: elide; }
+                        }
+                    }
+                }
+            }
+            if root.grabbed-links.length == 0: Rectangle { vertical-stretch: 1; }
+            if root.grabbed-links.length > 0: UiButton { text: root.label-add-selected; icon: "add"; primary: true; clicked => { root.add-grabbed(); } }
+        }
+    }
+export component MediaDialog inherits Rectangle {
+        in property <length> available-width;
+        in property <length> available-height;
+        in property <[MediaChoice]> media-choices;
+        in-out property <string> media-url;
+        in-out property <string> media-title;
+        in-out property <string> media-entries-text;
+        in-out property <bool> media-is-playlist;
+        in-out property <bool> media-probe-playlist;
+        in-out property <string> media-quality;
+        in-out property <bool> media-audio-only;
+        in-out property <bool> media-subtitles;
+        in-out property <bool> media-embed-subtitles;
+        in-out property <string> media-sub-langs;
+        in-out property <string> media-audio-format;
+        in-out property <bool> media-thumbnail;
+        in property <string> label-media-title;
+        in property <string> label-close;
+        in property <string> label-media-help;
+        in property <string> label-media-placeholder;
+        in property <string> label-probe;
+        in property <string> label-best-quality;
+        in property <string> label-playlist;
+        in property <string> label-audio-only;
+        in property <string> label-subtitles;
+        in property <string> label-thumbnail;
+        in property <string> label-embed-subtitles;
+        in property <string> label-select-all;
+        in property <string> label-select-none;
+        in property <string> label-add;
+        in property <string> label-add-playlist;
+        callback close();
+        callback probe-media(string, bool);
+        callback add-media(string);
+        callback select-media-choices(bool);
+        callback toggle-media-choice(int, bool);
+        callback add-media-choice(string, string);
+        callback add-playlist();
+        x: (root.available-width - self.width) / 2;
+        y: (root.available-height - self.height) / 2;
+        width: min(640px, root.available-width - 48px);
+        height: min(590px, root.available-height - 48px);
+        background: Theme.surface;
+        border-color: Theme.border;
+        border-width: 1px;
+        border-radius: 12px;
+        VerticalLayout {
+            padding: 20px;
+            spacing: 11px;
+            HorizontalLayout {
+                Text { text: root.label-media-title; color: Theme.strong; font-size: 22px; font-weight: 700; horizontal-stretch: 1; }
+                IconButton { icon: "close"; label: root.label-close; clicked => { root.close(); } }
+            }
+            Text { text: root.label-media-help; color: Theme.muted; font-size: 12px; }
+            HorizontalLayout {
+                spacing: 8px;
+                UiField { text <=> root.media-url; placeholder: root.label-media-placeholder; horizontal-stretch: 1; }
+                UiButton { text: root.label-probe; clicked => { root.probe-media(root.media-url, root.media-probe-playlist); } }
+                UiButton { text: root.label-best-quality; primary: true; clicked => { root.add-media(root.media-url); } }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                UiCheckBox { text: root.label-playlist; checked <=> root.media-probe-playlist; }
+                UiCheckBox { text: root.label-audio-only; checked <=> root.media-audio-only; }
+                UiCheckBox { text: root.label-subtitles; checked <=> root.media-subtitles; }
+                UiCheckBox { text: root.label-thumbnail; checked <=> root.media-thumbnail; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+            if root.media-subtitles || root.media-audio-only: HorizontalLayout {
+                spacing: 8px;
+                if root.media-subtitles: UiField { text <=> root.media-sub-langs; placeholder: "en,tr"; width: 100px; }
+                if root.media-subtitles: UiCheckBox { text: root.label-embed-subtitles; checked <=> root.media-embed-subtitles; }
+                if root.media-audio-only: ComboBox { model: ["mp3", "m4a", "opus"]; current-value <=> root.media-audio-format; }
+            }
+            if root.media-title != "": Text { text: root.media-title; color: Theme.strong; font-size: 14px; font-weight: 600; overflow: elide; }
+            if root.media-is-playlist: HorizontalLayout {
+                Text { text: root.media-entries-text; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; }
+                UiButton { text: root.label-select-all; ghost: true; clicked => { root.select-media-choices(true); } }
+                UiButton { text: root.label-select-none; ghost: true; clicked => { root.select-media-choices(false); } }
+                ComboBox { model: ["best", "1080p", "720p"]; current-value <=> root.media-quality; }
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    spacing: 5px;
+                    for choice[index] in root.media-choices: Rectangle {
+                        height: 42px;
+                        border-radius: 7px;
+                        background: Theme.surface-2;
+                        HorizontalLayout {
+                            padding-left: 9px;
+                            padding-right: 9px;
+                            spacing: 8px;
+                            if choice.playlist: UiCheckBox { checked: choice.selected; toggled(value) => { root.toggle-media-choice(index, value); } }
+                            Text { text: choice.label; color: Theme.text; font-size: 11px; horizontal-stretch: 1; overflow: elide; }
+                            if !choice.playlist: UiButton { text: root.label-add; clicked => { root.add-media-choice(choice.url, choice.format-id); } }
+                        }
+                    }
+                }
+            }
+            if root.media-is-playlist: UiButton { text: root.label-add-playlist; icon: "add"; primary: true; clicked => { root.add-playlist(); } }
+        }
+    }
+export component ShortcutsDialog inherits Rectangle {
+        in property <length> available-width;
+        in property <length> available-height;
+        in property <string> label-shortcuts;
+        in property <string> label-close;
+        in property <string> label-sc-focus-add;
+        in property <string> label-sc-search;
+        in property <string> label-sc-filter;
+        in property <string> label-sc-select-all;
+        in property <string> label-sc-pause-resume;
+        in property <string> label-sc-remove;
+        in property <string> label-sc-open;
+        in property <string> label-sc-close;
+        callback close();
+        x: (root.available-width - self.width) / 2;
+        y: (root.available-height - self.height) / 2;
+        width: min(430px, root.available-width - 48px);
+        height: min(430px, root.available-height - 48px);
+        background: Theme.surface;
+        border-color: Theme.border;
+        border-width: 1px;
+        border-radius: 12px;
+        VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+            HorizontalLayout {
+                Text { text: root.label-shortcuts; color: Theme.strong; font-size: 22px; font-weight: 700; horizontal-stretch: 1; }
+                IconButton { icon: "close"; label: root.label-close; clicked => { root.close(); } }
+            }
+            Text { text: "Ctrl + N"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-focus-add; color: Theme.muted; font-size: 12px; }
+            Text { text: "Ctrl + F  /"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-search; color: Theme.muted; font-size: 12px; }
+            Text { text: "1 – 6"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-filter; color: Theme.muted; font-size: 12px; }
+            Text { text: "Ctrl + A"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-select-all; color: Theme.muted; font-size: 12px; }
+            Text { text: "Space"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-pause-resume; color: Theme.muted; font-size: 12px; }
+            Text { text: "Delete · Enter · Esc"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-remove + " · " + root.label-sc-open + " · " + root.label-sc-close; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }

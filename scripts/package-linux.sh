@@ -35,7 +35,7 @@ cargo build --locked --release -p minidl-native-desktop -p minidl-native-host
 rm -rf -- "$stage_dir" "$app_dir"
 install -Dm755 target/release/mini-downloader "$stage_dir/usr/bin/mini-downloader"
 install -Dm755 target/release/minidl-native-host "$stage_dir/usr/bin/minidl-native-host"
-install -Dm644 apps/desktop/src-tauri/icons/icon.png \
+install -Dm644 assets/icons/512x512.png \
   "$stage_dir/usr/share/icons/hicolor/512x512/apps/mini-downloader.png"
 install -Dm644 packaging/linux/io.minidownloader.app.desktop \
   "$stage_dir/usr/share/applications/io.minidownloader.app.desktop"
