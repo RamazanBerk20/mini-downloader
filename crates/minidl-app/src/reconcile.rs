@@ -26,6 +26,20 @@ fn number(item: &Value, key: &str) -> i64 {
         .unwrap_or(0)
 }
 
+/// Text for a failed aria2 job. aria2 reports some failures, a checksum
+/// mismatch among them, with a code and an empty message.
+pub(crate) fn error_text(item: &Value) -> Option<String> {
+    let message = string(item, "errorMessage");
+    if !message.trim().is_empty() {
+        return Some(message);
+    }
+    match string(item, "errorCode").as_str() {
+        "" => None,
+        "32" => Some("checksum verification failed".into()),
+        code => Some(format!("aria2 error {code}")),
+    }
+}
+
 async fn session_items(engine: &Engine) -> Vec<Value> {
     let mut items = engine
         .rpc
@@ -193,7 +207,7 @@ pub async fn reconcile(engine: &Engine, db: &Db) {
                         let _ = db.set_error(
                             row.id,
                             item.get("errorCode").and_then(Value::as_str),
-                            item.get("errorMessage").and_then(Value::as_str),
+                            error_text(item).as_deref(),
                         );
                     } else {
                         let _ = db.set_status(row.id, status);
@@ -204,5 +218,29 @@ pub async fn reconcile(engine: &Engine, db: &Db) {
                 let _ = db.set_status(row.id, DownloadStatus::Paused);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failures_without_a_message_still_get_text() {
+        let text = |item| error_text(&item);
+        assert_eq!(
+            text(serde_json::json!({"errorCode": "32", "errorMessage": ""})).as_deref(),
+            Some("checksum verification failed")
+        );
+        assert_eq!(
+            text(serde_json::json!({"errorCode": "3", "errorMessage": "Resource not found"}))
+                .as_deref(),
+            Some("Resource not found")
+        );
+        assert_eq!(
+            text(serde_json::json!({"errorCode": "19"})).as_deref(),
+            Some("aria2 error 19")
+        );
+        assert_eq!(text(serde_json::json!({})), None);
     }
 }

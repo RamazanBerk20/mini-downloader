@@ -233,12 +233,23 @@ impl Controller {
             }
             DownloadStatus::Error => {
                 if self.db.set_status_if_changed(row.id, next).unwrap_or(false) {
-                    let message = status.get("errorMessage").and_then(Value::as_str);
-                    let _ = self.db.set_error(
-                        row.id,
-                        status.get("errorCode").and_then(Value::as_str),
-                        message,
-                    );
+                    let code = status.get("errorCode").and_then(Value::as_str);
+                    let message = crate::reconcile::error_text(&status);
+                    if code == Some("32") {
+                        // Bytes that failed verification must not sit in the
+                        // folder looking finished, and aria2 would only
+                        // re-verify the same bytes on every retry.
+                        for file in status
+                            .get("files")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|file| file.get("path").and_then(Value::as_str))
+                        {
+                            delete_download_file(Path::new(&row.dir), Path::new(file));
+                        }
+                    }
+                    let _ = self.db.set_error(row.id, code, message.as_deref());
                     self.events
                         .emit("downloads:error", json!({"id": row.id, "message": message}));
                 }

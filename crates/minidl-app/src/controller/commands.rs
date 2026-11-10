@@ -207,6 +207,10 @@ impl Controller {
                 }
                 for row in self.db.running_rows()? {
                     if row.status.is_running() {
+                        // aria2's pauseAll does not reach yt-dlp children.
+                        if row.is_ytdlp() {
+                            self.ytdlp.cancel(row.id);
+                        }
                         let _ = self.db.set_status(row.id, DownloadStatus::Paused);
                     }
                 }
@@ -223,10 +227,14 @@ impl Controller {
                     .filter(|row| row.status == DownloadStatus::Paused)
                     .map(|row| row.id)
                     .collect();
+                // One item that cannot resume must not strand the rest paused.
+                let mut first_error = None;
                 for id in ids {
-                    self.resume(id).await?;
+                    if let Err(error) = self.resume(id).await {
+                        first_error.get_or_insert(error);
+                    }
                 }
-                Ok(Value::Null)
+                first_error.map_or(Ok(Value::Null), Err)
             }
             MoveInQueue { id, direction } => {
                 if let Some(row) = self.db.get(id)? {
@@ -257,16 +265,22 @@ impl Controller {
             SetGlobalSpeed { download, upload } => {
                 let download = download.max(0);
                 let upload = upload.max(0);
-                let handle = self.ensure_engine().await?;
-                handle
-                    .engine
-                    .rpc
-                    .change_global_option(json!({
-                        "max-overall-download-limit": download.to_string(),
-                        "max-overall-upload-limit": upload.to_string(),
-                    }))
-                    .await?;
-                self.arm_engine_if_idle().await;
+                // Persist first: aria2 is stopped whenever it is idle, so a cap
+                // held only by the live process is gone by the next download.
+                self.db.set_settings(&[
+                    ("global_download_limit".into(), download.to_string()),
+                    ("global_upload_limit".into(), upload.to_string()),
+                ])?;
+                self.engine.update_speed_limits(download, upload).await;
+                if let Some(engine) = self.engine.current().await {
+                    engine
+                        .rpc
+                        .change_global_option(json!({
+                            "max-overall-download-limit": download.to_string(),
+                            "max-overall-upload-limit": upload.to_string(),
+                        }))
+                        .await?;
+                }
                 Ok(Value::Null)
             }
             SetDownloadSpeed { id, limit } => {

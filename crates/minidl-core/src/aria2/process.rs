@@ -22,6 +22,10 @@ pub struct LaunchOptions {
     /// Confine the aria2c child to write only under download_dir/data_dir via
     /// Landlock (Linux ≥5.13; no-op elsewhere). Opt-in.
     pub sandbox: bool,
+    /// Global download/upload caps in bytes/sec (0 = unlimited). Launch
+    /// options so the cap survives idle shutdown and crash respawn.
+    pub download_limit: i64,
+    pub upload_limit: i64,
 }
 
 impl Default for LaunchOptions {
@@ -34,6 +38,8 @@ impl Default for LaunchOptions {
             proxy: None,
             dht: true,
             sandbox: false,
+            download_limit: 0,
+            upload_limit: 0,
         }
     }
 }
@@ -265,6 +271,14 @@ impl Aria2Process {
             .arg(format!(
                 "--max-concurrent-downloads={}",
                 opts.max_concurrent
+            ))
+            .arg(format!(
+                "--max-overall-download-limit={}",
+                opts.download_limit.max(0)
+            ))
+            .arg(format!(
+                "--max-overall-upload-limit={}",
+                opts.upload_limit.max(0)
             ))
             .arg("--bt-save-metadata=true")
             // Required for addTorrent/addMetalink jobs to survive --save-session.

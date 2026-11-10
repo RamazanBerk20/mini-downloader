@@ -53,28 +53,31 @@ fn desktop_entry() -> Result<(PathBuf, String), String> {
     Ok((data, entry))
 }
 
+/// Write only when the content differs. This runs on every launch, and each
+/// write under `~/.local/share/applications` makes the desktop rebuild its
+/// application cache.
+#[cfg(unix)]
+fn write_if_changed(path: &std::path::Path, contents: &[u8]) -> Result<(), String> {
+    if std::fs::read(path).is_ok_and(|current| current == contents) {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path.parent().ok_or("path has no parent")?)
+        .map_err(|error| error.to_string())?;
+    std::fs::write(path, contents).map_err(|error| error.to_string())
+}
+
 #[cfg(unix)]
 fn install_user_icon() -> Result<(), String> {
     let path = dirs::data_local_dir()
         .ok_or("local data directory unavailable")?
         .join("icons/hicolor/128x128/apps/mini-downloader.png");
-    if std::fs::read(&path)
-        .ok()
-        .is_some_and(|contents| contents == USER_ICON_PNG)
-    {
-        return Ok(());
-    }
-    std::fs::create_dir_all(path.parent().ok_or("icon path has no parent")?)
-        .map_err(|error| error.to_string())?;
-    std::fs::write(path, USER_ICON_PNG).map_err(|error| error.to_string())
+    write_if_changed(&path, USER_ICON_PNG)
 }
 
 #[cfg(unix)]
 pub fn register_private_scheme() -> Result<(), String> {
     let (path, entry) = desktop_entry()?;
-    std::fs::create_dir_all(path.parent().ok_or("desktop entry path has no parent")?)
-        .map_err(|error| error.to_string())?;
-    std::fs::write(&path, entry).map_err(|error| error.to_string())?;
+    write_if_changed(&path, entry.as_bytes())?;
     install_user_icon()?;
     set_xdg_default("x-scheme-handler/minidownloader")
 }
@@ -89,7 +92,11 @@ fn set_xdg_default(mime: &str) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error.to_string()),
     };
-    write_atomic(&path, &set_default_association(&contents, mime))
+    let updated = set_default_association(&contents, mime);
+    if updated == contents {
+        return Ok(());
+    }
+    write_atomic(&path, &updated)
 }
 
 #[cfg(unix)]
@@ -137,6 +144,9 @@ fn set_default_association(contents: &str, mime: &str) -> String {
 
 #[cfg(unix)]
 fn write_atomic(path: &std::path::Path, contents: &str) -> Result<(), String> {
+    // Replace the file a symlink points at, not the link itself: dotfile
+    // managers keep `mimeapps.list` as a symlink into their own tree.
+    let path = &std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
     let parent = path.parent().ok_or("configuration path has no parent")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let mut staging = tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
@@ -164,9 +174,7 @@ fn write_atomic(path: &std::path::Path, contents: &str) -> Result<(), String> {
 #[cfg(unix)]
 pub fn set_magnet_handler(enabled: bool) -> Result<(), String> {
     let (path, entry) = desktop_entry()?;
-    std::fs::create_dir_all(path.parent().ok_or("desktop entry path has no parent")?)
-        .map_err(|error| error.to_string())?;
-    std::fs::write(path, entry).map_err(|error| error.to_string())?;
+    write_if_changed(&path, entry.as_bytes())?;
     install_user_icon()?;
     if enabled {
         set_xdg_default("x-scheme-handler/magnet")
@@ -236,9 +244,7 @@ pub fn set_autostart(enabled: bool) -> Result<(), String> {
     let entry = format!(
         "[Desktop Entry]\nType=Application\nName=Mini Downloader\nExec=\"{executable}\" --background\nIcon=mini-downloader\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
     );
-    std::fs::create_dir_all(path.parent().ok_or("autostart path has no parent")?)
-        .map_err(|error| error.to_string())?;
-    std::fs::write(path, entry).map_err(|error| error.to_string())
+    write_if_changed(&path, entry.as_bytes())
 }
 
 #[cfg(windows)]
@@ -365,6 +371,30 @@ mod tests {
         assert!(!replaced.contains("x-scheme-handler/minidownloader=old.desktop;\ntext/plain"));
         assert!(
             replaced.contains("[Added Associations]\nx-scheme-handler/minidownloader=old.desktop;")
+        );
+    }
+
+    #[test]
+    fn atomic_write_keeps_a_symlinked_configuration_file_a_symlink() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("dotfiles/mimeapps.list");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, "old").unwrap();
+        let link = root.path().join("mimeapps.list");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        write_atomic(&link, "new").unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
+    }
+
+    #[test]
+    fn default_association_is_stable_once_set() {
+        let once = set_default_association("", "x-scheme-handler/magnet");
+        assert_eq!(
+            set_default_association(&once, "x-scheme-handler/magnet"),
+            once
         );
     }
 

@@ -111,9 +111,9 @@ impl Engine {
     async fn spawn_ready(opts: &LaunchOptions) -> Result<(Aria2Process, RpcClient)> {
         let mut last_err = None;
         for _ in 0..3 {
-            let proc = Aria2Process::spawn(opts)?;
+            let mut proc = Aria2Process::spawn(opts)?;
             let client = RpcClient::new(proc.port, proc.secret.clone())?;
-            match client.wait_ready(50, Duration::from_millis(100)).await {
+            match Self::wait_ready(&mut proc, &client).await {
                 Ok(()) => return Ok((proc, client)),
                 Err(e) => last_err = Some(e), // proc drops → stuck aria2c killed
             }
@@ -121,13 +121,30 @@ impl Engine {
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("aria2 RPC did not become ready")))
     }
 
+    /// Wait for our own child's RPC. A dead child fails immediately instead of
+    /// after the full timeout, and a reply on the port while the child is dead
+    /// came from some other process, so it is never trusted with jobs.
+    async fn wait_ready(proc: &mut Aria2Process, rpc: &RpcClient) -> Result<()> {
+        for _ in 0..50 {
+            let answered = rpc.get_version().await.is_ok();
+            if proc.has_exited() {
+                anyhow::bail!("aria2c exited during startup");
+            }
+            if answered {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        anyhow::bail!("aria2 RPC did not become ready")
+    }
+
     /// Respawn aria2c and point the existing (cloned-everywhere) RPC client at it.
     async fn respawn(opts: &LaunchOptions, rpc: &RpcClient) -> Result<Aria2Process> {
         let mut last_err = None;
         for _ in 0..3 {
-            let proc = Aria2Process::respawn(opts)?;
+            let mut proc = Aria2Process::respawn(opts)?;
             rpc.retarget(proc.port, proc.secret.clone());
-            match rpc.wait_ready(50, Duration::from_millis(100)).await {
+            match Self::wait_ready(&mut proc, rpc).await {
                 Ok(()) => return Ok(proc),
                 Err(e) => last_err = Some(e),
             }

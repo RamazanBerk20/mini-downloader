@@ -100,7 +100,7 @@ impl Db {
     ) -> Result<DownloadInsertResult> {
         let signed_base = signed_source_base(&download.url);
         let mut statement = conn.prepare(
-            "SELECT id, url FROM downloads
+            "SELECT id, url, status, dir, filename FROM downloads
              WHERE kind=?2
                AND format_id IS ?3 AND media_opts IS ?4 AND checksum IS ?5
                AND status IN ('queued','active','waiting','paused','complete','scheduled')
@@ -123,10 +123,22 @@ impl Db {
                 download.checksum,
                 signed_base
             ],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                let gone = row.get::<_, String>(2)? == "complete"
+                    && row.get::<_, Option<String>>(4)?.is_some_and(|filename| {
+                        row.get::<_, String>(3)
+                            .is_ok_and(|dir| !std::path::Path::new(&dir).join(filename).exists())
+                    });
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, gone))
+            },
         )?;
         for candidate in candidates {
-            let (id, source) = candidate?;
+            let (id, source, gone) = candidate?;
+            // The user deleted the finished file: asking again means "download
+            // it again", not "show me the entry for a file that is not there".
+            if gone {
+                continue;
+            }
             if duplicate_sources_match(&download.url, &source) {
                 return Ok(DownloadInsertResult::Existing(id));
             }

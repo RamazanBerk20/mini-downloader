@@ -194,12 +194,7 @@ impl Controller {
                 );
             }
             for file in files {
-                if let Some(target) = deletion_target(Path::new(&row.dir), Path::new(&file)) {
-                    let _ = std::fs::remove_file(&target);
-                    let mut sidecar = target.into_os_string();
-                    sidecar.push(".aria2");
-                    let _ = std::fs::remove_file(PathBuf::from(sidecar));
-                }
+                delete_download_file(Path::new(&row.dir), Path::new(&file));
             }
         }
         self.db.delete(id)?;

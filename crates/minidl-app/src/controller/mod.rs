@@ -44,6 +44,7 @@ const SETTINGS_KEYS: &[&str] = &[
     "split",
     "max_conn",
     "default_speed_limit",
+    "global_download_limit",
 ];
 
 const MAX_METADATA_FILE: u64 = 20 * 1024 * 1024;
@@ -201,7 +202,9 @@ impl AppError {
 
 impl<E: std::fmt::Display> From<E> for AppError {
     fn from(error: E) -> Self {
-        Self::classify(error.to_string())
+        // `{:#}` keeps anyhow's cause chain ("failed to spawn aria2c: …")
+        // instead of only the outermost context.
+        Self::classify(format!("{error:#}"))
     }
 }
 
@@ -265,6 +268,8 @@ impl Controller {
                 .filter(|s| !s.is_empty()),
             dht: db.get_setting("dht_enabled").ok().flatten().as_deref() != Some("false"),
             sandbox: db.get_setting("sandbox_children").ok().flatten().as_deref() == Some("true"),
+            download_limit: stored_limit(&db, "global_download_limit"),
+            upload_limit: stored_limit(&db, "global_upload_limit"),
         };
         let events = EventBus::default();
         let (ytdlp, ytdlp_completions) =
@@ -382,6 +387,15 @@ impl Controller {
     }
 }
 
+fn stored_limit(db: &Db, key: &str) -> i64 {
+    db.get_setting(key)
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(0)
+        .max(0)
+}
+
 fn lookup(db: &Db, gid: &str) -> Option<Download> {
     db.find_by_gid(gid).ok().flatten()
 }
@@ -474,6 +488,17 @@ fn deletion_target(dir: &Path, candidate: &Path) -> Option<PathBuf> {
     }
     let parent = candidate.parent()?.canonicalize().ok()?;
     parent.starts_with(root).then(|| parent.join(name))
+}
+
+/// Delete one downloaded file and its aria2 control file, refusing anything
+/// that resolves outside the download's own directory.
+fn delete_download_file(dir: &Path, file: &Path) {
+    if let Some(target) = deletion_target(dir, file) {
+        let _ = std::fs::remove_file(&target);
+        let mut sidecar = target.into_os_string();
+        sidecar.push(".aria2");
+        let _ = std::fs::remove_file(PathBuf::from(sidecar));
+    }
 }
 
 fn stored_detail_file(row: &Download) -> Option<DetailFile> {

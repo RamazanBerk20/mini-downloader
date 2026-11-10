@@ -151,6 +151,17 @@ impl EngineSupervisor {
         self.publish_options(options).await;
     }
 
+    pub async fn update_speed_limits(&self, download: i64, upload: i64) {
+        let mut options = self
+            .options
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        options.download_limit = download;
+        options.upload_limit = upload;
+        self.publish_options(options).await;
+    }
+
     pub async fn update_proxy(&self, proxy: Option<String>) {
         let mut options = self
             .options

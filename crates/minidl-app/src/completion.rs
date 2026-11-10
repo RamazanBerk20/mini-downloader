@@ -6,7 +6,17 @@ use minidl_core::db::Db;
 use minidl_core::model::{Download, DownloadStatus};
 use serde_json::Value;
 
+/// Name of the finished item directly under its download directory. A
+/// torrent reports its own name: the file for a single-file torrent, the root
+/// folder for a multi-file one (whose first file sits deeper than `dir`).
 pub fn basename(status: &Value) -> String {
+    if let Some(name) = status
+        .pointer("/bittorrent/info/name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+    {
+        return name.to_owned();
+    }
     status
         .get("files")
         .and_then(Value::as_array)
@@ -67,7 +77,10 @@ fn copy_new(source: &Path, destination: &Path) -> std::io::Result<()> {
         .open(destination)?;
     let copied = (|| {
         std::io::copy(&mut input, &mut output)?;
-        output.set_permissions(metadata.permissions())?;
+        output.sync_all()?;
+        // Metadata is best effort: exFAT/FAT/NTFS targets reject modes, times
+        // or xattrs, and that must not undo a byte-for-byte good copy.
+        let _ = output.set_permissions(metadata.permissions());
         let mut times = std::fs::FileTimes::new();
         if let Ok(accessed) = metadata.accessed() {
             times = times.set_accessed(accessed);
@@ -75,12 +88,11 @@ fn copy_new(source: &Path, destination: &Path) -> std::io::Result<()> {
         if let Ok(modified) = metadata.modified() {
             times = times.set_modified(modified);
         }
-        output.set_times(times)?;
-        output.sync_all()?;
+        let _ = output.set_times(times);
         #[cfg(unix)]
-        for name in xattr::list(source)? {
-            if let Some(value) = xattr::get(source, &name)? {
-                xattr::set(destination, &name, &value)?;
+        for name in xattr::list(source).into_iter().flatten() {
+            if let Ok(Some(value)) = xattr::get(source, &name) {
+                let _ = xattr::set(destination, &name, &value);
             }
         }
         Ok(())
@@ -189,7 +201,28 @@ pub fn set_origin(path: &Path, url: &str, referrer: Option<&str>) {
     }
 }
 
-#[cfg(not(unix))]
+/// Mark-of-the-Web body, as browsers write it. Without it Windows treats a
+/// downloaded file as locally created: no SmartScreen, no Office Protected View.
+#[cfg(any(windows, test))]
+fn zone_identifier(url: &str, referrer: Option<&str>) -> String {
+    // The stream is an INI file; a line break in a value would forge a key.
+    let clean = |value: &str| value.replace(['\r', '\n'], "");
+    let mut body = String::from("[ZoneTransfer]\r\nZoneId=3\r\n");
+    if let Some(referrer) = referrer {
+        body.push_str(&format!("ReferrerUrl={}\r\n", clean(referrer)));
+    }
+    body.push_str(&format!("HostUrl={}\r\n", clean(url)));
+    body
+}
+
+#[cfg(windows)]
+pub fn set_origin(path: &Path, url: &str, referrer: Option<&str>) {
+    let mut stream = path.as_os_str().to_owned();
+    stream.push(":Zone.Identifier");
+    let _ = std::fs::write(stream, zone_identifier(url, referrer));
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn set_origin(_path: &Path, _url: &str, _referrer: Option<&str>) {}
 
 #[cfg(test)]
@@ -243,6 +276,26 @@ mod tests {
         row.status = DownloadStatus::Complete;
         row.filename = Some("../finished.zip".into());
         assert!(downloaded_path(&row).is_none());
+    }
+
+    #[test]
+    fn torrents_are_named_by_their_root_not_their_first_file() {
+        let multi = serde_json::json!({
+            "dir": "/dl",
+            "files": [{"path": "/dl/Album/01 - intro.flac"}],
+            "bittorrent": {"info": {"name": "Album"}}
+        });
+        assert_eq!(basename(&multi), "Album");
+        let http = serde_json::json!({"files": [{"path": "/dl/file.zip"}]});
+        assert_eq!(basename(&http), "file.zip");
+    }
+
+    #[test]
+    fn zone_identifier_marks_the_internet_zone_without_line_injection() {
+        assert_eq!(
+            zone_identifier("https://a/b\r\nZoneId=0", Some("https://ref/")),
+            "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://ref/\r\nHostUrl=https://a/bZoneId=0\r\n"
+        );
     }
 
     #[test]

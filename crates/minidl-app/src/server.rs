@@ -551,7 +551,9 @@ impl ControlClient {
         write_frame_timed(&mut stream, &request)
             .await
             .map_err(|error| error.to_string())?;
-        let bytes = read_frame_timed(&mut stream)
+        // No deadline on the reply: a media probe runs up to two minutes and an
+        // update download far longer. A dead controller closes the socket.
+        let bytes = read_frame(&mut stream)
             .await
             .map_err(|error| error.to_string())?;
         let reply: ControlReply =

@@ -95,6 +95,32 @@ mod tests {
     }
 
     #[test]
+    fn completed_row_whose_file_was_deleted_does_not_block_a_new_download() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Db::open_in_memory().unwrap();
+        let download = NewDownload {
+            url: "https://x/gone.iso".into(),
+            filename: Some("gone.iso".into()),
+            dir: root.path().to_string_lossy().into_owned(),
+            kind: "http".into(),
+            ..Default::default()
+        };
+        let first = db.insert_download_deduplicated(&download).unwrap().id();
+        db.set_status(first, DownloadStatus::Complete).unwrap();
+
+        std::fs::write(root.path().join("gone.iso"), b"data").unwrap();
+        assert_eq!(
+            db.insert_download_deduplicated(&download).unwrap(),
+            DownloadInsertResult::Existing(first)
+        );
+        std::fs::remove_file(root.path().join("gone.iso")).unwrap();
+        assert!(matches!(
+            db.insert_download_deduplicated(&download).unwrap(),
+            DownloadInsertResult::Inserted(id) if id != first
+        ));
+    }
+
+    #[test]
     fn deduplicated_insert_recognizes_rotated_cdn_signatures_only() {
         let db = Db::open_in_memory().unwrap();
         let first = NewDownload {

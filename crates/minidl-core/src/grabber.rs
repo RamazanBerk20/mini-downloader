@@ -66,6 +66,11 @@ fn expand_pattern(token: &str) -> Vec<String> {
         let hi = token[lo..].find(close)? + lo;
         let inner = &token[lo + 1..hi];
         let (a, b) = inner.split_once(sep)?;
+        // u64 has at most 20 digits; longer bounds are only zero padding, which
+        // would otherwise multiply into gigabytes of expanded URLs.
+        if a.len().max(b.len()) > 20 {
+            return None;
+        }
         let (start, end) = (a.parse::<u64>().ok()?, b.parse::<u64>().ok()?);
         let (from, to) = if start <= end {
             (start, end)
@@ -168,5 +173,9 @@ mod tests {
         // A runaway range is left unexpanded (single literal token, unmatched).
         let l3 = parse_links("https://x/[1-100000].bin");
         assert!(l3.iter().all(|l| l.url.contains('[')));
+
+        // So is a range whose bounds are padded far past any real number.
+        let padded = format!("https://x/[{}1-{}9].bin", "0".repeat(64), "0".repeat(64));
+        assert_eq!(parse_links(&padded).len(), 1);
     }
 }

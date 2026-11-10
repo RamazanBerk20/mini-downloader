@@ -300,15 +300,4 @@ impl RpcClient {
     pub async fn shutdown(&self) -> Result<Value> {
         self.call("aria2.shutdown", vec![]).await
     }
-
-    /// Poll `getVersion` until aria2's RPC answers or the attempts run out.
-    pub async fn wait_ready(&self, attempts: u32, delay: std::time::Duration) -> Result<()> {
-        for _ in 0..attempts {
-            if self.get_version().await.is_ok() {
-                return Ok(());
-            }
-            tokio::time::sleep(delay).await;
-        }
-        Err(anyhow!("aria2 RPC did not become ready"))
-    }
 }
