@@ -19,9 +19,9 @@
     <name>RamazanBerk20</name>
   </developer>
   <releases>
-    <release version="3.1.0" date="2026-08-20">
+    <release version="3.2.0" date="2026-11-10">
       <description>
-        <p>Native desktop usability release with scrollable queues, precise transfer metrics, localized ETA, and reliable tray shutdown.</p>
+        <p>Reliability and security release: checksums typed in the Add field are now enforced, Pause all covers media downloads, speed limits persist, copied links are offered in the Add field, and a ctl command-line interface allows scripting.</p>
       </description>
     </release>
   </releases>
