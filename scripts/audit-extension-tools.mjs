@@ -35,29 +35,31 @@ if (Object.keys(vulnerabilities).length === 0) {
   process.exit(0);
 }
 
-// image-size 2.0.2 is the newest published version and, as of 2026-08-08,
-// addons-linter 10.10.0 pins it exactly. The affected parser runs only while
-// linting this repository's trusted extension images. Keep the exception
-// deliberately exact so a new advisory, dependency, or vulnerable path fails.
+// deepmerge 4.3.1 is the newest published version as of 2026-11-10 and has no
+// patched release. It is reached only through addons-linter, which runs on
+// this repository's own extension files. Keep the exception deliberately exact
+// so a new advisory, dependency, or vulnerable path fails.
+// Advisories are matched by GHSA id: npm renumbers its numeric ids whenever a
+// record is edited, which failed this gate with no real change.
 const expected = new Map([
   [
-    "image-size",
+    "deepmerge",
     {
-      advisorySources: new Set([1138808, 1138809]),
+      advisories: new Set(["GHSA-gcqx-w48m-w2h4"]),
       dependencyNames: new Set(),
     },
   ],
   [
     "addons-linter",
     {
-      advisorySources: new Set(),
-      dependencyNames: new Set(["image-size"]),
+      advisories: new Set(),
+      dependencyNames: new Set(["deepmerge"]),
     },
   ],
   [
     "web-ext",
     {
-      advisorySources: new Set(),
+      advisories: new Set(),
       dependencyNames: new Set(["addons-linter"]),
     },
   ],
@@ -77,8 +79,9 @@ for (const [name, vulnerability] of Object.entries(vulnerabilities)) {
       }
       continue;
     }
-    if (!allowance.advisorySources.has(Number(cause.source))) {
-      unexpected.push(`${name}: unexpected advisory ${cause.source ?? "unknown"}`);
+    const advisory = String(cause.url ?? "").split("/").pop() || "unknown";
+    if (!allowance.advisories.has(advisory)) {
+      unexpected.push(`${name}: unexpected advisory ${advisory}`);
     }
   }
 }
@@ -96,6 +99,6 @@ if (unexpected.length > 0) {
 }
 
 console.warn(
-  "Accepted only GHSA-w3rx-r6r6-pgpr and GHSA-5p2g-fcmc-qvqq " +
-    "in the trusted extension-linting toolchain; no patched image-size release exists yet.",
+  "Accepted only GHSA-gcqx-w48m-w2h4 (deepmerge, low severity) " +
+    "in the trusted extension-linting toolchain; no patched deepmerge release exists yet.",
 );
