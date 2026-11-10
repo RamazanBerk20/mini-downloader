@@ -3,7 +3,9 @@ name: build
 on:
   push:
     branches: [main]
+    paths-ignore: ["**/*.md", "docs/**"]
   pull_request:
+    paths-ignore: ["**/*.md", "docs/**"]
   workflow_dispatch:
 
 concurrency:
@@ -13,8 +15,16 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Tests need no debug info; without it they compile and link faster and the
+  # build cache is smaller. A panic still reports its file and line.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
+# One compile configuration per job. Lint, test and release builds share
+# nothing, so running them in one job made the run take their sum; in parallel
+# it takes as long as the slowest one.
 jobs:
-  linux:
+  lint:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,13 +37,12 @@ jobs:
           sudo apt-get install -y \
             build-essential pkg-config libfontconfig1-dev libwayland-dev \
             libxkbcommon-dev libx11-dev libx11-xcb-dev libxcb1-dev \
-            libxcursor-dev libxrandr-dev libxi-dev appstream desktop-file-utils \
-            shellcheck aria2
+            libxcursor-dev libxrandr-dev libxi-dev
 
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: 1.97.1
-          components: clippy,rustfmt,llvm-tools-preview
+          components: clippy,rustfmt
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
@@ -42,6 +51,28 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config libfontconfig1-dev libwayland-dev \
+            libxkbcommon-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxrandr-dev libxi-dev aria2
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Unit and integration tests
         run: cargo test --workspace --locked
@@ -57,6 +88,52 @@ jobs:
           cargo llvm-cov clean --workspace
           cargo llvm-cov -p minidl-core -p minidl-app --locked \
             --summary-only --fail-under-lines 40 -- --include-ignored
+
+  release-build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install native Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config libfontconfig1-dev libwayland-dev \
+            libxkbcommon-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcursor-dev libxrandr-dev libxi-dev
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - name: Native release smoke build
+        run: cargo build --release --locked -p minidl-native-desktop -p minidl-native-host
+
+  # Everything that inspects the dependency set and packaging metadata. It
+  # compiles none of the project, so only the installed tools are cached.
+  supply-chain:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install metadata validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream desktop-file-utils shellcheck
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          cache-targets: false
 
       - name: Dependency security audit
         run: |
@@ -79,9 +156,7 @@ jobs:
           shellcheck scripts/*.sh packaging/linux/*.sh
           ./scripts/check-workflows.sh
 
-      - name: Native release smoke build
-        run: cargo build --release --locked -p minidl-native-desktop -p minidl-native-host
-
+  # Formatting is platform-independent and checked once, in `lint`.
   windows:
     runs-on: windows-2022
     steps:
@@ -92,18 +167,28 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: 1.97.1
-          components: clippy,rustfmt
+          components: clippy
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Formatting
-        run: cargo fmt --all -- --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Unit and integration tests
         run: cargo test --workspace --locked
+
+  windows-release-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.97.1
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Native release smoke build
         run: cargo build --release --locked -p minidl-native-desktop -p minidl-native-host
