@@ -1,7 +1,12 @@
 [CmdletBinding()]
 param(
     [string]$ArtifactDirectory = "dist-native",
-    [string]$SidecarDirectory = "dist-native\windows-stage"
+    [string]$SidecarDirectory = "dist-native\windows-stage",
+    # Release CI compiles on a machine without the signing key and packages on
+    # another: -BuildOnly stops after cargo build, -SkipBuild signs and packages
+    # the binaries already in target\release.
+    [switch]$BuildOnly,
+    [switch]$SkipBuild
 )
 
 Set-StrictMode -Version Latest
@@ -57,8 +62,11 @@ foreach ($flag in @(
 }
 $env:CARGO_ENCODED_RUSTFLAGS = $releaseRustFlags
 
-cargo build --locked --release -p minidl-native-desktop -p minidl-native-host
-if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+if (-not $SkipBuild) {
+    cargo build --locked --release -p minidl-native-desktop -p minidl-native-host
+    if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
+}
+if ($BuildOnly) { return }
 
 New-Item -ItemType Directory -Force $artifacts, $stage | Out-Null
 Copy-Item target\release\mini-downloader.exe $stage\mini-downloader.exe -Force

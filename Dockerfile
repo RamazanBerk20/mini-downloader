@@ -3,6 +3,9 @@
 FROM ubuntu:22.04@sha256:3b06811b2afd352be909dd088a004166d665dc76d38b13eada33522a9d915c6f
 
 ARG RUST_TOOLCHAIN=1.97.1
+# Versioned archive URL: `rustup/dist/` always serves the newest rustup, so a
+# fixed checksum against it breaks on every upstream release.
+ARG RUSTUP_VERSION=1.29.0
 ARG RUSTUP_INIT_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
 ARG YTDLP_VERSION=2026.07.04
 ARG YTDLP_SHA256=495be29ff4d9d4e9be7eabdfef225221e5d5282e77f2f505abc6dca80349f3fd
@@ -28,7 +31,7 @@ RUN curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 
 
 RUN curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors \
       --connect-timeout 15 --max-time 600 \
-      https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
+      "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/x86_64-unknown-linux-gnu/rustup-init" \
       -o /tmp/rustup-init \
     && echo "${RUSTUP_INIT_SHA256}  /tmp/rustup-init" | sha256sum -c - \
     && chmod 0755 /tmp/rustup-init \

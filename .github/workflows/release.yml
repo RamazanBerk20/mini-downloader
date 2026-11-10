@@ -88,11 +88,12 @@ jobs:
               --notes "$release_notes"
           fi
 
+  # Build jobs run third-party code (build scripts, gems, AppImage tools), so
+  # they get the read-only token and hand their files over as artifacts. Only
+  # `upload` and `checksums` may write to the release.
   linux:
     needs: prepare
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -112,10 +113,12 @@ jobs:
             https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
             -o "$RUNNER_TEMP/linuxdeploy"
           echo "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d  $RUNNER_TEMP/linuxdeploy" | sha256sum -c -
+          # A dated release, not `continuous`: that tag is rebuilt in place, so a
+          # checksum pinned against it fails on the next upstream build.
           curl -fsSL --retry 3 --retry-all-errors --connect-timeout 15 --max-time 600 \
-            https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage \
             -o "$RUNNER_TEMP/linuxdeploy-plugin-appimage"
-          echo "a45d3e227bc7f397e9cf6bfa4c9507494efa2293357b6e86690a3de2ca992e79  $RUNNER_TEMP/linuxdeploy-plugin-appimage" | sha256sum -c -
+          echo "992d502a248e14ab185448ddf6f6e7d25558cb84d4623c354c3af350c25fccb3  $RUNNER_TEMP/linuxdeploy-plugin-appimage" | sha256sum -c -
           sudo install -m 0755 "$RUNNER_TEMP/linuxdeploy" /usr/local/bin/linuxdeploy
           sudo install -m 0755 "$RUNNER_TEMP/linuxdeploy-plugin-appimage" /usr/local/bin/linuxdeploy-plugin-appimage
 
@@ -123,7 +126,8 @@ jobs:
         with:
           toolchain: 1.97.1
           components: clippy,rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # No build cache: a release must not start from a target directory that
+      # an ordinary CI run filled.
 
       - name: Test and audit release source
         run: |
@@ -149,20 +153,83 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: ./scripts/package-linux.sh
 
-      - name: Upload Linux packages
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Collect Linux packages
         run: |
-          while IFS= read -r -d '' artifact; do
-            gh release upload "$RELEASE_TAG" "$artifact" \
-              --repo "$GITHUB_REPOSITORY" --clobber
-          done < <(find dist-native -maxdepth 1 -type f -print0)
+          mkdir release-assets
+          find dist-native -maxdepth 1 -type f -exec mv -t release-assets {} +
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux
+          path: release-assets
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
 
-  windows:
+  # Windows is three jobs on three machines, so that the Authenticode key never
+  # shares a machine with third-party build code. Steps of one job share a VM,
+  # and a process started by a build script would simply outlive its step.
+  #
+  # 1. Decide whether this release is signed and publish the certificate
+  #    thumbprint, which the build compiles in. Runs only this repository's
+  #    script; the key is deleted before the job ends.
+  windows-identity:
     needs: prepare
     runs-on: windows-2022
-    permissions:
-      contents: write
+    outputs:
+      enabled: ${{ steps.signing.outputs.enabled }}
+      unsigned: ${{ steps.signing.outputs.unsigned }}
+      thumbprint: ${{ steps.identity.outputs.thumbprint }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - id: signing
+        name: Require signing or explicit unsigned override
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $certificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
+          $password = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
+          $allowUnsigned = $env:ALLOW_UNSIGNED_WINDOWS -eq "true"
+          if ($certificate -xor $password) {
+            throw "Both Authenticode signing secrets are required when either is configured."
+          }
+          if ($certificate -and $password) {
+            "enabled=true" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "unsigned=false" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } elseif ($allowUnsigned) {
+            Write-Warning "Publishing explicitly authorized unsigned Windows artifacts."
+            "enabled=false" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "unsigned=true" | Out-File `
+              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            throw "Public Windows releases require both Authenticode signing secrets."
+          }
+
+      - id: identity
+        name: Read signing certificate thumbprint
+        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: ./scripts/configure-windows-signing.ps1 -ThumbprintOnly
+
+  # 2. Test and compile. Build scripts, proc-macros and dev-dependencies run
+  #    here, with no signing secret and the read-only token.
+  windows-build:
+    needs: windows-identity
+    runs-on: windows-2022
+    env:
+      MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ needs.windows-identity.outputs.thumbprint }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -171,11 +238,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-
-      - name: Install NSIS
-        shell: pwsh
-        run: choco install nsis --version 3.12.0 --no-progress -y
+      # No build cache: a release must not start from a target directory that
+      # an ordinary CI run filled.
 
       - name: Stage aria2c and yt-dlp
         shell: pwsh
@@ -226,51 +290,56 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not extract the yt-dlp license." }
           Copy-Item yt-dlp-source\yt-dlp\LICENSE "$stage\LICENSE.yt-dlp.txt"
 
-      - id: signing
-        name: Require signing or explicit unsigned override
+      - name: Test and compile
         shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          $certificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)
-          $password = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)
-          $allowUnsigned = $env:ALLOW_UNSIGNED_WINDOWS -eq "true"
-          if ($certificate -xor $password) {
-            throw "Both Authenticode signing secrets are required when either is configured."
-          }
-          if ($certificate -and $password) {
-            "enabled=true" | Out-File `
-              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "unsigned=false" | Out-File `
-              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } elseif ($allowUnsigned) {
-            Write-Warning "Publishing explicitly authorized unsigned Windows artifacts."
-            "enabled=false" | Out-File `
-              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-            "unsigned=true" | Out-File `
-              -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          } else {
-            throw "Public Windows releases require both Authenticode signing secrets."
-          }
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
+          ./scripts/package-windows.ps1 -BuildOnly
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-unsigned
+          path: |
+            target/release/mini-downloader.exe
+            target/release/minidl-native-host.exe
+            dist-native
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  # 3. Sign and package. The only job that holds the key; it compiles nothing.
+  windows:
+    needs: [windows-identity, windows-build]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+      # Restores target\release and dist-native exactly as the build left them.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-unsigned
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --version 3.12.0 --no-progress -y
 
       - name: Import Authenticode certificate
-        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        if: ${{ needs.windows-identity.outputs.enabled == 'true' }}
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: ./scripts/configure-windows-signing.ps1
 
-      - name: Build native Windows packages
+      - name: Sign and package
         shell: pwsh
-        run: |
-          cargo test --workspace --locked
-          if ($LASTEXITCODE -ne 0) { throw "cargo test failed" }
-          ./scripts/package-windows.ps1
+        run: ./scripts/package-windows.ps1 -SkipBuild
 
       - name: Verify Authenticode signatures
-        if: ${{ steps.signing.outputs.enabled == 'true' }}
+        if: ${{ needs.windows-identity.outputs.enabled == 'true' }}
         shell: pwsh
         run: |
           ./scripts/verify-windows-signatures.ps1 `
@@ -278,7 +347,7 @@ jobs:
             -StageDirectory dist-native\windows-stage
 
       - name: Mark unsigned Windows artifacts
-        if: ${{ steps.signing.outputs.unsigned == 'true' }}
+        if: ${{ needs.windows-identity.outputs.unsigned == 'true' }}
         shell: pwsh
         run: |
           @"
@@ -290,19 +359,8 @@ jobs:
           the release SHA256SUMS before running them.
           "@ | Set-Content -LiteralPath dist-native\WINDOWS-UNSIGNED.txt -Encoding utf8
 
-      - name: Upload Windows packages
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          Get-ChildItem dist-native -File | ForEach-Object {
-            gh release upload $env:RELEASE_TAG $_.FullName `
-              --repo $env:GITHUB_REPOSITORY --clobber
-            if ($LASTEXITCODE -ne 0) { throw "Release upload failed." }
-          }
-
       - name: Remove imported signing certificate
-        if: ${{ always() && steps.signing.outputs.enabled == 'true' }}
+        if: ${{ always() && needs.windows-identity.outputs.enabled == 'true' }}
         shell: pwsh
         run: |
           if (-not [string]::IsNullOrWhiteSpace($env:MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT)) {
@@ -310,11 +368,23 @@ jobs:
             if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
           }
 
+      - name: Collect Windows packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory release-assets | Out-Null
+          Get-ChildItem dist-native -File | Move-Item -Destination release-assets
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows
+          path: release-assets
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
   extension:
     needs: prepare
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write
     env:
       NPM_CONFIG_AUDIT: "false"
       NPM_CONFIG_IGNORE_SCRIPTS: "true"
@@ -354,20 +424,46 @@ jobs:
             | zip -Xq ../mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip -@)
           (cd chrome && find . -type f -print | LC_ALL=C sort \
             | zip -Xq ../mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip -@)
-      - name: Upload extension packages
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "$RELEASE_TAG" \
-            dist-ext/mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip \
-            dist-ext/mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip \
-            --repo "$GITHUB_REPOSITORY" --clobber
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-extension
+          path: |
+            dist-ext/mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip
+            dist-ext/mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
 
-  stores:
+  # The one job that puts build output on the draft release. It runs no build
+  # tooling: it only moves the files the jobs above produced.
+  upload:
     needs: [linux, windows, extension]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while IFS= read -r -d '' artifact; do
+            gh release upload "$RELEASE_TAG" "$artifact" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          done < <(find assets -maxdepth 1 -type f -print0)
+
+  # Runs the npm publishing tools with the store credentials, so it too gets
+  # only the read-only token.
+  stores:
+    needs: upload
+    runs-on: ubuntu-22.04
+    outputs:
+      signed-xpi: ${{ steps.xpi.outputs.artifact-id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -390,15 +486,13 @@ jobs:
           version=$(node -p 'require("./extension/manifest.json").version')
           test "$RELEASE_TAG" = "v$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Download built extension artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-extension
+          path: dist-ext
+      - name: Unpack built Firefox package
         run: |
           mkdir -p dist-ext/firefox
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern "mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip" \
-            --pattern "mini-downloader-chrome-${{ steps.extension_version.outputs.version }}.zip" \
-            --dir dist-ext
           unzip -q "dist-ext/mini-downloader-firefox-${{ steps.extension_version.outputs.version }}.zip" \
             -d dist-ext/firefox
       - id: publication
@@ -447,18 +541,24 @@ jobs:
             --api-key "$AMO_API_KEY" \
             --api-secret "$AMO_API_SECRET" \
             --artifacts-dir web-ext-artifacts
-      - name: Attach unlisted signed Firefox package
+      - name: Check unlisted signed Firefox package
         if: ${{ steps.publication.outputs.amo == 'true' && vars.AMO_CHANNEL == 'unlisted' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mapfile -d '' xpis < <(find web-ext-artifacts -maxdepth 1 -name '*.xpi' -print0)
           test "${#xpis[@]}" -eq 1 || {
             echo "Expected exactly one signed Firefox XPI." >&2
             exit 1
           }
-          gh release upload "$RELEASE_TAG" "${xpis[0]}" \
-            --repo "$GITHUB_REPOSITORY" --clobber
+      - id: xpi
+        if: ${{ steps.publication.outputs.amo == 'true' && vars.AMO_CHANNEL == 'unlisted' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: firefox-signed
+          path: web-ext-artifacts/*.xpi
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
       - name: Publish Chrome extension
         if: ${{ steps.publication.outputs.cws == 'true' }}
         env:
@@ -480,6 +580,18 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: ${{ needs.stores.outputs.signed-xpi != '' }}
+        with:
+          name: firefox-signed
+          path: signed
+      - name: Attach unlisted signed Firefox package
+        if: ${{ needs.stores.outputs.signed-xpi != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "$RELEASE_TAG" signed/*.xpi \
+            --repo "$GITHUB_REPOSITORY" --clobber
       - name: Compute and upload SHA256SUMS
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

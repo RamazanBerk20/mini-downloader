@@ -1,5 +1,10 @@
 [CmdletBinding()]
-param()
+param(
+    # Publish the certificate thumbprint, then delete the certificate and its
+    # private key again. The release build compiles the thumbprint in and must
+    # run on a machine that never holds the key.
+    [switch]$ThumbprintOnly
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -70,4 +75,16 @@ if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_ENV)) {
         -Encoding utf8
 }
 $env:MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT = $certificate.Thumbprint
+if ($ThumbprintOnly) {
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_OUTPUT)) {
+        Add-Content $env:GITHUB_OUTPUT `
+            "thumbprint=$($certificate.Thumbprint)" `
+            -Encoding utf8
+    }
+    # -DeleteKey: without it the key container outlives the certificate and
+    # stays usable by any process of this user.
+    Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -DeleteKey -Force
+    Write-Host "Read Authenticode certificate $($certificate.Thumbprint); the key was not kept."
+    return
+}
 Write-Host "Imported Authenticode certificate $($certificate.Thumbprint)."
