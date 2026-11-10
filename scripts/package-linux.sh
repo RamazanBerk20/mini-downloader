@@ -85,7 +85,7 @@ if command -v fpm >/dev/null 2>&1; then
     --depends aria2 --depends fontconfig --depends libX11 \
     --depends libX11-xcb --depends libxcb --depends libXcursor \
     --depends libXrandr --depends libXi --depends libxkbcommon \
-    --depends wayland-libs \
+    --depends libwayland-client \
     .
 fi
 

@@ -34,7 +34,10 @@ cleanup_active() {
   active_pid=""
   active_root=""
 }
-trap cleanup_active EXIT HUP INT TERM
+trap cleanup_active EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 tree_pids() {
   local root_pid="$1" current child

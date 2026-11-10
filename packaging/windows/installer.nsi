@@ -91,6 +91,11 @@ Section "Uninstall"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mini Downloader"
   DeleteRegKey HKCU "Software\Mini Downloader"
   DeleteRegKey HKCU "Software\Classes\minidownloader"
+  ; The app also registers itself for magnet: links. Remove that handler only
+  ; while it still points at this install, never another client's.
+  ReadRegStr $0 HKCU "Software\Classes\magnet\shell\open\command" ""
+  StrCmp $0 '"$INSTDIR\mini-downloader.exe" "%1"' 0 +2
+  DeleteRegKey HKCU "Software\Classes\magnet"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "MiniDownloader"
   DeleteRegKey HKCU "Software\Mozilla\NativeMessagingHosts\com.minidownloader.host"
   DeleteRegKey HKCU "Software\Google\Chrome\NativeMessagingHosts\com.minidownloader.host"
