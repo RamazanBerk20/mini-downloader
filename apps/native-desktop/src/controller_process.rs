@@ -66,7 +66,9 @@ pub(super) async fn run_controller(launch_commands: Vec<ControlCommand>) -> Resu
         spawn_ui_client(ui_running.clone());
     }
     for command in launch_commands {
-        let _ = controller.execute(command).await;
+        if let Err(error) = controller.execute(command).await {
+            eprintln!("{}", error.message);
+        }
     }
 
     #[cfg(any(target_os = "linux", windows))]
@@ -153,9 +155,13 @@ fn service_exit(
 
 async fn forward_to_controller(launch_commands: &[ControlCommand], background: bool) {
     for command in launch_commands {
-        let _ = server::send_one(command.clone()).await;
+        if let Err(error) = server::send_one(command.clone()).await {
+            eprintln!("{error}");
+        }
     }
-    if !background && launch_commands.is_empty() {
+    // Also after adding: a magnet or link opened from the browser while the
+    // app sits in the tray would otherwise give no sign that anything happened.
+    if !background {
         let _ = server::send_one(ControlCommand::Show).await;
     }
 }

@@ -20,7 +20,7 @@ mod tray;
 mod ui;
 
 use controller_process::run_controller;
-use launch::{command_for_argument, command_for_path};
+use launch::{command_for_add_field, command_for_path};
 use tray::*;
 use ui::run_ui;
 
@@ -32,6 +32,8 @@ fn main() {
     launch::run();
 }
 
+#[cfg(test)]
+use launch::command_for_argument;
 #[cfg(test)]
 use ui::view_models::*;
 #[cfg(test)]

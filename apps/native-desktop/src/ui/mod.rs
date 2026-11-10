@@ -93,6 +93,22 @@ pub(super) fn run_ui(runtime: &tokio::runtime::Runtime) -> Result<(), String> {
                 });
                 return;
             }
+            if event.event == "clipboard:detected" {
+                let weak = weak.clone();
+                let url = event
+                    .payload
+                    .get("url")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let _ = slint::invoke_from_event_loop(move || {
+                    // Offer the copied link without overwriting one being typed.
+                    if let Some(ui) = weak.upgrade().filter(|ui| ui.get_url_text().is_empty()) {
+                        ui.set_url_text(url.into());
+                    }
+                });
+                return;
+            }
             if event.event == "connector:status" {
                 let weak = weak.clone();
                 let status = event.payload;

@@ -1,5 +1,84 @@
 use super::*;
 
+const USAGE: &str = "\
+Mini Downloader
+
+Usage:
+  mini-downloader [URL|FILE]...    add links, magnets, .torrent or .metalink files
+  mini-downloader --background     start in the tray without opening a window
+  mini-downloader --show | --hide | --quit
+  mini-downloader ctl <command> [json-args]
+                                   run one controller command, print its JSON result
+  mini-downloader ctl subscribe    stream controller events, one JSON object per line
+  mini-downloader --version | --help
+
+ctl examples:
+  mini-downloader ctl snapshot
+  mini-downloader ctl ingest_url '{\"url\":\"https://example.org/file.iso\"}'
+  mini-downloader ctl pause '{\"id\":3}'
+
+Commands are the snake_case variants of ControlCommand in
+crates/minidl-ipc/src/lib.rs; an unknown command prints the full list.
+ctl exits 0 on success, 1 when the controller reports an error, 2 on bad usage.
+";
+
+/// `ctl <command> [json-args]`: the scripting and agent surface. It speaks the
+/// same user-private control socket as the UI, so it grants nothing new.
+fn run_ctl(runtime: &tokio::runtime::Runtime, arguments: &[String]) -> i32 {
+    use std::io::Write as _;
+
+    let Some(name) = arguments.first() else {
+        eprint!("{USAGE}");
+        return 2;
+    };
+    if name == "subscribe" {
+        let ended = runtime.block_on(ControlClient::subscribe(|event| {
+            let line = serde_json::to_string(&event).unwrap_or_default();
+            // A closed pipe (`| head`) is the reader saying it has enough.
+            if writeln!(std::io::stdout(), "{line}").is_err() {
+                std::process::exit(0);
+            }
+        }));
+        eprintln!("event stream ended: {}", ended.err().unwrap_or_default());
+        return 1;
+    }
+    let mut request = serde_json::json!({ "command": name });
+    if let Some(raw) = arguments.get(1) {
+        match serde_json::from_str::<serde_json::Value>(raw) {
+            Ok(arguments) => request["args"] = arguments,
+            Err(error) => {
+                eprintln!("arguments are not valid JSON: {error}");
+                return 2;
+            }
+        }
+    }
+    let command = match serde_json::from_value::<ControlCommand>(request) {
+        Ok(command) => command,
+        Err(error) => {
+            eprintln!("{error}");
+            return 2;
+        }
+    };
+    let outcome = runtime.block_on(async {
+        let client = ControlClient::connect().await.map_err(|error| {
+            format!(
+                "controller is not running ({error}); start it with `mini-downloader --background`"
+            )
+        })?;
+        client.request(command).await
+    });
+    match outcome {
+        Ok(result) => {
+            println!("{result}");
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
 pub(super) fn run() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     if arguments
@@ -7,6 +86,13 @@ pub(super) fn run() {
         .any(|argument| argument == "--version" || argument == "-V")
     {
         println!("mini-downloader {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if arguments
+        .iter()
+        .any(|argument| argument == "--help" || argument == "-h")
+    {
+        print!("{USAGE}");
         return;
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -18,6 +104,11 @@ pub(super) fn run() {
         .thread_name("minidl-worker")
         .build()
         .expect("create runtime");
+    // Only as the first argument: a URL-scheme launch always puts the link
+    // first, so a crafted link can never reach this.
+    if arguments.first().is_some_and(|argument| argument == "ctl") {
+        std::process::exit(run_ctl(&runtime, &arguments[1..]));
+    }
     if let Some(command) = arguments
         .iter()
         .find_map(|argument| match argument.as_str() {
@@ -94,6 +185,21 @@ pub(crate) fn command_for_path(path: &std::path::Path) -> Option<ControlCommand>
         path: path.to_string_lossy().into_owned(),
         kind,
     })
+}
+
+/// Command for the Add field. The launch-argument parser builds link commands
+/// without a checksum, so the one typed next to the link is attached here.
+pub(crate) fn command_for_add_field(raw: &str, checksum: &str) -> ControlCommand {
+    let raw = raw.trim();
+    let checksum = (!checksum.trim().is_empty()).then(|| checksum.trim().to_owned());
+    match command_for_argument(raw) {
+        Some(ControlCommand::IngestUrl { url, .. }) => ControlCommand::IngestUrl { url, checksum },
+        Some(command) => command,
+        None => ControlCommand::IngestUrl {
+            url: raw.to_owned(),
+            checksum,
+        },
+    }
 }
 
 pub(crate) fn command_for_argument(argument: &str) -> Option<ControlCommand> {

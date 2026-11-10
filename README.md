@@ -129,6 +129,11 @@ cargo run -p minidl-native-desktop
 cargo build --release -p minidl-native-desktop -p minidl-native-host
 ```
 
+`./scripts/check.sh` runs every gate CI enforces (format, clippy, tests, the
+real-aria2 tests, extension tests, shellcheck) in one command.
+[AGENTS.md](AGENTS.md) describes the code layout and the rules to keep when
+changing it.
+
 The ignored E2E tests require `aria2c`; they use a deterministic loopback HTTP
 fixture and never depend on an external download host. Canonical app locales
 and icons live under `assets/` and are shared by the native build and packaging.
@@ -142,6 +147,26 @@ when `fpm` and `linuxdeploy` are installed. On Windows, stage `aria2c.exe` and
 The Dev Container and `compose.yaml` provide the same Ubuntu 22.04 native build
 environment. `docker compose run --rm build` creates the portable Linux archive;
 GUI and browser-integration testing must run against the host desktop/session.
+
+## Command line and scripting
+
+Links, magnets, `.torrent` and `.metalink` files can be passed as arguments;
+`mini-downloader --help` lists every option. `ctl` drives a running app from a
+terminal, a script, or an AI agent, with JSON in and JSON out:
+
+```sh
+mini-downloader --background                 # start in the tray, no window
+mini-downloader ctl ingest_url '{"url":"https://example.org/file.iso"}'
+mini-downloader ctl list_downloads '{"status":"active"}'
+mini-downloader ctl pause_all
+mini-downloader ctl subscribe | jq .         # live events, one JSON object per line
+```
+
+Every command the interface itself uses is available; `mini-downloader ctl
+snapshot` returns the whole state. `ctl` exits 0 on success, 1 when the app
+reports an error, and 2 on bad usage. It uses the same user-private local
+socket as the window, so it adds no network surface. On Windows release builds
+there is no console, so pipe the output (`mini-downloader ctl snapshot | more`).
 
 ## Architecture
 

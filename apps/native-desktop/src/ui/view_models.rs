@@ -143,6 +143,14 @@ pub(super) fn apply_settings(ui: &MainWindow, snapshot: &AppSnapshot) {
         ui.set_on_complete_action(on_complete.into());
     }
     ui.set_on_complete_confirmed(setting("on_complete_command_confirmed") == Some("true"));
+    // Mirrors the toolbar's preset cycle in main-window.slint.
+    ui.set_global_speed_index(match setting("global_download_limit") {
+        Some("500000") => 1,
+        Some("1000000") => 2,
+        Some("5000000") => 3,
+        Some("10000000") => 4,
+        _ => 0,
+    });
     ui.set_default_speed_mb(
         setting("default_speed_limit")
             .and_then(|value| value.parse::<i64>().ok())
@@ -391,7 +399,8 @@ pub(crate) fn rows_from_downloads(
     selection: &HashSet<i64>,
     collapsed_packages: &HashSet<i64>,
 ) -> Vec<DownloadRow> {
-    let search = search.to_ascii_lowercase();
+    // Unicode-aware: file names are not ASCII in most of the ten UI languages.
+    let search = search.to_lowercase();
     let filtered = downloads
         .iter()
         .filter(|row| match filter {
@@ -405,12 +414,12 @@ pub(crate) fn rows_from_downloads(
         })
         .filter(|row| {
             search.is_empty()
-                || row.url.to_ascii_lowercase().contains(&search)
+                || row.url.to_lowercase().contains(&search)
                 || row
                     .filename
                     .as_deref()
                     .unwrap_or("")
-                    .to_ascii_lowercase()
+                    .to_lowercase()
                     .contains(&search)
         })
         .collect::<Vec<_>>();

@@ -24,6 +24,55 @@ mod tests {
     }
 
     #[test]
+    fn add_field_keeps_the_typed_checksum_for_ordinary_links() {
+        let digest = "a".repeat(64);
+        assert!(matches!(
+            command_for_add_field(" https://example.org/file.iso ", &digest),
+            ControlCommand::IngestUrl { url, checksum: Some(checksum) }
+                if url == "https://example.org/file.iso" && checksum == digest
+        ));
+        assert!(matches!(
+            command_for_add_field("https://example.org/file.iso", "  "),
+            ControlCommand::IngestUrl { checksum: None, .. }
+        ));
+        assert!(matches!(
+            command_for_add_field("/tmp/example.torrent", &digest),
+            ControlCommand::IngestFile { .. }
+        ));
+    }
+
+    #[test]
+    fn search_matches_non_ascii_names_case_insensitively() {
+        let catalog = locale::Catalog::new("en");
+        let mut row: minidl_app::controller::DownloadView = serde_json::from_value(
+            serde_json::json!({
+                "id": 1, "gid": null, "url": "https://example.org/a", "filename": "ÖDEV Çalışması.pdf",
+                "dir": "/dl", "status": "complete", "kind": "http", "total_bytes": 0,
+                "completed_bytes": 0, "download_speed": 0, "upload_speed": 0, "connections": 0,
+                "num_seeders": 0, "referrer": null, "info_hash": null, "error_code": null,
+                "error_message": null, "category_id": null, "created_at": 0, "finished_at": null,
+                "page_url": null, "format_id": null, "speed_limit": null, "package_id": null,
+                "mime": null, "checksum": null, "start_at": null, "media_opts": null
+            }),
+        )
+        .unwrap();
+        let found = |search: &str, row: &minidl_app::controller::DownloadView| {
+            rows_from_downloads(
+                std::slice::from_ref(row),
+                0,
+                search,
+                &catalog,
+                &HashSet::new(),
+                &HashSet::new(),
+            )
+            .len()
+        };
+        assert_eq!(found("ödev çalış", &row), 1);
+        row.filename = Some("other.pdf".into());
+        assert_eq!(found("ödev", &row), 0);
+    }
+
+    #[test]
     fn category_editor_preserves_legacy_and_structured_rule_shapes() {
         assert_eq!(category_rules("zip, pdf", "", ""), r#"["zip","pdf"]"#);
         assert_eq!(

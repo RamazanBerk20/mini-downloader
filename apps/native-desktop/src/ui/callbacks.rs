@@ -30,15 +30,31 @@ pub(super) fn install_callbacks(
     let invoke = Rc::new(invoke);
 
     {
-        let invoke = invoke.clone();
+        let client = client.clone();
+        let runtime = runtime.clone();
         let weak = ui.as_weak();
         ui.on_add_url(move |url, checksum| {
-            let raw = url.trim();
-            let command = command_for_argument(raw).unwrap_or_else(|| ControlCommand::IngestUrl {
-                url: raw.to_owned(),
-                checksum: (!checksum.trim().is_empty()).then(|| checksum.to_string()),
+            let command = command_for_add_field(&url, &checksum);
+            let client = client.clone();
+            let weak = weak.clone();
+            runtime.spawn(async move {
+                let result = client.request(command).await;
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    match result {
+                        Ok(_) => {
+                            // Clear only what was submitted, not a link typed
+                            // while the request was in flight.
+                            if ui.get_url_text() == url {
+                                ui.set_url_text("".into());
+                                ui.set_checksum_text("".into());
+                            }
+                            ui.set_status_text("".into());
+                        }
+                        Err(error) => ui.set_status_text(error.into()),
+                    }
+                });
             });
-            invoke(command, weak.clone());
         });
     }
     {
