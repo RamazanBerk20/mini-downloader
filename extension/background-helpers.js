@@ -65,6 +65,27 @@
     }
   }
 
+  // Referrer the connector synthesizes from the tab, under the browser's own
+  // default policy (strict-origin-when-cross-origin): the full page URL stays
+  // on its origin, other hosts see only the origin, and https never tells http.
+  function defaultReferrer(pageUrl, targetUrl) {
+    try {
+      const page = new URL(pageUrl);
+      const target = new URL(targetUrl);
+      if (!/^https?:$/.test(page.protocol)) return undefined;
+      if (page.origin === target.origin) {
+        page.username = "";
+        page.password = "";
+        page.hash = "";
+        return page.href;
+      }
+      if (page.protocol === "https:" && target.protocol !== "https:") return undefined;
+      return `${page.origin}/`;
+    } catch {
+      return undefined;
+    }
+  }
+
   async function enrichCaptureJob(job, tab, getCookies) {
     const capture = { ...job };
     const storeId = capture.cookie_store_id || (tab && tab.cookieStoreId);
@@ -73,7 +94,10 @@
       const header = cookieHeader(cookies);
       if (header) capture.cookie = header;
     }
-    if (!capture.referrer && tab && tab.url) capture.referrer = tab.url;
+    if (!capture.referrer && tab && tab.url) {
+      const referrer = defaultReferrer(tab.url, capture.url);
+      if (referrer) capture.referrer = referrer;
+    }
     if (!capture.cookie_store_id && storeId) capture.cookie_store_id = storeId;
     return capture;
   }
@@ -90,6 +114,7 @@
     addBoundedMedia,
     cookieHeader,
     cookieQuery,
+    defaultReferrer,
     enrichCaptureJob,
     isHostDisabled,
     normalizeDisabledHosts,

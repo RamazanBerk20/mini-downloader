@@ -431,7 +431,6 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
     for (const u of urls) {
       const job = await enrichJob({
         url: u,
-        referrer: tab.url,
         extra_headers: [],
         kind: "http",
         batch_id: batchId,
@@ -448,7 +447,6 @@ b.contextMenus.onClicked.addListener(async (info, tab) => {
   if (!url || !/^(https?:|ftp:|magnet:)/i.test(url)) return;
   const job = await enrichJob({
     url,
-    referrer: tab && tab.url,
     extra_headers: [],
     kind: url.startsWith("magnet:") ? "magnet" : "http",
   }, tab);
@@ -540,8 +538,11 @@ b.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     for (const u of msg.urls || []) addMedia(tabId, { url: u, type: "file" });
     return;
   }
+  // Captured media URLs and job handoff belong to the connector's own pages
+  // (the popup). Content scripts run beside page content and get neither.
+  const fromExtensionPage = sender.id === b.runtime.id && !sender.tab;
   if (msg.type === "ldm-get-media") {
-    if (msg.private || (sender.tab && sender.tab.incognito)) {
+    if (msg.private || !fromExtensionPage) {
       if (IS_FIREFOX) return Promise.resolve([]);
       sendResponse([]);
       return false;
@@ -554,7 +555,7 @@ b.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === "ldm-grab") {
-    if (msg.private || (sender.tab && sender.tab.incognito)) {
+    if (msg.private || !fromExtensionPage) {
       if (IS_FIREFOX) return Promise.resolve(null);
       sendResponse(null);
       return false;

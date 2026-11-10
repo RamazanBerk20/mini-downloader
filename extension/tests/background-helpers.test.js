@@ -5,6 +5,7 @@ const {
   addBoundedMedia,
   cookieHeader,
   cookieQuery,
+  defaultReferrer,
   enrichCaptureJob,
   isHostDisabled,
   normalizeDisabledHosts,
@@ -25,7 +26,22 @@ test("cookie lookup is scoped to each captured target, not the source page", asy
     { url: "https://files.example/download.zip", storeId: "firefox-container-2" },
   ]);
   assert.equal(job.cookie, "target=only");
-  assert.equal(job.referrer, "https://account.example/private");
+  // Another host learns the origin, never the private page path.
+  assert.equal(job.referrer, "https://account.example/");
+});
+
+test("a synthesized referrer follows the browser's default policy", () => {
+  assert.equal(
+    defaultReferrer("https://user:pw@a.example/doc?id=1#frag", "https://a.example/file.zip"),
+    "https://a.example/doc?id=1",
+  );
+  assert.equal(
+    defaultReferrer("https://a.example/doc?token=secret", "https://cdn.example/file.zip"),
+    "https://a.example/",
+  );
+  assert.equal(defaultReferrer("https://a.example/doc", "http://cdn.example/file.zip"), undefined);
+  assert.equal(defaultReferrer("https://a.example/doc", "magnet:?xt=urn:btih:abc"), undefined);
+  assert.equal(defaultReferrer("about:blank", "https://cdn.example/file.zip"), undefined);
 });
 
 test("an existing request cookie is preserved without a second lookup", async () => {
