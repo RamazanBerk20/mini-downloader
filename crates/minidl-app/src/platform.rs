@@ -61,7 +61,7 @@ async fn show_items_over_dbus(file: &std::path::Path) -> bool {
 }
 
 /// A `file://` URI that `dbus-send`'s comma-separated array syntax cannot split.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", all(test, unix)))]
 fn file_uri(file: &std::path::Path) -> Option<String> {
     url::Url::from_file_path(file)
         .ok()
