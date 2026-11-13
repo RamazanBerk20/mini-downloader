@@ -19,9 +19,9 @@
     <name>RamazanBerk20</name>
   </developer>
   <releases>
-    <release version="3.2.0" date="2026-11-10">
+    <release version="3.3.0" date="2026-11-13">
       <description>
-        <p>Reliability and security release: checksums typed in the Add field are now enforced, Pause all covers media downloads, speed limits persist, copied links are offered in the Add field, and a ctl command-line interface allows scripting.</p>
+        <p>Safer, tidier downloads: files are staged and never overwritten, browser cookies stay on their origin across redirects, plus file-type icons, drag-out to other apps, and single-click select with double-click open. The database is upgraded and cannot be opened by 3.2.0 afterwards.</p>
       </description>
     </release>
   </releases>

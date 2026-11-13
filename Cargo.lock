@@ -3577,7 +3577,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-app"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-core"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "anyhow",
  "dirs 5.0.1",
@@ -3627,7 +3627,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-ipc"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "dirs 5.0.1",
  "interprocess",
@@ -3639,7 +3639,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-native-desktop"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "arboard",
  "ashpd",
@@ -3674,7 +3674,7 @@ dependencies = [
 
 [[package]]
 name = "minidl-native-host"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "interprocess",
  "minidl-ipc",
