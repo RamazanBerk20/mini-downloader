@@ -26,15 +26,184 @@ mod tests {
         assert_eq!(d.completed_bytes, 50);
         assert_eq!(d.connections, 8);
 
-        db.set_status(id, DownloadStatus::Complete).unwrap();
+        assert!(db.transition(id, DownloadStatus::Complete, "test").unwrap());
         let d = db.get(id).unwrap().unwrap();
         assert_eq!(d.status, DownloadStatus::Complete);
         assert!(d.finished_at.is_some());
 
-        db.set_status(id, DownloadStatus::Paused).unwrap();
+        assert!(db.transition(id, DownloadStatus::Active, "retry").unwrap());
         let d = db.get(id).unwrap().unwrap();
-        assert_eq!(d.status, DownloadStatus::Paused);
+        assert_eq!(d.status, DownloadStatus::Active);
         assert!(d.finished_at.is_none());
+    }
+
+    /// A completion or error that lands before the code that started the job
+    /// writes `active` must win: the late write is refused, not applied.
+    #[test]
+    fn late_or_duplicate_events_never_move_a_row_backwards() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://x/fast.bin".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(db
+            .transition_if(id, &[DownloadStatus::Queued], DownloadStatus::Active, "ingest")
+            .unwrap());
+        assert!(db.transition(id, DownloadStatus::Complete, "aria2").unwrap());
+        // Duplicate completion (WebSocket + poller) fires side effects once.
+        assert!(!db.transition(id, DownloadStatus::Complete, "aria2").unwrap());
+        // A stale paused/error report after completion is ignored.
+        assert!(!db.transition(id, DownloadStatus::Paused, "aria2").unwrap());
+        assert!(!db.fail(id, Some("1"), Some("late"), "aria2").unwrap());
+        assert!(!db
+            .transition_if(id, &[DownloadStatus::Queued], DownloadStatus::Active, "ingest")
+            .unwrap());
+        let row = db.get(id).unwrap().unwrap();
+        assert_eq!(row.status, DownloadStatus::Complete);
+        assert!(row.error_message.is_none());
+
+        let journal = db.transitions(id).unwrap();
+        let path: Vec<_> = journal.iter().map(|t| t.to.as_str()).collect();
+        assert_eq!(path, ["queued", "active", "complete"]);
+        assert_eq!(journal[1].from, Some(DownloadStatus::Queued));
+        assert_eq!(journal[2].cause, "aria2");
+    }
+
+    #[test]
+    fn explain_names_the_cause_of_the_current_state() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://x/broken.bin".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        db.transition(id, DownloadStatus::Active, "ingest: handed to aria2")
+            .unwrap();
+        db.fail(id, Some("3"), Some("Resource not found"), "aria2: download failed")
+            .unwrap();
+        let row = db.get(id).unwrap().unwrap();
+        let text = crate::model::explain(&row, &db.transitions(id).unwrap(), crate::model::now());
+        assert!(text.starts_with(&format!("#{id} is error since 0s ago: aria2: download failed")), "{text}");
+        assert!(text.contains("error: Resource not found (aria2 code 3)"));
+        assert!(text.contains("queued -> active  ingest: handed to aria2"));
+    }
+
+    /// A removed download's id is never handed out again: a reused id would
+    /// inherit the old row's staging folder, partial file and control file.
+    #[test]
+    fn download_ids_are_never_reused() {
+        let db = Db::open_in_memory().unwrap();
+        let new = || NewDownload {
+            url: "https://x/a".into(),
+            dir: "/dl".into(),
+            kind: "http".into(),
+            ..Default::default()
+        };
+        let first = db.insert_download(&new()).unwrap();
+        let second = db.insert_download(&new()).unwrap();
+        db.delete(second).unwrap();
+        let third = db.insert_download(&new()).unwrap();
+        assert!(third > second && second > first, "{first} {second} {third}");
+    }
+
+    #[test]
+    fn v5_database_keeps_rows_and_journal_through_the_id_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATION_1).unwrap();
+        conn.execute_batch(MIGRATION_2).unwrap();
+        conn.execute_batch(MIGRATION_3).unwrap();
+        conn.execute_batch(super::schema::MIGRATION_4).unwrap();
+        conn.execute_batch(super::schema::MIGRATION_5).unwrap();
+        conn.execute_batch(
+            "INSERT INTO downloads (id, url, dir, status, created_at, stage_dir)
+                 VALUES (7, 'https://example.org/a', '/dl', 'active', 1, '/dl/.minidl-staging/7');
+             INSERT INTO download_events (download_id, at, to_status, cause)
+                 VALUES (7, 1, 'active', 'ingest');",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 5).unwrap();
+
+        let db = Db::init(conn).unwrap();
+        let row = db.get(7).unwrap().unwrap();
+        assert_eq!(row.stage_dir.as_deref(), Some("/dl/.minidl-staging/7"));
+        assert_eq!(db.transitions(7).unwrap().len(), 1);
+        db.delete(7).unwrap();
+        assert!(db.transitions(7).unwrap().is_empty(), "journal cascade still works");
+        let next = db
+            .insert_download(&NewDownload {
+                url: "https://x/b".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(next > 7);
+    }
+
+    #[test]
+    fn transition_table_allows_only_lifecycle_edges() {
+        use DownloadStatus::*;
+        let all = [
+            Queued, Active, Waiting, Paused, Complete, Error, Removed, Scheduled,
+        ];
+        for from in all {
+            for to in all {
+                let expected = from != to
+                    && to != Queued
+                    && (!from.is_terminal() || matches!(to, Active | Scheduled | Removed));
+                assert_eq!(from.can_transition_to(to), expected, "{from:?} -> {to:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn journal_is_bounded_per_download() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://x/flappy.bin".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        for _ in 0..40 {
+            db.transition(id, DownloadStatus::Active, "t").unwrap();
+            db.transition(id, DownloadStatus::Paused, "t").unwrap();
+        }
+        let journal = db.transitions(id).unwrap();
+        assert_eq!(journal.len(), 50);
+        assert_eq!(journal.last().unwrap().to, DownloadStatus::Paused);
+        db.delete(id).unwrap();
+        assert!(db.transitions(id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unreadable_status_is_surfaced_not_restartable() {
+        let db = Db::open_in_memory().unwrap();
+        let id = db
+            .insert_download(&NewDownload {
+                url: "https://x/odd.bin".into(),
+                dir: "/dl".into(),
+                kind: "http".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        db.lock()
+            .execute("UPDATE downloads SET status='bogus' WHERE id=?1", params![id])
+            .unwrap();
+        let row = db.get(id).unwrap().unwrap();
+        assert_eq!(row.status, DownloadStatus::Error);
+        assert!(row.error_message.unwrap().contains("bogus"));
+        assert!(!db.transition(id, DownloadStatus::Paused, "t").unwrap());
+        assert!(db.transition(id, DownloadStatus::Active, "retry").unwrap());
     }
 
     #[test]
@@ -50,10 +219,43 @@ mod tests {
                 ..Default::default()
             })
             .unwrap();
-        db.set_status(id, DownloadStatus::Complete).unwrap();
+        db.transition(id, DownloadStatus::Complete, "test").unwrap();
         let row = db.get(id).unwrap().unwrap();
         assert!(row.cookie.is_none());
         assert!(row.extra_headers.is_none());
+    }
+
+    #[test]
+    fn removed_and_long_failed_rows_drop_replay_credentials() {
+        let db = Db::open_in_memory().unwrap();
+        let new = |url: &str| NewDownload {
+            url: url.into(),
+            dir: "/dl".into(),
+            kind: "http".into(),
+            cookie: Some("session=secret".into()),
+            extra_headers: Some(r#"[["Authorization","Bearer secret"]]"#.into()),
+            ..Default::default()
+        };
+        let removed = db.insert_download(&new("https://x/removed")).unwrap();
+        db.transition(removed, DownloadStatus::Removed, "test").unwrap();
+        assert!(db.get(removed).unwrap().unwrap().cookie.is_none());
+
+        let failed = db.insert_download(&new("https://x/failed")).unwrap();
+        let stale = db.insert_download(&new("https://x/stale")).unwrap();
+        db.fail(failed, None, Some("boom"), "test").unwrap();
+        db.fail(stale, None, Some("boom"), "test").unwrap();
+        // Retry still has its credentials right after a failure.
+        assert!(db.get(failed).unwrap().unwrap().cookie.is_some());
+        db.lock()
+            .execute(
+                "UPDATE downloads SET finished_at=0 WHERE id=?1",
+                params![stale],
+            )
+            .unwrap();
+        db.migrate().unwrap();
+        assert!(db.get(failed).unwrap().unwrap().cookie.is_some());
+        let stale = db.get(stale).unwrap().unwrap();
+        assert!(stale.cookie.is_none() && stale.extra_headers.is_none());
     }
 
     #[test]
@@ -74,7 +276,8 @@ mod tests {
             DownloadInsertResult::Existing(first_id)
         );
 
-        db.set_status(first_id, DownloadStatus::Complete).unwrap();
+        db.transition(first_id, DownloadStatus::Complete, "test")
+            .unwrap();
         assert_eq!(
             db.insert_download_deduplicated(&download).unwrap(),
             DownloadInsertResult::Existing(first_id)
@@ -87,7 +290,9 @@ mod tests {
             DownloadInsertResult::Existing(first_id)
         );
 
-        db.set_error(first_id, None, Some("network failed"))
+        db.transition(first_id, DownloadStatus::Active, "retry")
+            .unwrap();
+        db.fail(first_id, None, Some("network failed"), "test")
             .unwrap();
         let retry = db.insert_download_deduplicated(&download).unwrap();
         assert!(matches!(retry, DownloadInsertResult::Inserted(id) if id != first_id));
@@ -106,7 +311,7 @@ mod tests {
             ..Default::default()
         };
         let first = db.insert_download_deduplicated(&download).unwrap().id();
-        db.set_status(first, DownloadStatus::Complete).unwrap();
+        db.transition(first, DownloadStatus::Complete, "test").unwrap();
 
         std::fs::write(root.path().join("gone.iso"), b"data").unwrap();
         assert_eq!(
@@ -152,6 +357,36 @@ mod tests {
             db.insert_download_with_duplicate_policy(&semantic).unwrap(),
             DownloadInsertResult::Inserted(_)
         ));
+
+        // Identity-bearing fields next to a signature still name the file:
+        // `key=A` and `key=B` are two downloads, not one rotated link.
+        let mut keyed = first.clone();
+        keyed.url = "https://files.example/dl?key=A&token=T&expires=1".into();
+        let keyed_id = db
+            .insert_download_with_duplicate_policy(&keyed)
+            .unwrap()
+            .id();
+        keyed.url = "https://files.example/dl?key=B&token=T&expires=1".into();
+        assert_ne!(
+            db.insert_download_with_duplicate_policy(&keyed).unwrap(),
+            DownloadInsertResult::Existing(keyed_id)
+        );
+        keyed.url = "https://files.example/dl?expires=2&token=U&key=A".into();
+        assert_eq!(
+            db.insert_download_with_duplicate_policy(&keyed).unwrap(),
+            DownloadInsertResult::Existing(keyed_id)
+        );
+        let mut hashed = first.clone();
+        hashed.url = "https://files.example/get?h=one&exp=1&sig=s".into();
+        let hashed_id = db
+            .insert_download_with_duplicate_policy(&hashed)
+            .unwrap()
+            .id();
+        hashed.url = "https://files.example/get?h=two&exp=1&sig=s".into();
+        assert_ne!(
+            db.insert_download_with_duplicate_policy(&hashed).unwrap(),
+            DownloadInsertResult::Existing(hashed_id)
+        );
 
         let mut mixed = first;
         mixed.url = "https://cdn.example/download?id=1&token=old".into();
@@ -309,7 +544,7 @@ mod tests {
 
         assert_eq!(db.list_packages().unwrap().len(), 1);
 
-        db.set_status(id, DownloadStatus::Scheduled).unwrap();
+        db.transition(id, DownloadStatus::Scheduled, "test").unwrap();
         assert!(db.due_scheduled(122).unwrap().is_empty());
         assert_eq!(db.due_scheduled(123).unwrap().len(), 1);
 
@@ -362,6 +597,32 @@ mod tests {
                 .unwrap()
         };
         assert!(columns.iter().any(|column| column == "session_gid"));
+        assert!(columns.iter().any(|column| column == "stage_dir"));
+    }
+
+    /// A download in flight across the upgrade keeps finishing where it was:
+    /// no staging folder, journal starts empty, transitions still work.
+    #[test]
+    fn v4_rows_in_flight_survive_the_staging_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(MIGRATION_1).unwrap();
+        conn.execute_batch(MIGRATION_2).unwrap();
+        conn.execute_batch(MIGRATION_3).unwrap();
+        conn.execute_batch(super::schema::MIGRATION_4).unwrap();
+        conn.execute(
+            "INSERT INTO downloads (url, dir, status, gid, session_gid, created_at)
+             VALUES ('https://example.org/big.iso', '/dl', 'active', 'g1', 'g1', 1)",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 4).unwrap();
+
+        let db = Db::init(conn).unwrap();
+        let row = db.list(None).unwrap().pop().unwrap();
+        assert_eq!(row.status, DownloadStatus::Active);
+        assert!(row.stage_dir.is_none());
+        assert!(db.transition(row.id, DownloadStatus::Complete, "aria2").unwrap());
+        assert_eq!(db.transitions(row.id).unwrap().len(), 1);
     }
 
     #[test]
@@ -404,7 +665,7 @@ mod tests {
             })
             .unwrap();
         db.bind_aria2_job(id, "scheduled-gid").unwrap();
-        db.set_status(id, DownloadStatus::Scheduled).unwrap();
+        db.transition(id, DownloadStatus::Scheduled, "test").unwrap();
 
         assert!(db.running_rows().unwrap().is_empty());
         assert_eq!(db.resumable_session_rows().unwrap().len(), 1);

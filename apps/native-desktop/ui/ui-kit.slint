@@ -64,6 +64,28 @@ export component AppIcon inherits Path {
         name == "chevron-up" ? "M6 15 L12 9 L18 15" :
         name == "chevron-down" ? "M6 9 L12 15 L18 9" :
         name == "chevron-right" ? "M9 6 L15 12 L9 18" :
+        // File-type glyphs (FileTile), same 24-grid and stroke as the rest.
+        name == "ft-archive" ? "M6 3 L18 3 L18 21 L6 21 Z M11 3 L11 5 M13 5 L13 7 M11 7 L11 9 M13 9 L13 11 M10.5 12.5 L13.5 12.5 L13.5 16.5 L10.5 16.5 Z" :
+        name == "ft-video" ? "M4 5 L20 5 L20 19 L4 19 Z M8 5 L8 19 M16 5 L16 19 M4 9.5 L8 9.5 M4 14.5 L8 14.5 M16 9.5 L20 9.5 M16 14.5 L20 14.5" :
+        name == "ft-stream" ? "M5 5 L19 5 A2 2 0 0 1 21 7 L21 17 A2 2 0 0 1 19 19 L5 19 A2 2 0 0 1 3 17 L3 7 A2 2 0 0 1 5 5 Z M10 9 L15 12 L10 15 Z" :
+        name == "ft-audio" ? "M9.5 17 L9.5 5.5 L19 3.5 L19 15 M9.5 9 L19 7 M9.5 17 A2.5 2.5 0 1 1 4.5 17 A2.5 2.5 0 1 1 9.5 17 M19 15 A2.5 2.5 0 1 1 14 15 A2.5 2.5 0 1 1 19 15" :
+        name == "ft-image" ? "M4 5 L20 5 L20 19 L4 19 Z M4 16 L9 11 L13 15 L15.5 12.5 L20 17 M17 8.5 A1.5 1.5 0 1 1 14 8.5 A1.5 1.5 0 1 1 17 8.5" :
+        name == "ft-document" ? "M6 3 L14 3 L18 7 L18 21 L6 21 Z M14 3 L14 7 L18 7 M9 11 L15 11 M9 14 L15 14 M9 17 L13 17" :
+        name == "ft-pdf" ? "M6 3 L14 3 L18 7 L18 21 L6 21 Z M14 3 L14 7 L18 7 M9.5 18 L9.5 11 L12 11 A2 2 0 0 1 12 15 L9.5 15" :
+        name == "ft-spreadsheet" ? "M4 4 L20 4 L20 20 L4 20 Z M4 9.5 L20 9.5 M4 15 L20 15 M10 4 L10 20" :
+        name == "ft-presentation" ? "M3 4 L21 4 M5 4 L5 15 L19 15 L19 4 M12 15 L12 18 M8.5 21 L12 18 L15.5 21 M9 12 L9 10 M12 12 L12 7.5 M15 12 L15 9" :
+        name == "ft-code" ? "M8.5 7 L3.5 12 L8.5 17 M15.5 7 L20.5 12 L15.5 17 M13.5 5 L10.5 19" :
+        name == "ft-executable" ? "M3 5 L21 5 L21 19 L3 19 Z M3 9 L21 9 M7 12 L10 14.5 L7 17 M12.5 17 L16.5 17" :
+        name == "ft-package" ? "M12 3 L20 7.5 L20 16.5 L12 21 L4 16.5 L4 7.5 Z M4 7.5 L12 12 L20 7.5 M12 12 L12 21 M8 5.25 L16 9.75" :
+        name == "ft-disk-image" ? "M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M14 12 A2 2 0 1 1 10 12 A2 2 0 1 1 14 12 M7.8 9.4 A5 5 0 0 1 9.4 7.8" :
+        name == "ft-torrent" ? "M6 4 L6 11 A6 6 0 0 0 18 11 L18 4 M6 8 L10 8 M14 8 L18 8" :
+        name == "ft-folder" ? "M3 7 A2 2 0 0 1 5 5 L8.5 5 L10.5 7 L19 7 A2 2 0 0 1 21 9 L21 17 A2 2 0 0 1 19 19 L5 19 A2 2 0 0 1 3 17 Z" :
+        name == "ft-font" ? "M3 19 L8 5 L13 19 M5 14 L11 14 M20.5 11 L20.5 19 M20.5 15.5 A3 3 0 1 1 14.5 15.5 A3 3 0 1 1 20.5 15.5" :
+        name == "ft-ebook" ? "M12 6 C10 4.5 6.5 4 3 4.5 L3 18.5 C6.5 18 10 18.5 12 20 C14 18.5 17.5 18 21 18.5 L21 4.5 C17.5 4 14 4.5 12 6 Z M12 6 L12 20" :
+        name == "ft-subtitle" ? "M4 5 L20 5 L20 16 L13 16 L9 20 L9 16 L4 16 Z M7.5 9 L16.5 9 M7.5 12.5 L13.5 12.5" :
+        name == "ft-data" ? "M19 6 A7 2.5 0 1 1 5 6 A7 2.5 0 1 1 19 6 M5 6 L5 18 A7 2.5 0 0 0 19 18 L19 6 M5 12 A7 2.5 0 0 0 19 12" :
+        name == "ft-resolving" ? "M6 3 L14 3 L18 7 L18 21 L6 21 Z M14 3 L14 7 L18 7 M9 14 L9.01 14 M12 14 L12.01 14 M15 14 L15.01 14" :
+        name == "ft-generic" ? "M6 3 L14 3 L18 7 L18 21 L6 21 Z M14 3 L14 7 L18 7" :
         "";
 }
 
@@ -82,6 +104,100 @@ export component IconSlot inherits Rectangle {
         height: root.size;
         name: root.name;
         color: root.icon-color;
+    }
+}
+
+// File-type tile colours: muted tints below the status pills' chroma, a
+// light and a dark pair per category with the glyph at >= 4.5:1 on its tile.
+export global FileTheme {
+    pure public function tint(type: string) -> color {
+        if type == "archive" { return Theme.dark ? #3b2f24 : #f8eee3; }
+        if type == "video" { return Theme.dark ? #2e2840 : #efe9fd; }
+        if type == "stream" { return Theme.dark ? #3f2b22 : #fdefe6; }
+        if type == "audio" { return Theme.dark ? #3d2734 : #fbe9f1; }
+        if type == "image" { return Theme.dark ? #1f3735 : #e4f4f1; }
+        if type == "document" { return Theme.dark ? #24313f : #e6f0fa; }
+        if type == "pdf" { return Theme.dark ? #402626 : #fdebeb; }
+        if type == "spreadsheet" { return Theme.dark ? #233528 : #e8f4ea; }
+        if type == "presentation" { return Theme.dark ? #3d321f : #fbf2df; }
+        if type == "code" { return Theme.dark ? #1f3240 : #e3f2fa; }
+        if type == "executable" { return Theme.dark ? #2f2f35 : #efeff2; }
+        if type == "package" { return Theme.dark ? #2a3340 : #e9f0f8; }
+        if type == "disk-image" { return Theme.dark ? #262b40 : #e8ecfc; }
+        if type == "torrent" { return Theme.dark ? #3a2540 : #f6e8fa; }
+        if type == "folder" { return Theme.dark ? #3a3426 : #f7f1e2; }
+        if type == "font" { return Theme.dark ? #302b36 : #f0edf4; }
+        if type == "ebook" { return Theme.dark ? #33341f : #f3f4e2; }
+        if type == "subtitle" { return Theme.dark ? #38351f : #f7f4dd; }
+        if type == "data" { return Theme.dark ? #22333a : #e6f1f3; }
+        return Theme.surface-2;
+    }
+    pure public function ink(type: string) -> color {
+        if type == "archive" { return Theme.dark ? #e0b07e : #8a5216; }
+        if type == "video" { return Theme.dark ? #b9a5f0 : #5b3fb0; }
+        if type == "stream" { return Theme.dark ? #f0b08f : #a4481c; }
+        if type == "audio" { return Theme.dark ? #eba1c4 : #9c2f62; }
+        if type == "image" { return Theme.dark ? #7fd0c4 : #1f6d63; }
+        if type == "document" { return Theme.dark ? #95bde6 : #285f93; }
+        if type == "pdf" { return Theme.dark ? #f0a3a3 : #a12f2f; }
+        if type == "spreadsheet" { return Theme.dark ? #92cf9d : #2f6b3b; }
+        if type == "presentation" { return Theme.dark ? #e8c27a : #85580b; }
+        if type == "code" { return Theme.dark ? #8cc7e8 : #1d5f80; }
+        if type == "executable" { return Theme.dark ? #b4b4c2 : #4a4a5a; }
+        if type == "package" { return Theme.dark ? #a3c0e3 : #2f557f; }
+        if type == "disk-image" { return Theme.dark ? #9fb0f0 : #34449c; }
+        if type == "torrent" { return Theme.dark ? #d79ae6 : #7d2e93; }
+        if type == "folder" { return Theme.dark ? #dcc48e : #735819; }
+        if type == "font" { return Theme.dark ? #bcb0cc : #5a4c6e; }
+        if type == "ebook" { return Theme.dark ? #c9cc84 : #5c5e1b; }
+        if type == "subtitle" { return Theme.dark ? #d8cf7c : #665d12; }
+        if type == "data" { return Theme.dark ? #9cc4cc : #2d5f68; }
+        return Theme.muted;
+    }
+}
+
+// A rounded tile tinted for the file's type, with a stroked glyph and an
+// optional item count. `label` is its spoken name.
+export component FileTile inherits Rectangle {
+    in property <string> type: "generic";
+    in property <string> label;
+    in property <string> count;
+    accessible-role: image;
+    accessible-label: root.label;
+
+    width: 26px;
+    height: 26px;
+    horizontal-stretch: 0;
+    border-radius: 7px;
+    background: FileTheme.tint(root.type);
+    border-width: root.type == "resolving" ? 1px : 0px;
+    border-color: Theme.border-strong;
+    AppIcon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 16px;
+        height: 16px;
+        name: "ft-" + root.type;
+        color: FileTheme.ink(root.type);
+    }
+    if root.count != "": Rectangle {
+        x: parent.width - self.width / 2 - 3px;
+        y: -4px;
+        width: max(13px, count-text.preferred-width + 6px);
+        height: 12px;
+        border-radius: 6px;
+        background: FileTheme.ink(root.type);
+        count-text := Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.count;
+            color: FileTheme.tint(root.type);
+            font-family: "Noto Sans Mono";
+            font-size: 8px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
     }
 }
 
@@ -714,84 +830,6 @@ export component SettingsTab inherits Rectangle {
     }
 }
 
-export component UiStepper inherits Rectangle {
-    in-out property <int> value: 0;
-    in property <int> minimum: 0;
-    in property <int> maximum: 100;
-    in property <int> step: 1;
-    in property <string> label: "";
-    callback changed(int);
-
-    width: 116px;
-    height: 38px;
-    horizontal-stretch: 0;
-    vertical-stretch: 0;
-    border-radius: 7px;
-    border-width: 1px;
-    border-color: Theme.border;
-    background: Theme.surface;
-    clip: true;
-
-    Rectangle {
-        x: 33px;
-        width: 1px;
-        height: parent.height;
-        background: Theme.border;
-    }
-    Rectangle {
-        x: parent.width - 34px;
-        width: 1px;
-        height: parent.height;
-        background: Theme.border;
-    }
-    Text {
-        x: 34px;
-        width: parent.width - 68px;
-        height: parent.height;
-        text: root.value;
-        color: Theme.text;
-        font-family: "Noto Sans Mono";
-        font-size: 11px;
-        horizontal-alignment: center;
-        vertical-alignment: center;
-        overflow: elide;
-    }
-    Rectangle {
-        x: 0px;
-        width: 33px;
-        height: parent.height;
-        background: decrement.pressed ? Theme.surface-pressed : decrement.has-hover ? Theme.surface-2 : transparent;
-        animate background { duration: 90ms; easing: ease-out; }
-        Text { y: decrement.pressed ? 1px : 0px; width: parent.width; height: parent.height - self.y; text: "−"; color: Theme.muted; font-size: 16px; horizontal-alignment: center; vertical-alignment: center; }
-        decrement := TouchArea {
-            mouse-cursor: pointer;
-            accessible-role: button;
-            accessible-label: "Decrease " + root.label;
-            clicked => {
-                root.value = max(root.minimum, root.value - root.step);
-                root.changed(root.value);
-            }
-        }
-    }
-    Rectangle {
-        x: parent.width - 33px;
-        width: 33px;
-        height: parent.height;
-        background: increment.pressed ? Theme.surface-pressed : increment.has-hover ? Theme.surface-2 : transparent;
-        animate background { duration: 90ms; easing: ease-out; }
-        Text { y: increment.pressed ? 1px : 0px; width: parent.width; height: parent.height - self.y; text: "+"; color: Theme.muted; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; }
-        increment := TouchArea {
-            mouse-cursor: pointer;
-            accessible-role: button;
-            accessible-label: "Increase " + root.label;
-            clicked => {
-                root.value = min(root.maximum, root.value + root.step);
-                root.changed(root.value);
-            }
-        }
-    }
-}
-
 export component OnboardCard inherits Rectangle {
     in property <string> text;
     in property <string> icon;
@@ -860,4 +898,40 @@ export component SectionLabel inherits Text {
     font-weight: 500;
     letter-spacing: 1.4px;
     vertical-alignment: center;
+}
+
+// One notice: errors in the error colours, information in the neutral ones.
+export component NoticeBanner inherits Rectangle {
+    in property <bool> error: true;
+    in property <string> text;
+    in property <string> label-close;
+    callback dismiss;
+    accessible-role: AccessibleRole.text;
+    accessible-label: root.text;
+
+    horizontal-stretch: 1;
+    min-height: 34px;
+    border-radius: 7px;
+    background: root.error ? Theme.error-bg : Theme.active-bg;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 5px;
+        spacing: 9px;
+        IconSlot { name: root.error ? "warning" : "check"; size: 16px; icon-color: root.error ? Theme.error-fg : Theme.active-fg; }
+        Text { text: root.text; color: root.error ? Theme.error-fg : Theme.active-fg; font-size: 12px; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
+        Rectangle {
+            width: 28px;
+            horizontal-stretch: 0;
+            background: transparent;
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: "close";
+                label: root.label-close;
+                danger: root.error;
+                width: 28px;
+                height: 28px;
+                clicked => { root.dismiss(); }
+            }
+        }
+    }
 }

@@ -322,9 +322,22 @@ jobs:
         with:
           name: windows-unsigned
 
+      # Pinned by version and SHA-256 like every other tool: a package
+      # manager would run its own install scripts on the machine that holds
+      # the signing key.
       - name: Install NSIS
         shell: pwsh
-        run: choco install nsis --version 3.12.0 --no-progress -y
+        run: |
+          Invoke-WebRequest `
+            -Uri "https://downloads.sourceforge.net/project/nsis/NSIS%203/3.12/nsis-3.12.zip" `
+            -OutFile nsis.zip `
+            -TimeoutSec 600
+          $nsisHash = (Get-FileHash -Algorithm SHA256 nsis.zip).Hash.ToLowerInvariant()
+          if ($nsisHash -ne "56581f90db321581c5381193d796fffcf2d24b2f8fed2160a6c6a3baa67f2c4f") {
+            throw "NSIS archive checksum mismatch: $nsisHash"
+          }
+          Expand-Archive nsis.zip -DestinationPath "$env:RUNNER_TEMP\nsis"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\nsis\nsis-3.12"
 
       - name: Import Authenticode certificate
         if: ${{ needs.windows-identity.outputs.enabled == 'true' }}
@@ -365,7 +378,7 @@ jobs:
         run: |
           if (-not [string]::IsNullOrWhiteSpace($env:MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT)) {
             $path = "Cert:\CurrentUser\My\$env:MINIDL_WINDOWS_CERTIFICATE_THUMBPRINT"
-            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+            if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -DeleteKey -Force }
           }
 
       - name: Collect Windows packages

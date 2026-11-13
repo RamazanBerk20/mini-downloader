@@ -50,6 +50,11 @@ function enabledForUrl(url) {
   return settings.enabled && !helpers.isHostDisabled(url, settings.disabledHosts);
 }
 
+// User blacklist: these file types stay with the browser's own download flow.
+function isBlacklisted(urls, filename) {
+  return helpers.isBlacklisted(urls, filename, settings.blacklistExts);
+}
+
 function notify(title, message) {
   try {
     b.notifications.create({
@@ -143,24 +148,7 @@ void sendPresence();
 // Correlate Firefox's Path A handoff with the Path B download event it may
 // produce for the same browser request. Every Path A request still reaches the
 // app, where the user's duplicate-prevention setting is authoritative.
-const pathAHandoffs = new Map();
-function rememberPathAHandoff(url, handoff) {
-  const at = Date.now();
-  pathAHandoffs.set(url, { at, handoff });
-  while (pathAHandoffs.size > 512) {
-    pathAHandoffs.delete(pathAHandoffs.keys().next().value);
-  }
-  setTimeout(() => {
-    if (pathAHandoffs.get(url)?.at === at) pathAHandoffs.delete(url);
-  }, 5000);
-}
-function recentPathAHandoff(url) {
-  const now = Date.now();
-  for (const [key, entry] of pathAHandoffs) {
-    if (now - entry.at > 5000) pathAHandoffs.delete(key);
-  }
-  return pathAHandoffs.get(url)?.handoff || null;
-}
+const pathAHandoffs = helpers.createHandoffRegistry();
 
 // ---------- Path A: webRequest (Firefox only) ----------
 
@@ -221,43 +209,7 @@ const SKIP_CT_PREFIX = [
 const FILE_EXT_RE =
   /\.(zip|7z|rar|tar|gz|tgz|xz|bz2|zst|iso|img|dmg|exe|msi|deb|rpm|appimage|pkg|apk|mp4|mkv|webm|avi|mov|flv|mp3|flac|m4a|wav|ogg|opus|pdf|epub|bin|run)(\?|$)/i;
 
-function filenameFromCD(cd, url) {
-  if (cd) {
-    const m =
-      /filename\*=(?:UTF-8'')?["']?([^;"']+)/i.exec(cd) ||
-      /filename=["']?([^;"']+)/i.exec(cd);
-    if (m) {
-      try {
-        return decodeURIComponent(m[1]);
-      } catch {
-        return m[1];
-      }
-    }
-  }
-  try {
-    const n = new URL(url).pathname.split("/").pop();
-    if (n) return decodeURIComponent(n);
-  } catch {}
-  return undefined;
-}
-
-// Lowercased trailing extension of a filename or URL path ("" when none).
-function extOf(name) {
-  const m = /\.([a-z0-9]{1,8})$/i.exec((name || "").split(/[?#]/)[0]);
-  return m ? m[1].toLowerCase() : "";
-}
-
-// User blacklist: these file types stay with the browser's own download flow.
-function isBlacklisted(url, filename) {
-  const list = settings.blacklistExts || [];
-  if (!list.length) return false;
-  let fromUrl = "";
-  try {
-    fromUrl = extOf(new URL(url).pathname);
-  } catch {}
-  const fromName = extOf(filename);
-  return (fromName && list.includes(fromName)) || (fromUrl && list.includes(fromUrl));
-}
+const filenameFromCD = helpers.filenameFromCD;
 
 function shouldHijack(cd, ct, len, url) {
   if (/^blob:|^data:/i.test(url)) return false;
@@ -308,7 +260,7 @@ b.webRequest.onHeadersReceived.addListener(
     const lenRaw = parseInt(h["content-length"] || "-1", 10);
     const len = Number.isNaN(lenRaw) ? -1 : lenRaw;
     if (!shouldHijack(cd, ct, len, d.url)) return {};
-    if (isBlacklisted(d.url, filenameFromCD(cd, d.url))) return {};
+    if (isBlacklisted([d.url], filenameFromCD(cd, d.url))) return {};
     const job = jobFromRequest(
       d.url,
       filenameFromCD(cd, d.url),
@@ -321,7 +273,7 @@ b.webRequest.onHeadersReceived.addListener(
     // browser request alive while the native host appraises the capture; a
     // failed/rejected handoff falls through to Firefox's normal download.
     const handoff = sendJob(job);
-    rememberPathAHandoff(d.url, handoff);
+    pathAHandoffs.remember(d.url, d.cookieStoreId, handoff);
     const reply = await handoff;
     return reply && reply.ok ? { cancel: true } : {};
   },
@@ -336,36 +288,39 @@ b.downloads.onCreated.addListener(async (item) => {
   try {
     if (item.incognito) return;
     if (item.byExtensionId === b.runtime.id) return;
-    if (/^blob:|^data:/i.test(item.url)) return;
+    // Chromium's `url` is the URL before redirects. The job, and the cookie
+    // lookup for it, use where the download actually comes from: cookies of
+    // the first URL must never be sent to the host it redirected to.
+    const url = item.finalUrl || item.url;
+    if (/^blob:|^data:/i.test(url)) return;
     await settingsReady;
-    if (!enabledForUrl(item.url)) return;
+    // A page picks where its link redirects, so the user's per-site and
+    // file-type exclusions apply to the clicked URL and the final one alike.
+    const seen = [item.url, url];
+    if (!seen.every(enabledForUrl)) return;
     // Ordinary magnet clicks belong to the system-selected handler. The
     // context-menu action below remains an explicit Mini Downloader override.
-    if (item.url.startsWith("magnet:")) return;
-    if (isBlacklisted(item.url, item.filename ? item.filename.split(/[\\/]/).pop() : "")) return;
+    if (url.startsWith("magnet:")) return;
+    if (isBlacklisted(seen, item.filename ? item.filename.split(/[\\/]/).pop() : "")) return;
     if (item.totalBytes > -1 && item.totalBytes < settings.minSize) return;
 
     // Firefox can surface the same request through both capture paths. Await
     // Path A's in-flight decision: on acceptance, remove this browser copy; on
     // failure, let Path B make its own handoff so the normal fallback survives.
-    const earlierHandoff = recentPathAHandoff(item.url);
-    if (earlierHandoff) {
-      const earlierReply = await earlierHandoff.catch(() => null);
-      if (earlierReply && earlierReply.ok) {
-        await b.downloads.cancel(item.id).catch(() => {});
-        await b.downloads.erase({ id: item.id }).catch(() => {});
-        return;
-      }
+    if ((await pathAHandoffs.decide(url, item.cookieStoreId)) === "accepted") {
+      await b.downloads.cancel(item.id).catch(() => {});
+      await b.downloads.erase({ id: item.id }).catch(() => {});
+      return;
     }
 
     const job = await enrichJob({
-      url: item.url,
+      url,
       filename: item.filename ? item.filename.split(/[\\/]/).pop() : undefined,
       mime: item.mime,
       size: item.totalBytes,
       referrer: item.referrer || undefined,
       extra_headers: [],
-      kind: item.url.startsWith("magnet:") ? "magnet" : "http",
+      kind: "http",
       cookie_store_id: item.cookieStoreId,
     }, { cookieStoreId: item.cookieStoreId });
     const reply = await sendJob(job);

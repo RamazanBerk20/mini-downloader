@@ -1,5 +1,23 @@
-import { DownloadRow } from "models.slint";
-import { AppIcon, IconButton, IconSlot, Theme, UiCheckBox } from "ui-kit.slint";
+import { DownloadRow, RowState } from "models.slint";
+import { AppIcon, FileTile, IconButton, IconSlot, Theme, UiCheckBox } from "ui-kit.slint";
+
+// One pill colour pair per row state.
+global RowLook {
+    pure public function bg(state: RowState) -> color {
+        if state == RowState.done { return Theme.complete-bg; }
+        if state == RowState.failed { return Theme.error-bg; }
+        if state == RowState.paused || state == RowState.scheduled || state == RowState.interrupted { return Theme.paused-bg; }
+        if state == RowState.downloading || state == RowState.engine-restarting { return Theme.active-bg; }
+        return Theme.queued-bg;
+    }
+    pure public function fg(state: RowState) -> color {
+        if state == RowState.done { return Theme.complete-fg; }
+        if state == RowState.failed { return Theme.error-fg; }
+        if state == RowState.paused || state == RowState.scheduled || state == RowState.interrupted { return Theme.paused-fg; }
+        if state == RowState.downloading || state == RowState.engine-restarting { return Theme.active-fg; }
+        return Theme.queued-fg;
+    }
+}
 
 export component DownloadCard inherits Rectangle {
     in property <DownloadRow> data;
@@ -15,18 +33,24 @@ export component DownloadCard inherits Rectangle {
     callback resume(int);
     callback retry(int);
     callback open-file(int);
+    // (id, toggle): a plain click selects only this row, Ctrl/Cmd+click toggles it.
+    callback row-clicked(int, bool);
     callback open-folder(int);
     callback show-details(int);
     callback remove(int);
     callback copy-url(string);
     callback toggle-selected(int, bool);
     callback key-action(int, string);
+    // Drag-out: a left press arms, moves report the distance; true means the
+    // OS drag started, so the press is no click.
+    callback drag-pressed(int);
+    callback drag-moved(int, length, length) -> bool;
 
     height: 94px;
     border-radius: 12px;
     border-width: 1px;
-    border-color: keyboard.has-focus ? Theme.strong : card-touch.has-hover ? Theme.border-strong : Theme.border;
-    background: card-touch.pressed ? Theme.surface-pressed : card-touch.has-hover ? Theme.surface-2 : Theme.surface;
+    border-color: keyboard.has-focus || root.data.selected ? Theme.strong : card-touch.has-hover ? Theme.border-strong : Theme.border;
+    background: card-touch.pressed ? Theme.surface-pressed : card-touch.has-hover || root.data.selected ? Theme.surface-2 : Theme.surface;
     animate background, border-color { duration: 90ms; easing: ease-out; }
 
     keyboard := FocusScope {
@@ -34,7 +58,7 @@ export component DownloadCard inherits Rectangle {
         height: 0px;
         focus-on-tab-navigation: true;
         accessible-role: list-item;
-        accessible-label: root.data.name;
+        accessible-label: root.data.name + ", " + root.data.type-label + ", " + root.data.status-display;
         key-pressed(event) => {
             if event.text == Key.Space {
                 root.key-action(root.data.id, "toggle");
@@ -52,10 +76,33 @@ export component DownloadCard inherits Rectangle {
         }
     }
 
+    // All pointer handling of the row lives here: click selects, double-click
+    // opens a finished file (a single click never launches anything), and
+    // press-and-move drags finished files out to other apps (src/dragout).
     card-touch := TouchArea {
-        enabled: root.data.status == "complete";
-        mouse-cursor: pointer;
-        clicked => { root.open-file(root.data.id); }
+        mouse-cursor: default;
+        property <bool> toggle;
+        property <bool> dragged;
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.down && event.button == PointerEventButton.left {
+                self.toggle = event.modifiers.control || event.modifiers.meta;
+                self.dragged = false;
+                root.drag-pressed(root.data.id);
+            }
+        }
+        moved => {
+            if self.pressed && !self.dragged {
+                self.dragged = root.drag-moved(root.data.id, self.mouse-x - self.pressed-x, self.mouse-y - self.pressed-y);
+            }
+        }
+        clicked => {
+            if self.dragged { return; }
+            keyboard.focus();
+            root.row-clicked(root.data.id, self.toggle);
+        }
+        double-clicked => {
+            if root.data.can-open && !self.dragged { root.open-file(root.data.id); }
+        }
     }
 
     VerticalLayout {
@@ -72,11 +119,10 @@ export component DownloadCard inherits Rectangle {
                 label: root.data.name;
                 toggled(value) => { root.toggle-selected(root.data.id, value); }
             }
-            IconSlot {
-                name: root.data.kind == "video" || root.data.kind == "hls" || root.data.kind == "dash" ? "video" :
-                    root.data.kind == "magnet" || root.data.kind == "torrent" ? "magnet" : "file";
-                size: 16px;
-                icon-color: Theme.muted;
+            FileTile {
+                type: root.data.file-type;
+                label: root.data.type-label;
+                count: root.data.file-count;
             }
             Text {
                 text: root.data.name;
@@ -92,19 +138,13 @@ export component DownloadCard inherits Rectangle {
                 horizontal-stretch: 0;
                 height: 20px;
                 border-radius: 10px;
-                background: root.data.status == "complete" ? Theme.complete-bg :
-                    root.data.status == "error" ? Theme.error-bg :
-                    root.data.status == "paused" || root.data.status == "scheduled" ? Theme.paused-bg :
-                    root.data.running ? Theme.active-bg : Theme.queued-bg;
+                background: RowLook.bg(root.data.state);
                 status-label := Text {
                     x: 8px;
                     width: parent.width - 16px;
                     height: parent.height;
                     text: root.data.status-display.to-uppercase();
-                    color: root.data.status == "complete" ? Theme.complete-fg :
-                        root.data.status == "error" ? Theme.error-fg :
-                        root.data.status == "paused" || root.data.status == "scheduled" ? Theme.paused-fg :
-                        root.data.running ? Theme.active-fg : Theme.queued-fg;
+                    color: RowLook.fg(root.data.state);
                     font-family: "Noto Sans Mono";
                     font-size: 9px;
                     font-weight: 600;
@@ -125,10 +165,8 @@ export component DownloadCard inherits Rectangle {
                 height: parent.height;
                 horizontal-stretch: 0;
                 border-radius: 3px;
-                background: root.data.status == "complete" ? Theme.complete-fg :
-                    root.data.status == "error" ? Theme.error-fg :
-                    root.data.status == "paused" || root.data.status == "scheduled" ? Theme.paused-fg :
-                    root.data.running ? Theme.active-fg : Theme.strong;
+                background: root.data.state == RowState.queued || root.data.state == RowState.waiting || root.data.state == RowState.removed
+                    ? Theme.strong : RowLook.fg(root.data.state);
                 animate width { duration: 400ms; easing: linear; }
             }
         }
@@ -164,15 +202,48 @@ export component DownloadCard inherits Rectangle {
                     padding-top: 2px;
                     padding-bottom: 2px;
                     spacing: 2px;
-                    if root.data.running: IconButton { icon: "pause"; label: root.label-pause; width: 28px; height: 28px; clicked => { root.pause(root.data.id); } }
-                    if root.data.resumable: IconButton { icon: "play"; label: root.label-resume; width: 28px; height: 28px; clicked => { root.resume(root.data.id); } }
-                    if root.data.status == "error": IconButton { icon: "retry"; label: root.label-retry; width: 28px; height: 28px; clicked => { root.retry(root.data.id); } }
-                    if root.data.status == "complete": IconButton { icon: "folder"; label: root.label-folder; width: 28px; height: 28px; clicked => { root.open-folder(root.data.id); } }
+                    if root.data.can-pause: IconButton { icon: "pause"; label: root.label-pause; width: 28px; height: 28px; clicked => { root.pause(root.data.id); } }
+                    if root.data.can-resume: IconButton { icon: "play"; label: root.label-resume; width: 28px; height: 28px; clicked => { root.resume(root.data.id); } }
+                    if root.data.can-retry: IconButton { icon: "retry"; label: root.label-retry; width: 28px; height: 28px; clicked => { root.retry(root.data.id); } }
+                    if root.data.can-open: IconButton { icon: "folder"; label: root.label-folder; width: 28px; height: 28px; clicked => { root.open-folder(root.data.id); } }
                     IconButton { icon: "chevron-down"; label: root.label-details; width: 28px; height: 28px; clicked => { root.show-details(root.data.id); } }
                     IconButton { icon: "link"; label: root.label-copy-url; width: 28px; height: 28px; clicked => { root.copy-url(root.data.url); } }
                     IconButton { icon: "trash"; label: root.label-remove; danger: true; width: 28px; height: 28px; clicked => { root.remove(root.data.id); } }
                 }
             }
+        }
+    }
+}
+
+// The drag image on Wayland: Rust shows it for one snapshot and crops it.
+export component DragGhost inherits Rectangle {
+    in property <string> name;
+    in property <string> file-type;
+    in property <string> type-label;
+    in property <string> count;
+    width: min(300px, ghost-layout.preferred-width);
+    height: 40px;
+    background: Theme.surface;
+    border-width: 1px;
+    border-color: Theme.border-strong;
+    ghost-layout := HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        spacing: 9px;
+        FileTile {
+            type: root.file-type;
+            label: root.type-label;
+            count: root.count;
+        }
+        Text {
+            text: root.name;
+            color: Theme.strong;
+            font-size: 13px;
+            font-weight: 600;
+            overflow: elide;
+            vertical-alignment: center;
         }
     }
 }

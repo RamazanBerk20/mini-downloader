@@ -33,6 +33,12 @@ impl Controller {
             schedules: self.db.list_schedules()?,
             settings,
             engine_running: self.engine.is_running().await,
+            engine_state: self
+                .engine
+                .current()
+                .await
+                .map(|engine| json!(*engine.state().borrow())),
+            tray_available: self.tray_available.load(Ordering::Relaxed),
         })
     }
 
@@ -211,7 +217,9 @@ impl Controller {
                         if row.is_ytdlp() {
                             self.ytdlp.cancel(row.id);
                         }
-                        let _ = self.db.set_status(row.id, DownloadStatus::Paused);
+                        let _ =
+                            self.db
+                                .transition(row.id, DownloadStatus::Paused, "user: pause all");
                     }
                 }
                 self.events
@@ -303,7 +311,9 @@ impl Controller {
                     .ok_or_else(|| AppError::classify("download not found"))?;
                 let path = crate::completion::downloaded_path(&row)
                     .ok_or_else(|| AppError::classify("downloaded file is unavailable"))?;
-                open::that(path)?;
+                // Detached: a launcher that waits for the opened program (xdg-open
+                // on a bare window manager) must not hold the controller's worker.
+                open::that_detached(path)?;
                 Ok(Value::Null)
             }
             OpenContainingFolder { id } => {
@@ -311,7 +321,12 @@ impl Controller {
                     .db
                     .get(id)?
                     .ok_or_else(|| AppError::classify("download not found"))?;
-                open::that(row.dir)?;
+                crate::platform::show_in_folder(
+                    crate::completion::downloaded_path(&row).as_deref(),
+                    Path::new(&row.dir),
+                )
+                .await
+                .map_err(AppError::classify)?;
                 Ok(Value::Null)
             }
             ProbeMedia { url, playlist } => {
@@ -477,6 +492,22 @@ impl Controller {
                 Ok(Value::Null)
             }
             GetDownloadDetails { id } => value(self.details(id).await?),
+            Why { id } => {
+                let row = self
+                    .db
+                    .get(id)?
+                    .ok_or_else(|| AppError::classify("download not found"))?;
+                let transitions = self.db.transitions(id)?;
+                Ok(json!({
+                    "id": id,
+                    "status": row.status,
+                    "gid": row.gid,
+                    "error_code": row.error_code,
+                    "error_message": row.error_message,
+                    "summary": minidl_core::model::explain(&row, &transitions, minidl_core::model::now()),
+                    "transitions": transitions,
+                }))
+            }
             SetTorrentFiles { id, indices } => {
                 self.set_torrent_files(id, indices).await?;
                 Ok(Value::Null)

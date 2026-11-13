@@ -70,9 +70,12 @@ pub const DETAIL_KEYS: &[&str] = &[
 /// Current connection target — swapped atomically when aria2 is restarted on a
 /// fresh port/secret, so every cloned `RpcClient` follows the new instance
 /// without any call site changing.
+/// `None` while the engine is not `Ready`: calls then fail fast instead of
+/// sending the secret and job credentials to a port another process may own.
 struct Target {
     endpoint: String,
     secret: String,
+    ready: bool,
 }
 
 /// HTTP JSON-RPC client bound to one aria2 instance (retargetable).
@@ -101,6 +104,7 @@ impl RpcClient {
             target: Arc::new(RwLock::new(Target {
                 endpoint: format!("http://127.0.0.1:{port}/jsonrpc"),
                 secret: secret.into(),
+                ready: true,
             })),
             http,
             next_id: Arc::new(AtomicU64::new(1)),
@@ -112,12 +116,21 @@ impl RpcClient {
         let mut t = self.target.write().unwrap_or_else(|e| e.into_inner());
         t.endpoint = format!("http://127.0.0.1:{port}/jsonrpc");
         t.secret = secret.into();
+        t.ready = true;
+    }
+
+    /// Refuse every call until the next [`Self::retarget`] (the engine died).
+    pub fn invalidate(&self) {
+        self.target.write().unwrap_or_else(|e| e.into_inner()).ready = false;
     }
 
     /// One JSON-RPC call. `params` are the args *after* the secret token.
     pub async fn call(&self, method: &str, params: Vec<Value>) -> Result<Value> {
         let (endpoint, secret) = {
             let t = self.target.read().unwrap_or_else(|e| e.into_inner());
+            if !t.ready {
+                return Err(anyhow!("aria2 {method} refused: engine is not running"));
+            }
             (t.endpoint.clone(), t.secret.clone())
         };
 
@@ -165,6 +178,8 @@ impl RpcClient {
 
     // ---- add ----
 
+    /// Add with the caller's GID in `options["gid"]` (16 hex digits), so the
+    /// caller can record the job before aria2 can report anything about it.
     pub async fn add_uri(&self, uris: &[String], options: Value) -> Result<String> {
         let res = self
             .call("aria2.addUri", vec![json!(uris), options])
@@ -299,5 +314,38 @@ impl RpcClient {
     }
     pub async fn shutdown(&self) -> Result<Value> {
         self.call("aria2.shutdown", vec![]).await
+    }
+}
+
+/// A fresh random aria2 GID (16 lowercase hex digits, never all zero).
+pub fn new_gid() -> Result<String> {
+    let mut bytes = [0u8; 8];
+    loop {
+        getrandom::getrandom(&mut bytes).context("getrandom")?;
+        if bytes != [0; 8] {
+            return Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn invalidated_client_refuses_without_sending() {
+        // Port 9 (discard) is never an aria2; the call must fail before I/O.
+        let client = RpcClient::new(9, "secret").unwrap();
+        client.invalidate();
+        let error = client.get_version().await.unwrap_err().to_string();
+        assert!(error.contains("not running"), "{error}");
+    }
+
+    #[test]
+    fn gids_are_sixteen_hex_digits() {
+        let gid = new_gid().unwrap();
+        assert_eq!(gid.len(), 16);
+        assert!(gid.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        assert_ne!(gid, new_gid().unwrap());
     }
 }

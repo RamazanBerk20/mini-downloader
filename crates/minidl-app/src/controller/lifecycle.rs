@@ -22,9 +22,28 @@ impl Controller {
         tokio::spawn(async move {
             let mut stop = notification_handle.stop.clone();
             let mut notifications = notification_handle.engine.subscribe();
+            let mut engine_state = notification_handle.engine.state();
             loop {
                 tokio::select! {
                     _ = stop.changed() => break,
+                    changed = engine_state.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                        let state = engine_state.borrow_and_update().clone();
+                        this.events.emit("engine:state", json!(state));
+                        // A respawned aria2 restored only its last saved
+                        // session: put every running row back in line with it.
+                        if matches!(state, minidl_core::aria2::EngineState::Ready { .. }) {
+                            let defaults = this.defaults.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                            for id in crate::reconcile::recover_lost_jobs(
+                                &notification_handle.engine, &this.db, &defaults, None,
+                            ).await {
+                                this.emit_row_state(id);
+                            }
+                            this.events.emit("downloads:reconciled", json!({}));
+                        }
+                    }
                     event = notifications.recv() => match event {
                         Ok(event) => {
                             if matches!(event, Aria2Event::Start(_)) {
@@ -121,6 +140,51 @@ impl Controller {
         });
     }
 
+    /// No yt-dlp process outlives the controller. At startup a video row
+    /// that was downloading is shown as interrupted (Retry continues its
+    /// partial files) and rows that were waiting for a slot start again.
+    pub(super) fn recover_ytdlp_rows(self: &Arc<Self>) {
+        let mut restart = Vec::new();
+        for row in self.db.running_rows().unwrap_or_default() {
+            if !row.is_ytdlp() {
+                continue;
+            }
+            match row.status {
+                DownloadStatus::Active => {
+                    let _ = self.db.fail(
+                        row.id,
+                        Some(INTERRUPTED),
+                        Some("interrupted: the app stopped while this was downloading"),
+                        "startup: no yt-dlp process survived the restart",
+                    );
+                }
+                DownloadStatus::Queued | DownloadStatus::Waiting => restart.push(row),
+                _ => {}
+            }
+        }
+        if restart.is_empty() {
+            return;
+        }
+        // Starting validates the target over DNS: keep it off the open path.
+        let this = self.clone();
+        tokio::spawn(async move {
+            for row in restart {
+                if let Err(error) = this
+                    .start_ytdlp(&row, "startup: queued video started")
+                    .await
+                {
+                    let _ = this.db.fail(
+                        row.id,
+                        None,
+                        Some(&error.message),
+                        "startup: queued video could not start",
+                    );
+                }
+                this.emit_row_state(row.id);
+            }
+        });
+    }
+
     pub(super) fn spawn_ytdlp_completion_handler(
         self: &Arc<Self>,
         mut completions: mpsc::UnboundedReceiver<YtDlpCompletion>,
@@ -162,9 +226,40 @@ impl Controller {
         self.maybe_completion_action().await;
     }
 
+    pub(super) fn emit_row_state(&self, id: i64) {
+        if let Some(row) = self.db.get(id).ok().flatten() {
+            self.events.emit(
+                "downloads:state",
+                json!({"id": id, "status": row.status.as_str()}),
+            );
+        }
+    }
+
     async fn handle_transition(&self, handle: &EngineHandle, gid: &str) {
-        let Ok(status) = handle.engine.rpc.tell_status(gid, STATUS_KEYS).await else {
-            return;
+        let status = match handle.engine.rpc.tell_status(gid, STATUS_KEYS).await {
+            Ok(status) => status,
+            Err(error) => {
+                // aria2 is up but no longer knows a job a running row is bound
+                // to: re-add it or fail it, never leave it "active" forever.
+                if error.to_string().contains("is not found") {
+                    if let Some(row) = self.db.find_by_gid(gid).ok().flatten() {
+                        let defaults = self
+                            .defaults
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .clone();
+                        crate::reconcile::recover_lost_jobs(
+                            &handle.engine,
+                            &self.db,
+                            &defaults,
+                            Some(row.id),
+                        )
+                        .await;
+                        self.emit_row_state(row.id);
+                    }
+                }
+                return;
+            }
         };
         let Some(row) = self.db.find_by_gid(gid).ok().flatten() else {
             let _ = handle.engine.rpc.remove_download_result(gid).await;
@@ -191,50 +286,58 @@ impl Controller {
         }
         match next {
             DownloadStatus::Complete => {
-                if let Some(child) = crate::completion::first_followed_by(&status) {
-                    let _ = self.db.set_gid(row.id, &child);
-                    if let Some(info_hash) = status
-                        .get("infoHash")
-                        .and_then(Value::as_str)
-                        .filter(|value| !value.is_empty())
-                    {
-                        let _ = self.db.set_info_hash(row.id, info_hash);
+                match crate::completion::complete(
+                    &self.db,
+                    &row,
+                    &status,
+                    "aria2: download complete",
+                ) {
+                    crate::completion::Completion::Followed(child) => {
+                        self.events.emit(
+                            "downloads:state",
+                            json!({"id": row.id, "gid": child, "status": "active"}),
+                        );
+                        let _ = handle.engine.rpc.remove_download_result(gid).await;
+                        return;
                     }
-                    let _ = self.db.set_status(row.id, DownloadStatus::Active);
-                    self.events.emit(
-                        "downloads:state",
-                        json!({"id": row.id, "gid": child, "status": "active"}),
-                    );
-                    let _ = handle.engine.rpc.remove_download_result(gid).await;
-                    return;
-                }
-                if self.db.set_status_if_changed(row.id, next).unwrap_or(false) {
-                    let reported = crate::completion::basename(&status);
-                    let filename = if reported.is_empty() {
-                        row.filename.clone().unwrap_or_default()
-                    } else {
-                        reported
-                    };
-                    let (directory, filename) =
-                        crate::completion::organize(&self.db, &row, &filename);
-                    if !filename.is_empty() && row.filename.as_deref() != Some(filename.as_str()) {
-                        let _ = self.db.set_filename(row.id, &filename);
+                    crate::completion::Completion::Finished {
+                        directory,
+                        filename,
+                        problem,
+                    } => {
+                        if let Some(message) = problem {
+                            self.events
+                                .emit("downloads:error", json!({"id": row.id, "message": message}));
+                        }
+                        let path = Path::new(&directory).join(&filename);
+                        self.events.emit(
+                            "downloads:complete",
+                            json!({
+                                "id": row.id, "name": filename, "path": path.to_string_lossy()
+                            }),
+                        );
+                        self.maybe_completion_action().await;
                     }
-                    let path = Path::new(&directory).join(&filename);
-                    crate::completion::set_origin(&path, &row.url, row.referrer.as_deref());
-                    self.events.emit(
-                        "downloads:complete",
-                        json!({
-                            "id": row.id, "name": filename, "path": path.to_string_lossy()
-                        }),
-                    );
-                    self.maybe_completion_action().await;
+                    crate::completion::Completion::Refused(message) => {
+                        self.events
+                            .emit("downloads:error", json!({"id": row.id, "message": message}));
+                        self.events
+                            .emit("downloads:state", json!({"id": row.id, "status": "error"}));
+                        let _ = handle.engine.rpc.remove_download_result(gid).await;
+                        self.arm_engine_if_idle().await;
+                        return;
+                    }
+                    crate::completion::Completion::AlreadyDone => {}
                 }
             }
             DownloadStatus::Error => {
-                if self.db.set_status_if_changed(row.id, next).unwrap_or(false) {
-                    let code = status.get("errorCode").and_then(Value::as_str);
-                    let message = crate::reconcile::error_text(&status);
+                let code = status.get("errorCode").and_then(Value::as_str);
+                let message = crate::reconcile::error_text(&status);
+                if self
+                    .db
+                    .fail(row.id, code, message.as_deref(), "aria2: download failed")
+                    .unwrap_or(false)
+                {
                     if code == Some("32") {
                         // Bytes that failed verification must not sit in the
                         // folder looking finished, and aria2 would only
@@ -246,16 +349,17 @@ impl Controller {
                             .flatten()
                             .filter_map(|file| file.get("path").and_then(Value::as_str))
                         {
-                            delete_download_file(Path::new(&row.dir), Path::new(file));
+                            let _ = delete_download_file(Path::new(&row.dir), Path::new(file));
                         }
                     }
-                    let _ = self.db.set_error(row.id, code, message.as_deref());
                     self.events
                         .emit("downloads:error", json!({"id": row.id, "message": message}));
                 }
             }
             _ => {
-                let _ = self.db.set_status(row.id, next);
+                let _ = self
+                    .db
+                    .transition(row.id, next, &format!("aria2: {}", next.as_str()));
             }
         }
         self.events.emit(

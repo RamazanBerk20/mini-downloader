@@ -33,56 +33,71 @@ fn is_strong_transient_query_key(key: &str) -> bool {
         )
 }
 
-fn is_transient_query_key(key: &str) -> bool {
-    is_strong_transient_query_key(key)
-        || matches!(
-            key.to_ascii_lowercase().as_str(),
-            // Companion fields used by common CDN signatures. These are only
-            // stripped when the URL also contains a strong signature field.
-            "h" | "hash"
-                | "key"
-                | "key-pair-id"
-                | "user_id"
-                | "sv"
-                | "spr"
-                | "st"
-                | "se"
-                | "sr"
-                | "sp"
-        )
+/// Pure validity-window fields that rotate with every signature. Only these
+/// and the signature fields above are ignored; everything else in the query
+/// (`key`, `h`, `id`, `user_id`, …) may name the file and is compared.
+fn is_timing_query_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "expires" | "exp" | "se" | "st"
+    )
 }
 
-/// Return the stable resource URL for a fully signed CDN query. Ordinary query
-/// strings are deliberately left alone: `download?id=1` and `download?id=2`
-/// can be different files. A query is stripped only when every field belongs
-/// to a known signing scheme and at least one high-confidence signature field
-/// is present.
+/// Return the stable resource URL for a signed CDN link: the URL without its
+/// signature and expiry fields, with the remaining query pairs sorted.
+/// Ordinary query strings are never touched: a URL without a high-confidence
+/// signature field returns `None` and is compared exactly.
 pub(super) fn signed_source_base(source: &str) -> Option<String> {
     let mut parsed = url::Url::parse(source).ok()?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return None;
     }
-    let keys = parsed
+    let pairs = parsed
         .query_pairs()
-        .map(|(key, _)| key.into_owned())
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect::<Vec<_>>();
-    if keys.is_empty()
-        || !keys.iter().any(|key| is_strong_transient_query_key(key))
-        || !keys.iter().all(|key| is_transient_query_key(key))
+    if !pairs
+        .iter()
+        .any(|(key, _)| is_strong_transient_query_key(key))
     {
         return None;
     }
-    parsed.set_query(None);
+    let mut kept = pairs
+        .into_iter()
+        .filter(|(key, _)| !is_strong_transient_query_key(key) && !is_timing_query_key(key))
+        .collect::<Vec<_>>();
+    kept.sort();
     parsed.set_fragment(None);
+    if kept.is_empty() {
+        parsed.set_query(None);
+    } else {
+        parsed.query_pairs_mut().clear().extend_pairs(kept);
+    }
     Some(parsed.to_string())
 }
 
+/// The part of a signed source before its query: the SQL prefilter for rows
+/// that may match; [`duplicate_sources_match`] makes the decision.
+pub(super) fn signed_source_path(source: &str) -> Option<String> {
+    let base = signed_source_base(source)?;
+    Some(base.split('?').next().unwrap_or_default().to_owned())
+}
+
+/// An unsigned source without its fragment and with sorted query pairs, so it
+/// compares equal to the signature-free base of a signed link.
 fn unsigned_source(source: &str) -> Option<String> {
     let mut parsed = url::Url::parse(source).ok()?;
-    if parsed.query().is_some() {
-        return None;
-    }
     parsed.set_fragment(None);
+    let mut pairs = parsed
+        .query_pairs()
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    if pairs.is_empty() {
+        parsed.set_query(None);
+    } else {
+        pairs.sort();
+        parsed.query_pairs_mut().clear().extend_pairs(pairs);
+    }
     Some(parsed.to_string())
 }
 

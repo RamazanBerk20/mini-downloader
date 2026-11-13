@@ -1,10 +1,12 @@
 import { ComboBox, Palette, ScrollView, SpinBox } from "std-widgets.slint";
-import { AppIcon, IconButton, IconSlot, NavItem, OnboardCard, SectionLabel, SettingsTab, Theme, UiButton, UiCheckBox, UiDecimalField, UiField, UiNumberField, UiSlider, UiStepper, UiSwitch, UiTextArea } from "ui-kit.slint";
-import { CategoryRow, DetailFileRow, DownloadRow, LinkChoice, MediaChoice, ScheduleRow } from "models.slint";
-import { DownloadCard, PackageHeader } from "downloads.slint";
+import { AppIcon, IconButton, IconSlot, NavItem, NoticeBanner, OnboardCard, SectionLabel, SettingsTab, Theme, UiButton, UiCheckBox, UiDecimalField, UiField, UiNumberField, UiSlider, UiSwitch, UiTextArea } from "ui-kit.slint";
+import { CategoryRow, DetailFileRow, DownloadRow, LinkChoice, MediaChoice, NoticeRow, Overlay, ScheduleRow } from "models.slint";
+import { DownloadCard, DragGhost, PackageHeader } from "downloads.slint";
 import { BrowserStatus, BrowserStoreCard, DayChip, SettingsHint, SettingsToggleRow, SponsorButton } from "settings.slint";
 import { LinkDialog, MediaDialog, ShortcutsDialog } from "dialogs.slint";
 import { DetailDialog } from "detail-dialog.slint";
+// Rust reads and sets these through `ui.global::<…>()`.
+export { Overlay, RowState } from "models.slint";
 export component MainWindow inherits Window {
     title: "Mini Downloader";
     icon: @image-url("../../../assets/icons/32x32.png");
@@ -23,7 +25,16 @@ export component MainWindow inherits Window {
     in property <[MediaChoice]> media-choices;
     in property <[DetailFileRow]> detail-files;
     in-out property <string> page-title: "All downloads";
-    in-out property <string> status-text: "";
+    // Notices per place, highest priority first (ui/state.rs).
+    in property <[NoticeRow]> page-notices;
+    in property <[NoticeRow]> links-notices;
+    in property <[NoticeRow]> media-notices;
+    in property <[NoticeRow]> detail-notices;
+    in property <[NoticeRow]> settings-notices;
+    in property <bool> links-busy: false;
+    in property <bool> media-busy: false;
+    // The URL whose probe result is on screen; choices are addable only for it.
+    in property <string> media-loaded-url: "";
     in property <string> memory-text: "";
     in property <int> count-all: 0;
     in property <int> count-active: 0;
@@ -77,13 +88,15 @@ export component MainWindow inherits Window {
     in-out property <string> theme-choice: "system";
     in property <bool> system-dark: true;
     in property <bool> rtl: false;
-    in property <bool> dark: root.theme-choice == "dark" || (root.theme-choice == "system" && root.system-dark);
+    // "system" follows the platform scheme while Palette still reports it
+    // (it does until the app first overrides it), else the Rust-side probe.
+    in property <bool> dark: root.theme-choice == "dark" || (root.theme-choice == "system"
+        && (Palette.color-scheme == ColorScheme.unknown ? root.system-dark : Palette.color-scheme == ColorScheme.dark));
     in-out property <int> firefox-state: 0;
     in-out property <int> chromium-state: 0;
-    in-out property <int> current-page: 0;
+    in-out property <Overlay> overlay: Overlay.none;
     in-out property <int> settings-section: 0;
     in-out property <int> status-filter: 0;
-    in-out property <bool> detail-visible: false;
     in-out property <string> detail-url: "";
     in-out property <string> detail-dir: "";
     in-out property <string> detail-error: "";
@@ -106,7 +119,9 @@ export component MainWindow inherits Window {
     in-out property <int> schedule-minute: 0;
     in-out property <int> schedule-days: 127;
     in-out property <int> schedule-speed: 512000;
-    out property <bool> shortcut-blocked: root.current-page != 0 || root.detail-visible || add-field.input-focused || search-field.input-focused;
+    // Single-key and Ctrl+A/C shortcuts never fire over a dialog or while any
+    // text field has focus (digits belong in the checksum field).
+    out property <bool> shortcut-blocked: root.overlay != Overlay.none || TextInputInterface.text-input-focused;
 
     in property <string> nav-downloads: "All downloads";
     in property <string> nav-links: "Grab links";
@@ -132,7 +147,7 @@ export component MainWindow inherits Window {
     in property <string> label-resume: "Resume";
     in property <string> label-retry: "Retry";
     in property <string> label-open-file: "Open file";
-    in property <string> label-folder: "Open folder";
+    in property <string> label-folder: "Show in folder";
     in property <string> label-details: "Details";
     in property <string> label-remove: "Remove";
     in property <string> label-remove-delete: "Remove + delete files";
@@ -242,6 +257,7 @@ export component MainWindow inherits Window {
     in property <string> label-add-selected: "Add selected";
     in property <string> label-media-help: "Download video, HLS/DASH streams, subtitles and audio through yt-dlp.";
     in property <string> label-probe: "Probe";
+    in property <string> label-probing: "Probing…";
     in property <string> label-playlist: "Playlist";
     in property <string> label-audio-only: "Audio only";
     in property <string> label-subtitles: "Subtitles";
@@ -252,6 +268,7 @@ export component MainWindow inherits Window {
     in property <string> label-sc-search: "Search";
     in property <string> label-sc-filter: "Switch status filter";
     in property <string> label-sc-select-all: "Select all";
+    in property <string> label-sc-copy-files: "Copy finished files";
     in property <string> label-sc-pause-resume: "Pause/resume focused download";
     in property <string> label-sc-remove: "Remove focused download";
     in property <string> label-sc-open: "Open file (completed)";
@@ -279,6 +296,18 @@ export component MainWindow inherits Window {
     callback resume(int);
     callback retry(int);
     callback open-file(int);
+    callback row-clicked(int, bool);
+    callback drag-pressed(int);
+    callback drag-moved(int, length, length) -> bool;
+    in property <bool> drag-ghost-visible;
+    in property <string> drag-ghost-name;
+    in property <string> drag-ghost-type;
+    in property <string> drag-ghost-type-label;
+    in property <string> drag-ghost-count;
+    out property <length> drag-ghost-width: drag-ghost.width;
+    out property <length> drag-ghost-height: drag-ghost.height;
+    callback copy-selected-files();
+    callback dismiss-notice(int);
     callback remove(int);
     callback remove-delete(int);
     callback toggle-selected(int, bool);
@@ -337,12 +366,12 @@ export component MainWindow inherits Window {
     }
 
     public function focus-add-input() {
-        root.current-page = 0;
+        root.overlay = Overlay.none;
         add-field.focus-input();
     }
 
     public function focus-search-input() {
-        root.current-page = 0;
+        root.overlay = Overlay.none;
         search-field.focus-input();
     }
 
@@ -370,6 +399,7 @@ export component MainWindow inherits Window {
     }
 
     changed dark => { Theme.dark = root.dark; }
+    changed overlay => { root.delete-confirm-id = 0; }
     changed theme-choice => {
         Palette.color-scheme = root.theme-choice == "dark" ? ColorScheme.dark :
             root.theme-choice == "light" ? ColorScheme.light : ColorScheme.unknown;
@@ -483,7 +513,7 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    NavItem { text: root.nav-settings; icon: "gear"; clicked => { root.settings-section = 0; root.current-page = 3; } }
+                    NavItem { text: root.nav-settings; icon: "gear"; clicked => { root.settings-section = 0; root.overlay = Overlay.settings; } }
                 }
             }
         }
@@ -523,9 +553,9 @@ export component MainWindow inherits Window {
                     if root.count-completed > 0: IconButton { icon: "check"; label: root.label-clear-completed; clicked => { root.remove-completed(); } }
                     if root.count-failed > 0: IconButton { icon: "warning"; label: root.label-clear-failed; danger: true; clicked => { root.remove-failed(); } }
                     IconButton { icon: "file"; label: root.label-add-file; clicked => { root.pick-file(); } }
-                    IconButton { icon: "video"; label: root.nav-media; clicked => { root.current-page = 2; } }
-                    IconButton { icon: "link"; label: root.nav-links; clicked => { root.current-page = 1; } }
-                    IconButton { icon: "help"; label: root.label-shortcuts; clicked => { root.current-page = 4; } }
+                    IconButton { icon: "video"; label: root.nav-media; clicked => { root.overlay = Overlay.media; } }
+                    IconButton { icon: "link"; label: root.nav-links; clicked => { root.overlay = Overlay.links; } }
+                    IconButton { icon: "help"; label: root.label-shortcuts; clicked => { root.overlay = Overlay.shortcuts; } }
                 }
 
                 HorizontalLayout {
@@ -563,35 +593,18 @@ export component MainWindow inherits Window {
                     UiField { text <=> root.checksum-text; placeholder: root.label-checksum-placeholder; horizontal-stretch: 1; }
                 }
 
-                if root.status-text != "": HorizontalLayout {
+                for notice in root.page-notices: HorizontalLayout {
+                    // The page shows its own notices, the most urgent first;
+                    // dialogs show theirs inside the dialog.
                     height: 38px;
                     padding-left: 22px;
                     padding-right: 28px;
-                    status-banner := Rectangle {
-                        horizontal-stretch: 1;
-                        border-radius: 7px;
-                        background: Theme.error-bg;
-                        HorizontalLayout {
-                            padding-left: 12px;
-                            padding-right: 5px;
-                            spacing: 9px;
-                            IconSlot { name: "warning"; size: 16px; icon-color: Theme.error-fg; }
-                            Text { text: root.status-text; color: Theme.error-fg; font-size: 12px; horizontal-stretch: 1; vertical-alignment: center; overflow: elide; }
-                            Rectangle {
-                                width: 28px;
-                                horizontal-stretch: 0;
-                                background: transparent;
-                                IconButton {
-                                    y: (parent.height - self.height) / 2;
-                                    icon: "close";
-                                    label: root.label-close;
-                                    danger: true;
-                                    width: 28px;
-                                    height: 28px;
-                                    clicked => { root.status-text = ""; }
-                                }
-                            }
-                        }
+                    padding-bottom: 4px;
+                    NoticeBanner {
+                        error: notice.error;
+                        text: notice.text;
+                        label-close: root.label-close;
+                        dismiss => { root.dismiss-notice(notice.id); }
                     }
                 }
 
@@ -665,9 +678,9 @@ export component MainWindow inherits Window {
                                     height: parent.height;
                                     spacing: 8px;
                                     OnboardCard { row: 0; col: 0; text: root.label-onboard-paste; icon: "add"; clicked => { add-field.focus-input(); } }
-                                    OnboardCard { row: 0; col: 1; text: root.label-onboard-video; icon: "video"; clicked => { root.current-page = 2; } }
-                                    OnboardCard { row: 1; col: 0; text: root.label-onboard-links; icon: "link"; clicked => { root.current-page = 1; } }
-                                    OnboardCard { row: 1; col: 1; text: root.label-onboard-browser; icon: "download"; clicked => { root.settings-section = 4; root.current-page = 3; } }
+                                    OnboardCard { row: 0; col: 1; text: root.label-onboard-video; icon: "video"; clicked => { root.overlay = Overlay.media; } }
+                                    OnboardCard { row: 1; col: 0; text: root.label-onboard-links; icon: "link"; clicked => { root.overlay = Overlay.links; } }
+                                    OnboardCard { row: 1; col: 1; text: root.label-onboard-browser; icon: "download"; clicked => { root.settings-section = 4; root.overlay = Overlay.settings; } }
                                 }
                             }
                             Rectangle { horizontal-stretch: 1; }
@@ -717,6 +730,9 @@ export component MainWindow inherits Window {
                                 resume(id) => { root.resume(id); }
                                 retry(id) => { root.retry(id); }
                                 open-file(id) => { root.open-file(id); }
+                                row-clicked(id, toggle) => { root.row-clicked(id, toggle); }
+                                drag-pressed(id) => { root.drag-pressed(id); }
+                                drag-moved(id, dx, dy) => { return root.drag-moved(id, dx, dy); }
                                 open-folder(id) => { root.open-folder(id); }
                                 show-details(id) => { root.show-details(id); }
                                 remove(id) => { root.remove(id); }
@@ -724,12 +740,12 @@ export component MainWindow inherits Window {
                                 toggle-selected(id, value) => { root.toggle-selected(id, value); }
                                 key-action(id, action) => {
                                     if action == "toggle" {
-                                        if row.running { root.pause(id); }
-                                        else if row.resumable { root.resume(id); }
+                                        if row.can-pause { root.pause(id); }
+                                        else if row.can-resume { root.resume(id); }
                                     } else if action == "remove" {
                                         root.remove(id);
                                     } else if action == "open" {
-                                        if row.status == "complete" { root.open-file(id); }
+                                        if row.can-open { root.open-file(id); }
                                         else { root.show-details(id); }
                                     }
                                 }
@@ -741,23 +757,21 @@ export component MainWindow inherits Window {
         }
     }
 
-    if root.current-page != 0 || root.detail-visible: Rectangle {
+    if root.overlay != Overlay.none && root.overlay != Overlay.settings: Rectangle {
         width: parent.width;
         height: parent.height;
         background: #00000066;
         TouchArea {
-            clicked => {
-                root.current-page = 0;
-                root.detail-visible = false;
-                root.delete-confirm-id = 0;
-            }
+            clicked => { root.overlay = Overlay.none; }
         }
     }
 
-    if root.current-page == 1: LinkDialog {
+    if root.overlay == Overlay.links: LinkDialog {
         available-width: root.width;
         available-height: root.height;
         grabbed-links: root.grabbed-links;
+        notices: root.links-notices;
+        busy: root.links-busy;
         link-text <=> root.link-text;
         link-package <=> root.link-package;
         label-link-title: root.label-link-title;
@@ -769,17 +783,23 @@ export component MainWindow inherits Window {
         label-select-all: root.label-select-all;
         label-select-none: root.label-select-none;
         label-add-selected: root.label-add-selected;
-        close => { root.current-page = 0; }
+        close => { root.overlay = Overlay.none; }
         grab-links(text) => { root.grab-links(text); }
         select-grabbed(value) => { root.select-grabbed(value); }
         toggle-grabbed(index, value) => { root.toggle-grabbed(index, value); }
         add-grabbed => { root.add-grabbed(); }
+        dismiss-notice(id) => { root.dismiss-notice(id); }
     }
 
-    if root.current-page == 2: MediaDialog {
+    if root.overlay == Overlay.media: MediaDialog {
         available-width: root.width;
         available-height: root.height;
         media-choices: root.media-choices;
+        notices: root.media-notices;
+        busy: root.media-busy;
+        loaded-url: root.media-loaded-url;
+        label-probing: root.label-probing;
+        label-close: root.label-close;
         media-url <=> root.media-url;
         media-title <=> root.media-title;
         media-entries-text <=> root.media-entries-text;
@@ -793,7 +813,6 @@ export component MainWindow inherits Window {
         media-audio-format <=> root.media-audio-format;
         media-thumbnail <=> root.media-thumbnail;
         label-media-title: root.label-media-title;
-        label-close: root.label-close;
         label-media-help: root.label-media-help;
         label-media-placeholder: root.label-media-placeholder;
         label-probe: root.label-probe;
@@ -807,16 +826,17 @@ export component MainWindow inherits Window {
         label-select-none: root.label-select-none;
         label-add: root.label-add;
         label-add-playlist: root.label-add-playlist;
-        close => { root.current-page = 0; }
+        close => { root.overlay = Overlay.none; }
         probe-media(url, playlist) => { root.probe-media(url, playlist); }
         add-media(url) => { root.add-media(url); }
         select-media-choices(value) => { root.select-media-choices(value); }
         toggle-media-choice(index, value) => { root.toggle-media-choice(index, value); }
         add-media-choice(url, format-id) => { root.add-media-choice(url, format-id); }
         add-playlist => { root.add-playlist(); }
+        dismiss-notice(id) => { root.dismiss-notice(id); }
     }
 
-    if root.current-page == 4: ShortcutsDialog {
+    if root.overlay == Overlay.shortcuts: ShortcutsDialog {
         available-width: root.width;
         available-height: root.height;
         label-shortcuts: root.label-shortcuts;
@@ -825,25 +845,26 @@ export component MainWindow inherits Window {
         label-sc-search: root.label-sc-search;
         label-sc-filter: root.label-sc-filter;
         label-sc-select-all: root.label-sc-select-all;
+        label-sc-copy-files: root.label-sc-copy-files;
         label-sc-pause-resume: root.label-sc-pause-resume;
         label-sc-remove: root.label-sc-remove;
         label-sc-open: root.label-sc-open;
         label-sc-close: root.label-sc-close;
-        close => { root.current-page = 0; }
+        close => { root.overlay = Overlay.none; }
     }
 
-    if root.current-page == 3: Rectangle {
+    if root.overlay == Overlay.settings: Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
         height: parent.height;
         background: #00000066;
-        TouchArea { clicked => { root.current-page = 0; } }
+        TouchArea { clicked => { root.overlay = Overlay.none; } }
     }
 
     // The original settings interaction: a single continuous, compact drawer
     // with a sticky one-line section navigator and immediately persisted edits.
-    if root.current-page == 3: Rectangle {
+    if root.overlay == Overlay.settings: Rectangle {
         x: root.rtl ? 0px : parent.width - self.width;
         y: 0px;
         width: min(600px, parent.width - 32px);
@@ -883,7 +904,7 @@ export component MainWindow inherits Window {
                     horizontal-stretch: 1;
                     vertical-alignment: center;
                 }
-                IconButton { icon: "close"; label: root.label-close; clicked => { root.current-page = 0; } }
+                IconButton { icon: "close"; label: root.label-close; clicked => { root.overlay = Overlay.none; } }
             }
 
             Rectangle {
@@ -902,6 +923,16 @@ export component MainWindow inherits Window {
                 }
             }
             Rectangle { height: 1px; background: Theme.border; }
+            for notice in root.settings-notices: VerticalLayout {
+                height: 44px;
+                padding-top: 6px;
+                NoticeBanner {
+                    error: notice.error;
+                    text: notice.text;
+                    label-close: root.label-close;
+                    dismiss => { root.dismiss-notice(notice.id); }
+                }
+            }
 
             settings-scroll := ScrollView {
                 vertical-stretch: 1;
@@ -1248,11 +1279,13 @@ export component MainWindow inherits Window {
         }
     }
 
-    if root.detail-visible: DetailDialog {
+    if root.overlay == Overlay.details: DetailDialog {
         available-width: root.width;
         available-height: root.height;
         detail-files: root.detail-files;
-        detail-visible <=> root.detail-visible;
+        notices: root.detail-notices;
+        close => { root.overlay = Overlay.none; }
+        dismiss-notice(id) => { root.dismiss-notice(id); }
         detail-url: root.detail-url;
         detail-dir: root.detail-dir;
         detail-error: root.detail-error;
@@ -1289,4 +1322,14 @@ export component MainWindow inherits Window {
         remove-delete(id) => { root.remove-delete(id); }
     }
 
+    // Hidden; shown for the one snapshot a Wayland drag image is cut from.
+    drag-ghost := DragGhost {
+        x: 0px;
+        y: 0px;
+        visible: root.drag-ghost-visible;
+        name: root.drag-ghost-name;
+        file-type: root.drag-ghost-type;
+        type-label: root.drag-ghost-type-label;
+        count: root.drag-ghost-count;
+    }
 }

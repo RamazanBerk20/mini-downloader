@@ -160,78 +160,134 @@ pub struct BridgeRequest {
     pub presence: bool,
 }
 
-impl BridgeRequest {
-    pub fn new(job: CaptureJob) -> Self {
+fn placeholder_job(url: &str) -> CaptureJob {
+    CaptureJob {
+        url: url.into(),
+        filename: None,
+        referrer: None,
+        user_agent: None,
+        cookie: None,
+        extra_headers: Vec::new(),
+        kind: DownloadKind::Http,
+        mime: None,
+        size: None,
+        page_url: None,
+        cookie_store_id: None,
+        torrent_b64: None,
+        batch_id: None,
+        batch_name: None,
+    }
+}
+
+/// What a bridge message means. Both ends work with this enum; the v1 wire
+/// shape ([`BridgeRequest`]: a job plus `ping`/`presence` flags, with a
+/// placeholder job for the non-captures) is kept so published connector and
+/// app versions keep interoperating. Combinations the flags could express but
+/// that mean nothing (ping and presence at once, presence without a browser
+/// family) are rejected on conversion.
+#[derive(Debug, Clone)]
+pub enum Bridge {
+    /// Silent connector heartbeat: never launches the app.
+    Presence(BrowserFamily),
+    /// Manual connectivity check from the options page.
+    Ping(Option<BrowserFamily>),
+    /// A captured download.
+    Capture(Box<CaptureJob>, Option<BrowserFamily>),
+}
+
+impl From<Bridge> for BridgeRequest {
+    fn from(message: Bridge) -> Self {
+        let (job, ping, presence, browser_family) = match message {
+            Bridge::Presence(family) => (placeholder_job("presence://"), false, true, Some(family)),
+            Bridge::Ping(family) => (placeholder_job("ping://"), true, false, family),
+            Bridge::Capture(job, family) => (*job, false, false, family),
+        };
         Self {
             protocol_version: PROTOCOL_VERSION,
             job,
-            ping: false,
-            browser_family: None,
-            presence: false,
+            ping,
+            browser_family,
+            presence,
         }
     }
+}
 
-    /// A health-check request carrying a placeholder job.
-    pub fn ping() -> Self {
-        Self {
-            protocol_version: PROTOCOL_VERSION,
-            ping: true,
-            browser_family: None,
-            presence: false,
-            job: CaptureJob {
-                url: "ping://".into(),
-                filename: None,
-                referrer: None,
-                user_agent: None,
-                cookie: None,
-                extra_headers: Vec::new(),
-                kind: DownloadKind::Http,
-                mime: None,
-                size: None,
-                page_url: None,
-                cookie_store_id: None,
-                torrent_b64: None,
-                batch_id: None,
-                batch_name: None,
-            },
+impl TryFrom<BridgeRequest> for Bridge {
+    type Error = &'static str;
+
+    fn try_from(request: BridgeRequest) -> Result<Self, Self::Error> {
+        if request.protocol_version != PROTOCOL_VERSION {
+            return Err("unsupported protocol version");
+        }
+        match (request.presence, request.ping) {
+            (true, true) => Err("bridge request is both a ping and a presence heartbeat"),
+            (true, false) => request
+                .browser_family
+                .map(Bridge::Presence)
+                .ok_or("connector presence missing browser family"),
+            (false, true) => Ok(Bridge::Ping(request.browser_family)),
+            (false, false) => Ok(Bridge::Capture(
+                Box::new(request.job),
+                request.browser_family,
+            )),
         }
     }
+}
 
-    /// A connector heartbeat carrying no capture job. The desktop app records
-    /// the browser family and returns an acknowledgement without focusing the
-    /// window or adding a download.
-    pub fn presence(browser_family: BrowserFamily) -> Self {
-        Self {
-            protocol_version: PROTOCOL_VERSION,
-            ping: false,
-            browser_family: Some(browser_family),
-            presence: true,
-            job: CaptureJob {
-                url: "presence://".into(),
-                filename: None,
-                referrer: None,
-                user_agent: None,
-                cookie: None,
-                extra_headers: Vec::new(),
-                kind: DownloadKind::Http,
-                mime: None,
-                size: None,
-                page_url: None,
-                cookie_store_id: None,
-                torrent_b64: None,
-                batch_id: None,
-                batch_name: None,
-            },
+/// Refuse a named-pipe peer that runs as another Windows user. Pipe names are
+/// machine-global and derived from a predictable path, so another account can
+/// create ours first; the browser bridge would then hand it cookies and
+/// headers. `pid` is the peer's process id (`Stream::peer_creds()`).
+#[cfg(windows)]
+pub fn ensure_same_user(pid: u32) -> std::io::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{
+        GetLengthSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    unsafe fn user_sid(process: HANDLE) -> std::io::Result<Vec<u8>> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut length = 0u32;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut length);
+        // u64 storage keeps the TOKEN_USER header pointer-aligned.
+        let mut buffer = vec![0u64; (length as usize).div_ceil(8)];
+        let ok = GetTokenInformation(
+            token,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            length,
+            &mut length,
+        );
+        CloseHandle(token);
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let sid = (*buffer.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+        Ok(std::slice::from_raw_parts(sid.cast::<u8>(), GetLengthSid(sid) as usize).to_vec())
+    }
+
+    // SAFETY: plain Win32 calls on handles owned and closed here.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let peer = user_sid(process);
+        CloseHandle(process);
+        if peer? != user_sid(GetCurrentProcess())? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "local socket is owned by another user",
+            ));
         }
     }
-
-    /// Annotate a regular capture or manual ping with the browser family that
-    /// launched the native host. This is additive, so older app/host pairs
-    /// continue to exchange the same capture payload.
-    pub fn with_browser_family(mut self, browser_family: Option<BrowserFamily>) -> Self {
-        self.browser_family = browser_family;
-        self
-    }
+    Ok(())
 }
 
 /// The app's reply, relayed by the host back to the extension.
@@ -446,6 +502,11 @@ pub enum ControlCommand {
         id: i64,
     },
     GetDownloadDetails {
+        id: i64,
+    },
+    /// Why a download is in its current state: status, error and the recorded
+    /// transitions with their causes.
+    Why {
         id: i64,
     },
     SetTorrentFiles {
@@ -721,10 +782,49 @@ mod tests {
 
     #[test]
     fn presence_request_is_distinct_from_a_regular_capture() {
-        let req = BridgeRequest::presence(BrowserFamily::Chromium);
+        let req = BridgeRequest::from(Bridge::Presence(BrowserFamily::Chromium));
         assert!(req.presence);
         assert_eq!(req.browser_family, Some(BrowserFamily::Chromium));
         assert!(!req.ping);
+    }
+
+    #[test]
+    fn bridge_kinds_round_trip_over_the_v1_wire() {
+        let wire = |message: Bridge| {
+            let bytes = serde_json::to_vec(&BridgeRequest::from(message)).unwrap();
+            Bridge::try_from(serde_json::from_slice::<BridgeRequest>(&bytes).unwrap())
+        };
+        assert!(matches!(
+            wire(Bridge::Presence(BrowserFamily::Firefox)),
+            Ok(Bridge::Presence(BrowserFamily::Firefox))
+        ));
+        assert!(matches!(wire(Bridge::Ping(None)), Ok(Bridge::Ping(None))));
+        let job = placeholder_job("https://example.org/f.iso");
+        assert!(matches!(
+            wire(Bridge::Capture(Box::new(job), Some(BrowserFamily::Chromium))),
+            Ok(Bridge::Capture(job, Some(BrowserFamily::Chromium))) if job.url == "https://example.org/f.iso"
+        ));
+    }
+
+    #[test]
+    fn meaningless_flag_combinations_are_rejected() {
+        let mut request = BridgeRequest::from(Bridge::Ping(None));
+        request.presence = true;
+        assert!(Bridge::try_from(request.clone()).is_err());
+        request.ping = false;
+        request.browser_family = None;
+        assert!(Bridge::try_from(request.clone()).is_err());
+        request.presence = false;
+        request.protocol_version = PROTOCOL_VERSION + 1;
+        assert!(Bridge::try_from(request).is_err());
+        // A capture from an older connector (no family, no flags) still works.
+        let old: BridgeRequest =
+            serde_json::from_str(r#"{"protocol_version":1,"job":{"url":"https://example.org/a"}}"#)
+                .unwrap();
+        assert!(matches!(
+            Bridge::try_from(old),
+            Ok(Bridge::Capture(_, None))
+        ));
     }
 
     #[test]

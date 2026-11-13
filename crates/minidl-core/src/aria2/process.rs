@@ -44,12 +44,25 @@ impl Default for LaunchOptions {
     }
 }
 
+/// How a launch treats aria2's session file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionMode {
+    /// Cold application start: every saved job was rewritten as paused first.
+    ColdPaused,
+    /// Crash respawn: the app-owned session is restored as it was saved.
+    Warm,
+    /// The saved session could not be prepared, so it is not restored; new
+    /// jobs are still saved to it.
+    Disabled(String),
+}
+
 /// A running aria2c child plus the connection parameters to reach it.
 pub struct Aria2Process {
     child: Child,
     pub port: u16,
     pub secret: String,
     pub session_path: PathBuf,
+    pub session_mode: SessionMode,
 }
 
 /// Bind :0, read the assigned port, drop the listener, reuse the number.
@@ -209,14 +222,24 @@ impl Aria2Process {
         }
         let session_path = opts.data_dir.join("aria2.session");
         // aria2 warns if --input-file is missing. A cold launch rewrites every
-        // saved job with pause=true; if that write fails, don't restore it.
-        let use_session = if pause_session {
-            pause_startup_session_file(&session_path).is_ok()
+        // saved job with pause=true; if that write fails, don't restore it,
+        // but keep saving so jobs added in this run still survive a restart.
+        let session_mode = if pause_session {
+            match pause_startup_session_file(&session_path) {
+                Ok(()) => SessionMode::ColdPaused,
+                Err(error) => SessionMode::Disabled(format!("{error:#}")),
+            }
         } else if !session_path.exists() {
-            std::fs::write(&session_path, b"").is_ok()
+            match std::fs::write(&session_path, b"") {
+                Ok(()) => SessionMode::Warm,
+                Err(error) => SessionMode::Disabled(error.to_string()),
+            }
         } else {
-            true
+            SessionMode::Warm
         };
+        if let SessionMode::Disabled(reason) = &session_mode {
+            eprintln!("aria2 session not restored: {reason}");
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -264,7 +287,8 @@ impl Aria2Process {
             .arg(&conf_arg)
             // Large torrent/metalink payloads arrive base64 over RPC.
             .arg("--rpc-max-request-size=32M")
-            .arg("--continue=true")
+            // No --continue: it makes aria2 append to or overwrite a same-named
+            // file that has no control file. Resume uses the control file.
             .arg("--always-resume=true")
             .arg(format!("--dir={}", opts.download_dir.display()))
             .arg(format!("--stop-with-process={}", std::process::id()))
@@ -295,12 +319,12 @@ impl Aria2Process {
             .arg(format!("--enable-dht6={dht}"))
             .arg(format!("--bt-enable-lpd={dht}"))
             .arg(format!("--enable-peer-exchange={dht}"));
-        if use_session {
-            cmd.arg(format!("--save-session={}", session_path.display()))
-                .arg("--save-session-interval=30")
-                .arg(format!("--input-file={}", session_path.display()))
-                // Retain partial-file state while a user-started transfer is active.
-                .arg("--auto-save-interval=20");
+        cmd.arg(format!("--save-session={}", session_path.display()))
+            .arg("--save-session-interval=30")
+            // Retain partial-file state while a user-started transfer is active.
+            .arg("--auto-save-interval=20");
+        if !matches!(session_mode, SessionMode::Disabled(_)) {
+            cmd.arg(format!("--input-file={}", session_path.display()));
         }
 
         // Optional Landlock confinement of the child (Linux ≥ 5.13). Off by
@@ -312,10 +336,15 @@ impl Aria2Process {
                 opts.data_dir.clone(),
                 std::path::PathBuf::from("/tmp"),
             ];
+            let mut ruleset = Some(
+                crate::aria2::sandbox::prepare(&write_dirs)
+                    .map_err(|error| anyhow!("prepare aria2 sandbox: {error}"))?,
+            );
+            // SAFETY: the closure only performs syscalls (no allocation, no
+            // locks), as required between fork and exec.
             unsafe {
                 std::os::unix::process::CommandExt::pre_exec(&mut cmd, move || {
-                    crate::aria2::sandbox::restrict(&write_dirs)
-                        .map_err(|error| std::io::Error::other(error.to_string()))
+                    crate::aria2::sandbox::enforce(ruleset.take())
                 });
             }
         }
@@ -329,6 +358,7 @@ impl Aria2Process {
             port,
             secret,
             session_path,
+            session_mode,
         })
     }
 
@@ -336,6 +366,10 @@ impl Aria2Process {
         explicit
             .clone()
             .or_else(|| crate::paths::resolve_tool("aria2c"))
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
 
     /// True once the child has exited — the watchdog's restart trigger.
@@ -410,6 +444,39 @@ mod tests {
             .to_string_lossy()
             .ends_with(".tmp")));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// An unwritable session must not silently turn persistence off: aria2
+    /// still saves the jobs of this run.
+    #[cfg(unix)]
+    #[test]
+    fn unpreparable_session_still_saves_new_jobs() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        // A directory where the session file should be makes the rewrite fail.
+        std::fs::create_dir(data.join("aria2.session")).unwrap();
+        let fake = root.path().join("aria2c");
+        std::fs::write(
+            &fake,
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/argv\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut process = Aria2Process::spawn(&LaunchOptions {
+            aria2c_path: Some(fake),
+            download_dir: root.path().join("dl"),
+            data_dir: data.clone(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(matches!(process.session_mode, SessionMode::Disabled(_)));
+        let _ = process.child.wait();
+        let argv = std::fs::read_to_string(root.path().join("argv")).unwrap();
+        assert!(argv.contains("--save-session="));
+        assert!(!argv.contains("--input-file="));
+        assert!(!argv.contains("--continue"));
     }
 
     #[test]

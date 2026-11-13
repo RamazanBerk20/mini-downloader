@@ -50,6 +50,9 @@ pub(super) async fn run_controller(launch_commands: Vec<ControlCommand>) -> Resu
             eprintln!("browser bridge registration skipped: {error}");
         }
     }
+    // The UI child's lifecycle: closed or open. "Show" (tray, --show, a
+    // forwarded link) is one event: it spawns a closed UI, and an open UI
+    // raises its own window when it sees the same event.
     let ui_running = Arc::new(AtomicBool::new(false));
     let mut control = tokio::spawn(server::serve_control(controller.clone()));
     let mut bridge = tokio::spawn(server::serve_bridge(controller.clone()));
@@ -98,6 +101,13 @@ pub(super) async fn run_controller(launch_commands: Vec<ControlCommand>) -> Resu
         rx
     };
 
+    #[cfg(target_os = "linux")]
+    controller.set_tray_available(_tray_handle.is_some());
+    #[cfg(windows)]
+    controller.set_tray_available(_tray_thread.is_some());
+    #[cfg(not(any(target_os = "linux", windows)))]
+    controller.set_tray_available(false);
+
     let mut tray_available = true;
     let mut events = controller.events().subscribe();
     loop {
@@ -105,11 +115,17 @@ pub(super) async fn run_controller(launch_commands: Vec<ControlCommand>) -> Resu
             event = events.recv() => match event {
                 Ok(event) if event.0.event == "ui:show" => spawn_ui_client(ui_running.clone()),
                 Ok(event) if event.0.event == "app:quit" => break,
+                #[cfg(target_os = "linux")]
+                Ok(event) if event.0.event == "settings:changed" => {
+                    if let Some(handle) = &_tray_handle {
+                        relabel_linux_tray(handle, &controller).await;
+                    }
+                }
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             },
             action = tray_actions.recv(), if tray_available => match action {
-                Some(TrayAction::Show) => spawn_ui_client(ui_running.clone()),
+                Some(TrayAction::Show) => { let _ = controller.execute(ControlCommand::Show).await; }
                 Some(TrayAction::PauseAll) => { let _ = controller.execute(ControlCommand::PauseAll).await; }
                 Some(TrayAction::ResumeAll) => { let _ = controller.execute(ControlCommand::ResumeAll).await; }
                 Some(TrayAction::Quit) => { let _ = controller.execute(ControlCommand::Quit).await; break; }
@@ -173,12 +189,18 @@ fn spawn_ui_client(running: Arc<AtomicBool>) {
     tokio::spawn(async move {
         let result = async {
             let executable = std::env::current_exe()?;
-            let mut child = tokio::process::Command::new(executable)
+            let mut command = tokio::process::Command::new(executable);
+            command
                 .arg("--ui-client")
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?;
+                .stderr(Stdio::null());
+            // XWayland for the window on request (winit 0.30 picks Wayland
+            // whenever WAYLAND_DISPLAY is set).
+            if std::env::var_os("MINIDL_UI_X11").is_some_and(|value| value == "1") {
+                command.env_remove("WAYLAND_DISPLAY");
+            }
+            let mut child = command.spawn()?;
             child.wait().await
         }
         .await;
@@ -192,7 +214,13 @@ fn spawn_ui_client(running: Arc<AtomicBool>) {
 fn spawn_notification_adapter(controller: Arc<Controller>) {
     tokio::spawn(async move {
         let mut events = controller.events().subscribe();
-        while let Ok(event) = events.recv().await {
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                // Missing a few notifications must not stop all later ones.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
             let locale = controller
                 .db()
                 .get_setting("locale")
@@ -224,6 +252,7 @@ fn spawn_notification_adapter(controller: Arc<Controller>) {
                 ),
                 _ => continue,
             };
+            let body = notification_text(&body);
             tokio::task::spawn_blocking(move || {
                 let _ = notify_rust::Notification::new()
                     .appname("Mini Downloader")
@@ -233,4 +262,14 @@ fn spawn_notification_adapter(controller: Arc<Controller>) {
             });
         }
     });
+}
+
+/// Notification servers that support `body-markup` interpret `<b>`, `<a>` and
+/// `<img>`; a server-chosen file name must stay plain text and must not
+/// reorder itself with bidi controls.
+pub(crate) fn notification_text(text: &str) -> String {
+    ui::state::display_safe(text)
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

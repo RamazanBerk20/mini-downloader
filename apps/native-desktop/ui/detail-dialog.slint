@@ -1,12 +1,12 @@
 import { ScrollView } from "std-widgets.slint";
-import { DetailFileRow } from "models.slint";
-import { IconButton, Theme, UiButton, UiCheckBox, UiNumberField } from "ui-kit.slint";
+import { DetailFileRow, NoticeRow } from "models.slint";
+import { IconButton, NoticeBanner, Theme, UiButton, UiCheckBox, UiNumberField } from "ui-kit.slint";
 
 export component DetailDialog inherits Rectangle {
         in property <length> available-width;
         in property <length> available-height;
         in property <[DetailFileRow]> detail-files;
-        in-out property <bool> detail-visible;
+        in property <[NoticeRow]> notices;
         in property <string> detail-url;
         in property <string> detail-dir;
         in property <string> detail-error;
@@ -41,6 +41,8 @@ export component DetailDialog inherits Rectangle {
         callback schedule-download(int, int);
         callback unschedule-download(int);
         callback remove-delete(int);
+        callback close();
+        callback dismiss-notice(int);
 
         x: (root.available-width - self.width) / 2;
         y: (root.available-height - self.height) / 2;
@@ -48,6 +50,7 @@ export component DetailDialog inherits Rectangle {
         height: min(
             root.available-height - 48px,
             344px
+                + root.notices.length * 43px
                 + (root.detail-error != "" ? 26px : 0px)
                 + (root.detail-files.length > 0 ? 104px : 0px)
                 + (root.detail-files.length > 1 ? 57px : 0px)
@@ -68,11 +71,15 @@ export component DetailDialog inherits Rectangle {
                 IconButton {
                     icon: "close";
                     label: root.label-close;
-                    clicked => {
-                        root.detail-visible = false;
-                        root.delete-confirm-id = 0;
-                    }
+                    clicked => { root.close(); }
                 }
+            }
+            for notice in root.notices: NoticeBanner {
+                height: 34px;
+                error: notice.error;
+                text: notice.text;
+                label-close: root.label-close;
+                dismiss => { root.dismiss-notice(notice.id); }
             }
 
             Rectangle {
@@ -365,8 +372,7 @@ export component DetailDialog inherits Rectangle {
                         clicked => {
                             if root.delete-confirm-id == root.detail-id {
                                 root.remove-delete(root.detail-id);
-                                root.delete-confirm-id = 0;
-                                root.detail-visible = false;
+                                root.close();
                             } else {
                                 root.delete-confirm-id = root.detail-id;
                             }

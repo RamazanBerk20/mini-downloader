@@ -5,6 +5,76 @@ use std::path::PathBuf;
 #[cfg(unix)]
 use std::io::Write as _;
 
+/// Show `file` selected in the file manager where the platform can (the
+/// freedesktop `FileManager1.ShowItems` call, `explorer /select,`), else open
+/// `dir`. Never waits for the file manager itself.
+pub async fn show_in_folder(
+    file: Option<&std::path::Path>,
+    dir: &std::path::Path,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if let Some(file) = file {
+        if show_items_over_dbus(file).await {
+            return Ok(());
+        }
+    }
+    #[cfg(windows)]
+    if let Some(file) = file {
+        use std::os::windows::process::CommandExt as _;
+        let mut command = std::process::Command::new("explorer.exe");
+        command.raw_arg(explorer_select_argument(file));
+        return command.spawn().map(drop).map_err(|error| error.to_string());
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let _ = file;
+    open::that_detached(dir).map_err(|error| error.to_string())
+}
+
+/// `dbus-send` instead of a D-Bus crate: zbus is already in the binary with
+/// the async-io runtime for the tray and AccessKit, and mixing its Tokio mode
+/// in breaks them. A missing tool or file manager falls back to the folder.
+#[cfg(target_os = "linux")]
+async fn show_items_over_dbus(file: &std::path::Path) -> bool {
+    let Some(uri) = file_uri(file) else {
+        return false;
+    };
+    let mut command = tokio::process::Command::new("dbus-send");
+    command
+        .args([
+            "--session",
+            "--print-reply",
+            "--dest=org.freedesktop.FileManager1",
+            "--type=method_call",
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1.ShowItems",
+        ])
+        .arg(format!("array:string:{uri}"))
+        .arg("string:")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), command.status()).await,
+        Ok(Ok(status)) if status.success()
+    )
+}
+
+/// A `file://` URI that `dbus-send`'s comma-separated array syntax cannot split.
+#[cfg(any(target_os = "linux", test))]
+fn file_uri(file: &std::path::Path) -> Option<String> {
+    url::Url::from_file_path(file)
+        .ok()
+        .map(|uri| uri.as_str().replace(',', "%2C"))
+}
+
+/// explorer.exe parses its own command line: the path must be quoted after
+/// the comma, which `Command::arg` quoting does not produce.
+#[cfg(any(windows, test))]
+fn explorer_select_argument(file: &std::path::Path) -> String {
+    format!("/select,\"{}\"", file.display())
+}
+
 #[cfg(unix)]
 const DESKTOP_ID: &str = "io.minidownloader.app.desktop";
 
@@ -334,6 +404,24 @@ pub fn set_magnet_handler(_enabled: bool) -> Result<(), String> {
 #[cfg(not(any(unix, windows)))]
 pub fn set_autostart(_enabled: bool) -> Result<(), String> {
     Err("unsupported platform".into())
+}
+
+#[cfg(test)]
+mod reveal_tests {
+    use super::*;
+
+    #[test]
+    fn reveal_arguments_select_the_file() {
+        assert_eq!(
+            explorer_select_argument(std::path::Path::new(r"C:\Users\a b\x,y.iso")),
+            r#"/select,"C:\Users\a b\x,y.iso""#
+        );
+        #[cfg(unix)]
+        assert_eq!(
+            file_uri(std::path::Path::new("/home/u/a b,c.iso")).as_deref(),
+            Some("file:///home/u/a%20b%2Cc.iso")
+        );
+    }
 }
 
 #[cfg(all(test, unix))]

@@ -12,6 +12,7 @@ product is; this file covers how to change it safely.
 | `crates/minidl-app` | The controller: commands (`controller/`), ingest validation (`ingest.rs`), socket servers + scheduler (`server.rs`), OS integration (`platform.rs`, `connector.rs`), updater. |
 | `crates/minidl-native-host` | Browser native-messaging bridge. Short-lived, forwards one message to the controller. |
 | `apps/native-desktop` | Binary `mini-downloader`: controller process, tray, and the disposable Slint UI child (`--ui-client`). UI markup in `ui/*.slint`. |
+| `apps/native-desktop/src/dragout` | Dragging finished files out to other apps, and Ctrl+C on native Wayland. `mod.rs` holds the tested decisions (gesture, payload, URI list); `wayland.rs` (own queue on winit's display), `x11.rs` (XDND source) and `windows.rs` (`SHDoDragDrop`) do the I/O. End-to-end: `tests/dragout_e2e.rs` (nested KWin, `--ignored`). |
 | `extension/` | Browser connector (Firefox + Chromium, MV3). Plain JS, no build step beyond `scripts/build-extension.sh`. |
 | `assets/locales/*.json` | UI strings. Every locale must have exactly the keys of `en.json`; a test enforces it. |
 
@@ -73,6 +74,25 @@ mini-downloader ctl quit
 `XDG_RUNTIME_DIR` must be short: a Unix socket path is limited to about 100
 bytes.
 
+### Drive the real UI: `ui-mcp` (development only)
+
+`ctl` drives the controller; the `ui-mcp` cargo feature lets an agent drive the
+Slint window itself through Slint's built-in MCP server (list the element
+tree, click, type, take screenshots). It is off by default, refuses to compile
+without `debug_assertions`, and listens on `127.0.0.1` only.
+
+```sh
+# in the isolated instance above; the UI child inherits the environment
+export SLINT_MCP_PORT=8765
+export SLINT_BACKEND=headless    # optional: no display needed (software renderer)
+cargo run -p minidl-native-desktop --features ui-mcp
+# MCP endpoint (Streamable HTTP): http://127.0.0.1:8765/mcp
+```
+
+Useful element ids: rows are `DownloadCard`s; their pointer handling is the
+single `card-touch` TouchArea in `ui/downloads.slint` (click selects,
+double-click opens, press-and-move starts a drag-out through `src/dragout`).
+
 ## Rules that are easy to break
 
 Security and privacy:
@@ -80,8 +100,18 @@ Security and privacy:
 - Everything from the browser or a URL is untrusted. It enters through
   `ingest::validate_capture_job`; new job fields get a length and
   control-character check there.
-- A remote filename never reaches the filesystem unreduced: `safe_out_name`
-  (aria2 `out`), `completion::downloaded_path`, `deletion_target`.
+- A remote filename never reaches the filesystem unreduced:
+  `minidl_core::files::safe_out_name` (aria2 `out`, capture names),
+  `completion::downloaded_path`, `deletion_target`.
+- aria2 writes HTTP/metalink jobs into `<dir>/.minidl-staging/<id>`; the
+  finished file is moved into place with `files::commit_staged`, which never
+  replaces an existing file. Never give aria2 `continue=true`. Every path to
+  `complete` goes through `completion::complete`; every removal path empties
+  the row's staging folder through `Controller::release_stage`. Download ids
+  are never reused (`AUTOINCREMENT`).
+- Captured cookies/headers are valid for one origin. aria2 gets them only via
+  `redirect::resolve` (redirects followed in the app), and `build_add_options`
+  sets `max-redirect=0` whenever they are present.
 - Secrets (cookies, auth headers, proxy credentials, the aria2 RPC token) go
   through 0600 files or stdin, never argv. `DownloadView` must not grow a field
   that carries them; a test checks the serialized view.
@@ -109,6 +139,11 @@ Behaviour:
 - aria2 is started lazily and stopped after 30 idle seconds. Anything that must
   outlive that (a global speed cap, for example) belongs in settings and
   `LaunchOptions`, not only in a live RPC call.
+- Download status changes go through `Db::transition` / `transition_if` /
+  `fail` with a cause; the lifecycle table `DownloadStatus::can_transition_to`
+  refuses backward moves, and every change is journaled (`ctl why '{"id":N}'`).
+- Record an aria2 job (GID made by `new_gid`, status) before calling aria2,
+  so an early completion or error always finds its row.
 - "Running" includes yt-dlp downloads, which aria2 knows nothing about. A
   queue-wide command must handle `row.is_ytdlp()` rows itself.
 - A reply on the control socket may take minutes (media probe, update

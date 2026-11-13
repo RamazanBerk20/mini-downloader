@@ -1,9 +1,9 @@
 use anyhow::Result;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
-use crate::model::{now, Download, DownloadStatus, NewDownload};
+use crate::model::{now, Download, DownloadStatus, NewDownload, Transition};
 
-use super::dedup::signed_source_base;
+use super::dedup::signed_source_path;
 use super::{duplicate_sources_match, Db, DownloadInsertResult};
 
 const COLS: &str =
@@ -11,10 +11,17 @@ const COLS: &str =
     download_speed, upload_speed, connections, num_seeders, referrer, info_hash, \
     error_code, error_message, category_id, created_at, finished_at, \
     user_agent, cookie, extra_headers, page_url, format_id, speed_limit, \
-    package_id, mime, checksum, start_at, media_opts";
+    package_id, mime, checksum, start_at, media_opts, stage_dir";
+
+/// Journal rows kept per download; older ones are pruned on every write.
+const JOURNAL_PER_DOWNLOAD: i64 = 50;
 
 fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
-    let status: String = row.get(6)?;
+    let raw_status: String = row.get(6)?;
+    // A status this build cannot read is surfaced as a failure, never treated
+    // as a restartable `queued` row.
+    let status = DownloadStatus::parse(&raw_status);
+    let error_message: Option<String> = row.get(17)?;
     Ok(Download {
         id: row.get(0)?,
         gid: row.get(1)?,
@@ -22,7 +29,7 @@ fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
         url: row.get(3)?,
         filename: row.get(4)?,
         dir: row.get(5)?,
-        status: DownloadStatus::parse(&status),
+        status: status.unwrap_or(DownloadStatus::Error),
         kind: row.get(7)?,
         total_bytes: row.get(8)?,
         completed_bytes: row.get(9)?,
@@ -33,7 +40,10 @@ fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
         referrer: row.get(14)?,
         info_hash: row.get(15)?,
         error_code: row.get(16)?,
-        error_message: row.get(17)?,
+        error_message: match status {
+            Some(_) => error_message,
+            None => Some(format!("unreadable download status {raw_status:?}")),
+        },
         category_id: row.get(18)?,
         created_at: row.get(19)?,
         finished_at: row.get(20)?,
@@ -48,6 +58,7 @@ fn row_to_download(row: &Row) -> rusqlite::Result<Download> {
         checksum: row.get(29)?,
         start_at: row.get(30)?,
         media_opts: row.get(31)?,
+        stage_dir: row.get(32)?,
     })
 }
 
@@ -98,7 +109,7 @@ impl Db {
         conn: &Connection,
         download: &NewDownload,
     ) -> Result<DownloadInsertResult> {
-        let signed_base = signed_source_base(&download.url);
+        let signed_base = signed_source_path(&download.url);
         let mut statement = conn.prepare(
             "SELECT id, url, status, dir, filename FROM downloads
              WHERE kind=?2
@@ -175,7 +186,9 @@ impl Db {
                 download.media_opts
             ],
         )?;
-        Ok(conn.last_insert_rowid())
+        let id = conn.last_insert_rowid();
+        record_transition(conn, id, None, DownloadStatus::Queued, "created", None)?;
+        Ok(id)
     }
 
     /// Persist a per-download speed cap (bytes/sec; `None` clears it).
@@ -219,21 +232,6 @@ impl Db {
         let sql = format!("SELECT {COLS} FROM downloads WHERE gid=?1");
         Ok(conn
             .query_row(&sql, params![gid], row_to_download)
-            .optional()?)
-    }
-
-    /// Match by info_hash (BitTorrent) or URL — used to rebind a moved GID.
-    pub fn find_by_infohash_or_url(
-        &self,
-        info_hash: Option<&str>,
-        url: &str,
-    ) -> Result<Option<Download>> {
-        let conn = self.lock();
-        let sql = format!(
-            "SELECT {COLS} FROM downloads WHERE (?1 IS NOT NULL AND info_hash=?1) OR url=?2 ORDER BY id DESC LIMIT 1"
-        );
-        Ok(conn
-            .query_row(&sql, params![info_hash, url], row_to_download)
             .optional()?)
     }
 
@@ -306,46 +304,98 @@ impl Db {
         Ok(rows)
     }
 
-    pub fn set_status(&self, id: i64, status: DownloadStatus) -> Result<()> {
+    /// Record where aria2 writes this job before it is moved into `dir`.
+    pub fn set_stage_dir(&self, id: i64, stage_dir: Option<&str>) -> Result<()> {
         let conn = self.lock();
-        let finished = status.is_terminal().then(now);
         conn.execute(
-            "UPDATE downloads
-             SET status=?1,
-                 finished_at=?2,
-                 cookie=CASE WHEN ?1='complete' THEN NULL ELSE cookie END,
-                 extra_headers=CASE WHEN ?1='complete' THEN NULL ELSE extra_headers END
-             WHERE id=?3",
-            params![status.as_str(), finished, id],
+            "UPDATE downloads SET stage_dir=?1 WHERE id=?2",
+            params![stage_dir, id],
         )?;
         Ok(())
     }
 
-    /// Flip status only if it actually differs; returns `true` when a row was
-    /// changed. Used as an atomic finalize gate so a completion seen by both the
-    /// WebSocket consumer and the live poller fires side effects exactly once.
-    pub fn set_status_if_changed(&self, id: i64, status: DownloadStatus) -> Result<bool> {
+    /// Move a row to `to` if the lifecycle allows it from its current status
+    /// ([`DownloadStatus::can_transition_to`]). The write is a compare-and-set
+    /// on the status that was read, clears credentials on `complete`/`removed`,
+    /// keeps `finished_at`/`start_at`/error fields consistent with the new
+    /// status, and journals `cause`. Returns `false` (and changes nothing) for
+    /// a refused or no-op transition.
+    pub fn transition(&self, id: i64, to: DownloadStatus, cause: &str) -> Result<bool> {
         let conn = self.lock();
-        let finished = status.is_terminal().then(now);
-        let changed = conn.execute(
-            "UPDATE downloads
-             SET status=?1,
-                 finished_at=?2,
-                 cookie=CASE WHEN ?1='complete' THEN NULL ELSE cookie END,
-                 extra_headers=CASE WHEN ?1='complete' THEN NULL ELSE extra_headers END
-             WHERE id=?3 AND status<>?1",
-            params![status.as_str(), finished, id],
-        )?;
-        Ok(changed > 0)
+        transition_locked(&conn, id, None, to, cause, None)
     }
 
-    pub fn set_error(&self, id: i64, code: Option<&str>, message: Option<&str>) -> Result<()> {
+    /// [`Self::transition`], but only out of one of the `from` statuses.
+    pub fn transition_if(
+        &self,
+        id: i64,
+        from: &[DownloadStatus],
+        to: DownloadStatus,
+        cause: &str,
+    ) -> Result<bool> {
         let conn = self.lock();
-        conn.execute(
-            "UPDATE downloads SET status='error', error_code=?1, error_message=?2, finished_at=?3 WHERE id=?4",
-            params![code, message, now(), id],
-        )?;
+        transition_locked(&conn, id, Some(from), to, cause, None)
+    }
+
+    /// Transition to `error`, recording the engine's code and message.
+    pub fn fail(
+        &self,
+        id: i64,
+        code: Option<&str>,
+        message: Option<&str>,
+        cause: &str,
+    ) -> Result<bool> {
+        let conn = self.lock();
+        transition_locked(
+            &conn,
+            id,
+            None,
+            DownloadStatus::Error,
+            cause,
+            Some((code, message)),
+        )
+    }
+
+    /// Journal an event that does not change the status (the status is kept as
+    /// both `from` and `to`).
+    pub fn note(&self, id: i64, cause: &str, detail: Option<&str>) -> Result<()> {
+        let conn = self.lock();
+        let Some(raw) = conn
+            .query_row(
+                "SELECT status FROM downloads WHERE id=?1",
+                params![id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        else {
+            return Ok(());
+        };
+        let status = DownloadStatus::parse(&raw).unwrap_or(DownloadStatus::Error);
+        record_transition(&conn, id, Some(status), status, cause, detail)?;
         Ok(())
+    }
+
+    /// The journal of a download, oldest first.
+    pub fn transitions(&self, id: i64) -> Result<Vec<Transition>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT at, from_status, to_status, cause, detail FROM download_events
+             WHERE download_id=?1 ORDER BY id",
+        )?;
+        let rows = statement
+            .query_map(params![id], |row| {
+                let from: Option<String> = row.get(1)?;
+                let to: String = row.get(2)?;
+                Ok(Transition {
+                    at: row.get(0)?,
+                    from: from.as_deref().and_then(DownloadStatus::parse),
+                    to: DownloadStatus::parse(&to).unwrap_or(DownloadStatus::Error),
+                    cause: row.get(3)?,
+                    detail: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     pub fn set_filename(&self, id: i64, filename: &str) -> Result<()> {
@@ -467,4 +517,90 @@ impl Db {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
+}
+
+fn record_transition(
+    conn: &Connection,
+    id: i64,
+    from: Option<DownloadStatus>,
+    to: DownloadStatus,
+    cause: &str,
+    detail: Option<&str>,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO download_events (download_id, at, from_status, to_status, cause, detail)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            id,
+            now(),
+            from.map(|status| status.as_str()),
+            to.as_str(),
+            cause,
+            detail
+        ],
+    )?;
+    conn.execute(
+        "DELETE FROM download_events WHERE download_id=?1 AND id NOT IN (
+            SELECT id FROM download_events WHERE download_id=?1 ORDER BY id DESC LIMIT ?2)",
+        params![id, JOURNAL_PER_DOWNLOAD],
+    )?;
+    Ok(())
+}
+
+fn transition_locked(
+    conn: &Connection,
+    id: i64,
+    from: Option<&[DownloadStatus]>,
+    to: DownloadStatus,
+    cause: &str,
+    error: Option<(Option<&str>, Option<&str>)>,
+) -> Result<bool> {
+    let Some(raw) = conn
+        .query_row(
+            "SELECT status FROM downloads WHERE id=?1",
+            params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+    else {
+        return Ok(false);
+    };
+    let current = DownloadStatus::parse(&raw);
+    // An unreadable status may only be replaced by an explicit restart.
+    let allowed = match current {
+        Some(current) => {
+            current.can_transition_to(to) && from.is_none_or(|from| from.contains(&current))
+        }
+        None => from.is_none() && to == DownloadStatus::Active,
+    };
+    if !allowed {
+        return Ok(false);
+    }
+    let (code, message) = error.unwrap_or((None, None));
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
+        "UPDATE downloads
+         SET status=?1,
+             finished_at=?2,
+             start_at=CASE WHEN ?1='scheduled' THEN start_at ELSE NULL END,
+             error_code=?3,
+             error_message=?4,
+             cookie=CASE WHEN ?1 IN ('complete','removed') THEN NULL ELSE cookie END,
+             extra_headers=CASE WHEN ?1 IN ('complete','removed') THEN NULL ELSE extra_headers END
+         WHERE id=?5 AND status=?6",
+        params![
+            to.as_str(),
+            to.is_terminal().then(now),
+            code,
+            message,
+            id,
+            raw
+        ],
+    )?;
+    if changed == 0 {
+        return Ok(false);
+    }
+    record_transition(&tx, id, current, to, cause, message)?;
+    tx.commit()?;
+    Ok(true)
 }

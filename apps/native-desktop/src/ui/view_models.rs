@@ -100,7 +100,9 @@ pub(super) fn system_prefers_dark() -> bool {
         }
     }
 
-    true
+    // Light is every platform's default; winit's reported theme and the
+    // system palette override this guess once the window exists.
+    false
 }
 
 pub(super) fn apply_settings(ui: &MainWindow, snapshot: &AppSnapshot) {
@@ -189,7 +191,8 @@ pub(super) fn apply_i18n(ui: &MainWindow, catalog: &locale::Catalog) {
     set!(set_label_resume, "resume");
     set!(set_label_retry, "retry");
     set!(set_label_open_file, "openFile");
-    set!(set_label_folder, "openFolder");
+    set!(set_label_folder, "showInFolder");
+    set!(set_label_probing, "probing");
     set!(set_label_details, "detailTitle");
     set!(set_label_remove, "remove");
     set!(set_label_remove_delete, "removeDelete");
@@ -314,6 +317,7 @@ pub(super) fn apply_i18n(ui: &MainWindow, catalog: &locale::Catalog) {
     set!(set_label_sc_search, "scSearch");
     set!(set_label_sc_filter, "scFilter");
     set!(set_label_sc_select_all, "scSelectAll");
+    set!(set_label_sc_copy_files, "scCopyFiles");
     set!(set_label_sc_pause_resume, "scPauseResume");
     set!(set_label_sc_remove, "scRemove");
     set!(set_label_sc_open, "scOpen");
@@ -351,24 +355,6 @@ pub(super) fn apply_i18n(ui: &MainWindow, catalog: &locale::Catalog) {
     ui.set_page_title(catalog.get("titleAll").into());
 }
 
-pub(super) fn snapshot_rows(
-    snapshot: &AppSnapshot,
-    filter: i32,
-    search: &str,
-    catalog: &locale::Catalog,
-    selection: &HashSet<i64>,
-    collapsed_packages: &HashSet<i64>,
-) -> Vec<DownloadRow> {
-    rows_from_downloads(
-        &snapshot.downloads,
-        filter,
-        search,
-        catalog,
-        selection,
-        collapsed_packages,
-    )
-}
-
 pub(super) fn update_download_model(ui: &MainWindow, rows: Vec<DownloadRow>) {
     let model = ui.get_downloads();
     let same_identity = model.row_count() == rows.len()
@@ -398,6 +384,7 @@ pub(crate) fn rows_from_downloads(
     catalog: &locale::Catalog,
     selection: &HashSet<i64>,
     collapsed_packages: &HashSet<i64>,
+    engine_restarting: bool,
 ) -> Vec<DownloadRow> {
     // Unicode-aware: file names are not ASCII in most of the ten UI languages.
     let search = search.to_lowercase();
@@ -533,6 +520,8 @@ pub(crate) fn rows_from_downloads(
                     "—".to_owned()
                 },
             );
+            let state = super::state::row_state(row, engine_restarting);
+            let actions = super::state::row_actions(state, &row.kind);
             let eta_text = estimated_time_remaining(
                 row.status,
                 row.completed_bytes,
@@ -540,25 +529,39 @@ pub(crate) fn rows_from_downloads(
                 row.download_speed,
                 catalog,
             )
+            .filter(|_| state == RowState::Downloading)
             .unwrap_or_default();
+            let file_type = super::file_types::category(row);
             Some(DownloadRow {
                 id: clamp_id(row.id),
-                name: row.filename.as_deref().unwrap_or(&row.url).into(),
+                name: super::state::display_safe(row.filename.as_deref().unwrap_or(&row.url))
+                    .into(),
                 url: row.url.as_str().into(),
                 kind: row.kind.as_str().into(),
-                status: row.status.as_str().into(),
-                status_display: status_label(row.status, catalog).into(),
+                state,
+                status_display: catalog.get(super::state::status_key(state)).into(),
                 progress,
                 progress_text: progress_text.into(),
-                speed_text: format_speed(row.download_speed).into(),
+                // A paused or stopped row keeps its last speed in the DB.
+                speed_text: if state == RowState::Downloading {
+                    format_speed(row.download_speed)
+                } else {
+                    String::new()
+                }
+                .into(),
                 eta_text: eta_text.into(),
                 meta_text: meta_text.into(),
-                running: row.status.is_running(),
-                resumable: matches!(
-                    row.status,
-                    minidl_core::model::DownloadStatus::Paused
-                        | minidl_core::model::DownloadStatus::Scheduled
-                ),
+                can_pause: actions.pause,
+                can_resume: actions.resume,
+                can_retry: actions.retry,
+                can_open: actions.open,
+                file_type: file_type.into(),
+                type_label: catalog.get(super::file_types::label_key(file_type)).into(),
+                file_count: match row.entries {
+                    Some(count) if row.is_dir && count > 99 => "99+".into(),
+                    Some(count) if row.is_dir => count.to_string().into(),
+                    _ => Default::default(),
+                },
                 selected: selection.contains(&row.id),
                 package_id: row.package_id.map(clamp_id).unwrap_or_default(),
                 package_name: row.package_name.as_deref().unwrap_or_default().into(),
@@ -783,6 +786,48 @@ pub(super) fn media_options(ui: &MainWindow) -> MediaOptions {
     }
 }
 
+pub(super) fn apply_details(ui: &MainWindow, details: &minidl_app::controller::DownloadDetails) {
+    ui.set_detail_id(details.id.clamp(0, i32::MAX as i64) as i32);
+    ui.set_detail_is_torrent(matches!(details.kind.as_str(), "torrent" | "magnet"));
+    ui.set_detail_url(details.url.as_str().into());
+    ui.set_detail_dir(details.dir.as_str().into());
+    ui.set_detail_error(display_safe(details.error_message.as_deref().unwrap_or_default()).into());
+    ui.set_detail_peer_count(details.peers.len().min(i32::MAX as usize) as i32);
+    ui.set_detail_pieces_text(
+        if details.num_pieces > 0 {
+            format!(
+                "{} × {}",
+                details.num_pieces,
+                format_bytes(details.piece_length)
+            )
+        } else {
+            String::new()
+        }
+        .into(),
+    );
+    // Keep the user's file checkboxes while only progress changes.
+    let rows = detail_file_rows(&details.files);
+    let model = ui.get_detail_files();
+    let same_files = model.row_count() == rows.len()
+        && rows.iter().enumerate().all(|(index, row)| {
+            model
+                .row_data(index)
+                .is_some_and(|old| old.index == row.index)
+        });
+    if same_files {
+        for (index, mut row) in rows.into_iter().enumerate() {
+            if let Some(old) = model.row_data(index) {
+                row.selected = old.selected;
+                if old != row {
+                    model.set_row_data(index, row);
+                }
+            }
+        }
+    } else {
+        ui.set_detail_files(ModelRc::new(VecModel::from(rows)));
+    }
+}
+
 pub(super) fn detail_file_rows(files: &[minidl_app::controller::DetailFile]) -> Vec<DetailFileRow> {
     files
         .iter()
@@ -870,23 +915,6 @@ pub(super) fn apply_connector_status(ui: &MainWindow, status: &serde_json::Value
         "chromiumConnectorInstalled",
         "chromiumProfileDetected",
     ));
-}
-
-pub(super) fn status_label(
-    status: minidl_core::model::DownloadStatus,
-    catalog: &locale::Catalog,
-) -> &str {
-    let key = match status {
-        minidl_core::model::DownloadStatus::Queued => "statusQueued",
-        minidl_core::model::DownloadStatus::Active => "statusActive",
-        minidl_core::model::DownloadStatus::Waiting => "statusWaiting",
-        minidl_core::model::DownloadStatus::Paused => "statusPaused",
-        minidl_core::model::DownloadStatus::Complete => "statusCompleted",
-        minidl_core::model::DownloadStatus::Error => "statusFailed",
-        minidl_core::model::DownloadStatus::Scheduled => "statusScheduled",
-        minidl_core::model::DownloadStatus::Removed => "remove",
-    };
-    catalog.get(key)
 }
 
 pub(crate) fn format_bytes(value: i64) -> String {

@@ -16,8 +16,10 @@ thiserror = { workspace = true }
 dirs = { workspace = true }
 getrandom = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "process"] }
-# Request/reply JSON-RPC over loopback HTTP (no TLS backend needed).
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# Request/reply JSON-RPC over loopback HTTP.
+# rustls: the redirect resolver follows a capture's https hops itself (the
+# desktop app already builds reqwest with the same backend).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Read-only WebSocket for aria2 push notifications (ws:// only, no TLS).
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
 futures-util = "0.3"
@@ -29,6 +31,8 @@ url = "2"
 # Landlock confinement for spawned engine children (opt-in, Linux only).
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
+# renameat2(RENAME_NOREPLACE) for the no-replace commit of staged downloads.
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

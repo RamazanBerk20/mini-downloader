@@ -1,11 +1,13 @@
 import { ComboBox, ScrollView } from "std-widgets.slint";
-import { LinkChoice, MediaChoice } from "models.slint";
-import { IconButton, Theme, UiButton, UiCheckBox, UiField, UiTextArea } from "ui-kit.slint";
+import { LinkChoice, MediaChoice, NoticeRow } from "models.slint";
+import { IconButton, NoticeBanner, Theme, UiButton, UiCheckBox, UiField, UiTextArea } from "ui-kit.slint";
 
 export component LinkDialog inherits Rectangle {
         in property <length> available-width;
         in property <length> available-height;
         in property <[LinkChoice]> grabbed-links;
+        in property <[NoticeRow]> notices;
+        in property <bool> busy;
         in-out property <string> link-text;
         in-out property <string> link-package;
         in property <string> label-link-title;
@@ -22,6 +24,7 @@ export component LinkDialog inherits Rectangle {
         callback select-grabbed(bool);
         callback toggle-grabbed(int, bool);
         callback add-grabbed();
+        callback dismiss-notice(int);
         x: (root.available-width - self.width) / 2;
         y: (root.available-height - self.height) / 2;
         width: min(560px, root.available-width - 48px);
@@ -39,7 +42,14 @@ export component LinkDialog inherits Rectangle {
             }
             Text { text: root.label-link-help; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
             UiTextArea { text <=> root.link-text; placeholder: root.label-link-placeholder; height: 130px; }
-            UiButton { text: root.label-extract-links; icon: "link"; primary: true; clicked => { root.grab-links(root.link-text); } }
+            UiButton { text: root.label-extract-links; icon: "link"; primary: true; enabled: !root.busy; clicked => { root.grab-links(root.link-text); } }
+            for notice in root.notices: NoticeBanner {
+                height: 34px;
+                error: notice.error;
+                text: notice.text;
+                label-close: root.label-close;
+                dismiss => { root.dismiss-notice(notice.id); }
+            }
             if root.grabbed-links.length > 0: HorizontalLayout {
                 UiField { text <=> root.link-package; placeholder: root.label-package-name; horizontal-stretch: 1; }
                 UiButton { text: root.label-select-all; ghost: true; clicked => { root.select-grabbed(true); } }
@@ -72,6 +82,13 @@ export component MediaDialog inherits Rectangle {
         in property <length> available-width;
         in property <length> available-height;
         in property <[MediaChoice]> media-choices;
+        in property <[NoticeRow]> notices;
+        // Probing: the Probe and Add actions wait. `loaded-url` is the URL the
+        // choices on screen belong to; they are addable only while it is
+        // still the URL in the field.
+        in property <bool> busy;
+        in property <string> loaded-url;
+        in property <string> label-probing;
         in-out property <string> media-url;
         in-out property <string> media-title;
         in-out property <string> media-entries-text;
@@ -106,6 +123,8 @@ export component MediaDialog inherits Rectangle {
         callback toggle-media-choice(int, bool);
         callback add-media-choice(string, string);
         callback add-playlist();
+        callback dismiss-notice(int);
+        private property <bool> addable: !root.busy && root.loaded-url != "" && root.loaded-url == root.media-url;
         x: (root.available-width - self.width) / 2;
         y: (root.available-height - self.height) / 2;
         width: min(640px, root.available-width - 48px);
@@ -125,8 +144,8 @@ export component MediaDialog inherits Rectangle {
             HorizontalLayout {
                 spacing: 8px;
                 UiField { text <=> root.media-url; placeholder: root.label-media-placeholder; horizontal-stretch: 1; }
-                UiButton { text: root.label-probe; clicked => { root.probe-media(root.media-url, root.media-probe-playlist); } }
-                UiButton { text: root.label-best-quality; primary: true; clicked => { root.add-media(root.media-url); } }
+                UiButton { text: root.busy ? root.label-probing : root.label-probe; enabled: !root.busy && root.media-url != ""; clicked => { root.probe-media(root.media-url, root.media-probe-playlist); } }
+                UiButton { text: root.label-best-quality; primary: true; enabled: root.media-url != ""; clicked => { root.add-media(root.media-url); } }
             }
             HorizontalLayout {
                 spacing: 12px;
@@ -141,6 +160,13 @@ export component MediaDialog inherits Rectangle {
                 if root.media-subtitles: UiField { text <=> root.media-sub-langs; placeholder: "en,tr"; width: 100px; }
                 if root.media-subtitles: UiCheckBox { text: root.label-embed-subtitles; checked <=> root.media-embed-subtitles; }
                 if root.media-audio-only: ComboBox { model: ["mp3", "m4a", "opus"]; current-value <=> root.media-audio-format; }
+            }
+            for notice in root.notices: NoticeBanner {
+                height: 34px;
+                error: notice.error;
+                text: notice.text;
+                label-close: root.label-close;
+                dismiss => { root.dismiss-notice(notice.id); }
             }
             if root.media-title != "": Text { text: root.media-title; color: Theme.strong; font-size: 14px; font-weight: 600; overflow: elide; }
             if root.media-is-playlist: HorizontalLayout {
@@ -163,12 +189,12 @@ export component MediaDialog inherits Rectangle {
                             spacing: 8px;
                             if choice.playlist: UiCheckBox { checked: choice.selected; toggled(value) => { root.toggle-media-choice(index, value); } }
                             Text { text: choice.label; color: Theme.text; font-size: 11px; horizontal-stretch: 1; overflow: elide; }
-                            if !choice.playlist: UiButton { text: root.label-add; clicked => { root.add-media-choice(choice.url, choice.format-id); } }
+                            if !choice.playlist: UiButton { text: root.label-add; enabled: root.addable; clicked => { root.add-media-choice(choice.url, choice.format-id); } }
                         }
                     }
                 }
             }
-            if root.media-is-playlist: UiButton { text: root.label-add-playlist; icon: "add"; primary: true; clicked => { root.add-playlist(); } }
+            if root.media-is-playlist: UiButton { text: root.label-add-playlist; icon: "add"; primary: true; enabled: root.addable; clicked => { root.add-playlist(); } }
         }
     }
 export component ShortcutsDialog inherits Rectangle {
@@ -180,6 +206,7 @@ export component ShortcutsDialog inherits Rectangle {
         in property <string> label-sc-search;
         in property <string> label-sc-filter;
         in property <string> label-sc-select-all;
+        in property <string> label-sc-copy-files;
         in property <string> label-sc-pause-resume;
         in property <string> label-sc-remove;
         in property <string> label-sc-open;
@@ -188,7 +215,7 @@ export component ShortcutsDialog inherits Rectangle {
         x: (root.available-width - self.width) / 2;
         y: (root.available-height - self.height) / 2;
         width: min(430px, root.available-width - 48px);
-        height: min(430px, root.available-height - 48px);
+        height: min(480px, root.available-height - 48px);
         background: Theme.surface;
         border-color: Theme.border;
         border-width: 1px;
@@ -208,6 +235,8 @@ export component ShortcutsDialog inherits Rectangle {
             Text { text: root.label-sc-filter; color: Theme.muted; font-size: 12px; }
             Text { text: "Ctrl + A"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
             Text { text: root.label-sc-select-all; color: Theme.muted; font-size: 12px; }
+            Text { text: "Ctrl + C"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
+            Text { text: root.label-sc-copy-files; color: Theme.muted; font-size: 12px; }
             Text { text: "Space"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }
             Text { text: root.label-sc-pause-resume; color: Theme.muted; font-size: 12px; }
             Text { text: "Delete · Enter · Esc"; color: Theme.strong; font-family: "Noto Sans Mono"; font-size: 12px; }

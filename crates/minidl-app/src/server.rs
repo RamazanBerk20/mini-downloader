@@ -9,7 +9,7 @@ use chrono::{Datelike, TimeZone, Timelike};
 use interprocess::local_socket::tokio::{prelude::*, Stream};
 use interprocess::local_socket::ListenerOptions;
 use minidl_ipc::{
-    self, BridgeReply, BridgeRequest, ControlCommand, ControlReply, ControlRequest,
+    self, Bridge, BridgeReply, BridgeRequest, ControlCommand, ControlReply, ControlRequest,
     CONTROL_PROTOCOL_VERSION,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -246,55 +246,52 @@ async fn handle_bridge(mut stream: Stream, context: BridgeContext) {
         .ok()
         .and_then(|bytes| serde_json::from_slice::<BridgeRequest>(&bytes).ok())
     {
-        Some(request) if request.protocol_version == minidl_ipc::PROTOCOL_VERSION => {
+        Some(request) => {
             if let Some(family) = request.browser_family {
                 context.controller.record_connector_presence(family);
             }
-            if request.presence {
-                if request.browser_family.is_some() {
-                    BridgeReply::acknowledged()
-                } else {
-                    BridgeReply::rejected("connector presence missing browser family")
-                }
-            } else if request.ping {
-                BridgeReply {
+            match Bridge::try_from(request) {
+                Err(reason) => BridgeReply::rejected(reason),
+                Ok(Bridge::Presence(_)) => BridgeReply::acknowledged(),
+                Ok(Bridge::Ping(_)) => BridgeReply {
                     ok: true,
                     job_id: None,
                     error: Some(format!(
                         "Mini Downloader (protocol {})",
                         minidl_ipc::PROTOCOL_VERSION
                     )),
-                }
-            } else {
-                let batch_id = request.job.batch_id.clone();
-                let batch = batch_package(&context, &request.job);
-                match context
-                    .controller
-                    .ingest_capture(request.job, batch.map(|(id, _)| id))
-                    .await
-                {
-                    Ok(id) => {
-                        context
-                            .controller
-                            .events()
-                            .emit("ui:show", serde_json::json!({}));
-                        BridgeReply::accepted(id)
-                    }
-                    Err(error) => {
-                        if let (Some((package, true)), Some(batch_id)) = (batch, batch_id) {
-                            let _ = context.controller.db().delete_package_if_empty(package);
+                },
+                Ok(Bridge::Capture(job, _)) => {
+                    let job = *job;
+                    let batch_id = job.batch_id.clone();
+                    let batch = batch_package(&context, &job);
+                    match context
+                        .controller
+                        .ingest_capture(job, batch.map(|(id, _)| id))
+                        .await
+                    {
+                        Ok(id) => {
                             context
-                                .batches
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .remove(&batch_id);
+                                .controller
+                                .events()
+                                .emit("ui:show", serde_json::json!({}));
+                            BridgeReply::accepted(id)
                         }
-                        BridgeReply::rejected(error.message)
+                        Err(error) => {
+                            if let (Some((package, true)), Some(batch_id)) = (batch, batch_id) {
+                                let _ = context.controller.db().delete_package_if_empty(package);
+                                context
+                                    .batches
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .remove(&batch_id);
+                            }
+                            BridgeReply::rejected(error.message)
+                        }
                     }
                 }
             }
         }
-        Some(_) => BridgeReply::rejected("unsupported protocol version"),
         None => BridgeReply::rejected("malformed bridge request"),
     };
     let _ = write_frame_timed(&mut stream, &reply).await;
@@ -380,10 +377,19 @@ fn schedule_matches(schedule: &minidl_core::model::Schedule, weekday: u32, minut
 /// elapsed wall-clock minute thereafter. Iterating UTC instants gives correct
 /// local dates across midnight/DST; the local-minute key prevents a fall-back
 /// hour from firing the same rule twice.
+const SCHEDULED_START_ATTEMPTS: u32 = 6;
+
+/// One minute, doubling per failure, capped at an hour.
+fn scheduled_retry_delay(failures: u32) -> i64 {
+    (60_i64 << failures.saturating_sub(1).min(6)).min(3_600)
+}
+
 pub async fn run_scheduler(controller: Arc<Controller>) {
     let mut events = controller.events().subscribe();
     let mut last_utc_minute = None;
     let mut fired = HashSet::<(i64, chrono::NaiveDate, i64)>::new();
+    // Failed scheduled starts per row: backs the retry off and notifies once.
+    let mut start_failures = HashMap::<i64, u32>::new();
     loop {
         let now = chrono::Local::now();
         let now_epoch = now.timestamp();
@@ -425,26 +431,51 @@ pub async fn run_scheduler(controller: Arc<Controller>) {
             .due_scheduled(minidl_core::model::now())
             .unwrap_or_default()
         {
-            if let Err(error) = controller
+            match controller
                 .execute(ControlCommand::Resume { id: row.id })
                 .await
             {
-                let retry_at = minidl_core::model::now().saturating_add(60);
-                let _ = controller
-                    .db()
-                    .set_status(row.id, minidl_core::model::DownloadStatus::Scheduled);
-                let _ = controller.db().set_start_at(row.id, Some(retry_at));
-                controller.events().emit(
-                    "downloads:error",
-                    serde_json::json!({"id": row.id, "message": error.message}),
-                );
-                controller.events().emit(
-                    "downloads:state",
-                    serde_json::json!({"id": row.id, "status": "scheduled"}),
-                );
-                controller
-                    .events()
-                    .emit("scheduler:changed", serde_json::json!({}));
+                Ok(_) => {
+                    start_failures.remove(&row.id);
+                }
+                Err(error) => {
+                    let failures = start_failures.entry(row.id).or_insert(0);
+                    *failures += 1;
+                    let status = if *failures >= SCHEDULED_START_ATTEMPTS {
+                        let _ = controller.db().fail(
+                            row.id,
+                            None,
+                            Some(&error.message),
+                            "scheduler: start failed repeatedly, gave up",
+                        );
+                        start_failures.remove(&row.id);
+                        "error"
+                    } else {
+                        let retry_at = minidl_core::model::now()
+                            .saturating_add(scheduled_retry_delay(*failures));
+                        let _ = controller.db().transition(
+                            row.id,
+                            minidl_core::model::DownloadStatus::Scheduled,
+                            "scheduler: start failed, retrying later",
+                        );
+                        let _ = controller.db().set_start_at(row.id, Some(retry_at));
+                        "scheduled"
+                    };
+                    // One notification for the first failure and one when giving up.
+                    if status == "error" || start_failures.get(&row.id) == Some(&1) {
+                        controller.events().emit(
+                            "downloads:error",
+                            serde_json::json!({"id": row.id, "message": error.message}),
+                        );
+                    }
+                    controller.events().emit(
+                        "downloads:state",
+                        serde_json::json!({"id": row.id, "status": status}),
+                    );
+                    controller
+                        .events()
+                        .emit("scheduler:changed", serde_json::json!({}));
+                }
             }
         }
 
@@ -463,12 +494,18 @@ pub async fn run_scheduler(controller: Arc<Controller>) {
                 .unwrap_or(until_minute)
                 .max(1),
         );
-        tokio::select! {
-            _ = tokio::time::sleep(delay) => {}
-            event = events.recv() => match event {
-                Ok(event) if event.0.event == "scheduler:changed" => {}
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+        // Only the timer or a schedule change warrants a new pass; progress
+        // ticks arrive twice a second and must not re-run every query.
+        let sleep = tokio::time::sleep(delay);
+        tokio::pin!(sleep);
+        loop {
+            tokio::select! {
+                _ = &mut sleep => break,
+                event = events.recv() => match event {
+                    Ok(event) if event.0.event == "scheduler:changed" => break,
+                    Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
             }
         }
         if controller.should_quit() {
@@ -482,7 +519,12 @@ pub fn run_clipboard_watcher(controller: Arc<Controller>) {
     launch_clipboard_worker(controller.clone(), running.clone());
     tokio::spawn(async move {
         let mut events = controller.events().subscribe();
-        while let Ok(event) = events.recv().await {
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            };
             if event.0.event == "settings:clipboard" && controller.clipboard_enabled() {
                 launch_clipboard_worker(controller.clone(), running.clone());
             }
@@ -526,6 +568,21 @@ fn launch_clipboard_worker(controller: Arc<Controller>, running: Arc<AtomicBool>
     });
 }
 
+/// Connect to the controller; on Windows only to one running as this user
+/// (pipe names are machine-global, see `minidl_ipc::ensure_same_user`).
+async fn connect_control() -> std::io::Result<Stream> {
+    let stream = Stream::connect(minidl_ipc::control_socket_name()?).await?;
+    #[cfg(windows)]
+    {
+        let pid = stream
+            .peer_creds()?
+            .pid()
+            .ok_or_else(|| std::io::Error::other("controller pid unavailable"))?;
+        minidl_ipc::ensure_same_user(pid)?;
+    }
+    Ok(stream)
+}
+
 pub struct ControlClient {
     counter: std::sync::atomic::AtomicU64,
 }
@@ -535,7 +592,7 @@ impl ControlClient {
         // Probe eagerly so callers learn that the controller is unavailable at
         // connect time. Requests use independent streams to avoid a long media
         // probe serializing every unrelated UI action behind one mutex.
-        let _probe = Stream::connect(minidl_ipc::control_socket_name()?).await?;
+        let _probe = connect_control().await?;
         Ok(Arc::new(Self {
             counter: std::sync::atomic::AtomicU64::new(1),
         }))
@@ -544,10 +601,7 @@ impl ControlClient {
     pub async fn request(&self, command: ControlCommand) -> Result<serde_json::Value, String> {
         let request_id = self.counter.fetch_add(1, Ordering::Relaxed);
         let request = ControlRequest::new(request_id, command);
-        let mut stream =
-            Stream::connect(minidl_ipc::control_socket_name().map_err(|error| error.to_string())?)
-                .await
-                .map_err(|error| error.to_string())?;
+        let mut stream = connect_control().await.map_err(|error| error.to_string())?;
         write_frame_timed(&mut stream, &request)
             .await
             .map_err(|error| error.to_string())?;
@@ -568,10 +622,7 @@ impl ControlClient {
     pub async fn subscribe(
         mut on_event: impl FnMut(minidl_ipc::ControlEvent) + Send + 'static,
     ) -> Result<(), String> {
-        let mut stream =
-            Stream::connect(minidl_ipc::control_socket_name().map_err(|e| e.to_string())?)
-                .await
-                .map_err(|e| e.to_string())?;
+        let mut stream = connect_control().await.map_err(|e| e.to_string())?;
         write_frame_timed(
             &mut stream,
             &ControlRequest::new(1, ControlCommand::Subscribe),
@@ -604,6 +655,14 @@ pub async fn send_one(command: ControlCommand) -> Result<serde_json::Value, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scheduled_start_retries_back_off_to_an_hour() {
+        assert_eq!(scheduled_retry_delay(1), 60);
+        assert_eq!(scheduled_retry_delay(2), 120);
+        assert_eq!(scheduled_retry_delay(5), 960);
+        assert_eq!(scheduled_retry_delay(9), 3_600);
+    }
 
     #[test]
     fn frame_limit_rejects_zero_and_oversize() {

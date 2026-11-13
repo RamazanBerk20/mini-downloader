@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -7,11 +8,45 @@ use tokio::sync::oneshot;
 pub struct LoopbackHttp {
     pub url: String,
     pub payload: Arc<Vec<u8>>,
+    /// Every request head received, in order (lowercase header names kept as sent).
+    pub requests: Arc<Mutex<Vec<String>>>,
     stop: Option<oneshot::Sender<()>>,
 }
 
+#[derive(Clone)]
+enum Mode {
+    /// Serve the payload, pausing between 16 KiB chunks when a delay is set.
+    File(Option<Duration>),
+    /// Answer every request with `302 Found` to this URL.
+    Redirect(String),
+}
+
+#[allow(dead_code)]
 impl LoopbackHttp {
     pub async fn start(size: usize) -> Self {
+        Self::spawn(size, Mode::File(None)).await
+    }
+
+    /// A fixture slow enough to interrupt mid-transfer.
+    pub async fn start_slow(size: usize, chunk_delay: Duration) -> Self {
+        Self::spawn(size, Mode::File(Some(chunk_delay))).await
+    }
+
+    /// A fixture that redirects every request to `target`.
+    pub async fn redirect_to(target: &str) -> Self {
+        Self::spawn(0, Mode::Redirect(target.to_owned())).await
+    }
+
+    /// Whether any recorded request carried header `name` (case-insensitive).
+    pub fn saw_header(&self, name: &str) -> bool {
+        let prefix = format!("{}:", name.to_ascii_lowercase());
+        self.requests.lock().unwrap().iter().any(|head| {
+            head.lines()
+                .any(|line| line.to_ascii_lowercase().starts_with(&prefix))
+        })
+    }
+
+    async fn spawn(size: usize, mode: Mode) -> Self {
         let payload = Arc::new(
             (0..size)
                 .map(|index| ((index * 31 + 17) % 251) as u8)
@@ -23,6 +58,8 @@ impl LoopbackHttp {
         let address = listener.local_addr().expect("loopback fixture address");
         let (stop, mut stopped) = oneshot::channel();
         let served_payload = payload.clone();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = requests.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -30,7 +67,8 @@ impl LoopbackHttp {
                     accepted = listener.accept() => {
                         let Ok((socket, _)) = accepted else { break };
                         let payload = served_payload.clone();
-                        tokio::spawn(async move { serve(socket, payload).await });
+                        let (mode, recorded) = (mode.clone(), recorded.clone());
+                        tokio::spawn(async move { serve(socket, payload, mode, recorded).await });
                     }
                 }
             }
@@ -38,6 +76,7 @@ impl LoopbackHttp {
         Self {
             url: format!("http://{address}/fixture.bin"),
             payload,
+            requests,
             stop: Some(stop),
         }
     }
@@ -49,7 +88,12 @@ impl LoopbackHttp {
     }
 }
 
-async fn serve(mut socket: tokio::net::TcpStream, payload: Arc<Vec<u8>>) {
+async fn serve(
+    mut socket: tokio::net::TcpStream,
+    payload: Arc<Vec<u8>>,
+    mode: Mode,
+    recorded: Arc<Mutex<Vec<String>>>,
+) {
     let mut request = Vec::with_capacity(1_024);
     let mut chunk = [0_u8; 1_024];
     while request.len() < 64 * 1_024 {
@@ -66,6 +110,17 @@ async fn serve(mut socket: tokio::net::TcpStream, payload: Arc<Vec<u8>>) {
     }
 
     let request_text = String::from_utf8_lossy(&request);
+    recorded.lock().unwrap().push(request_text.to_string());
+    let chunk_delay = match mode {
+        Mode::Redirect(target) => {
+            let reply = format!(
+                "HTTP/1.1 302 Found\r\nLocation: {target}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            let _ = socket.write_all(reply.as_bytes()).await;
+            return;
+        }
+        Mode::File(delay) => delay,
+    };
     let head_only = request_text.starts_with("HEAD ");
     let range = request_text.lines().find_map(|line| {
         line.to_ascii_lowercase()
@@ -98,7 +153,14 @@ async fn serve(mut socket: tokio::net::TcpStream, payload: Arc<Vec<u8>>) {
         return;
     }
     if !head_only && !payload.is_empty() {
-        let _ = socket.write_all(&payload[start..=end]).await;
+        for chunk in payload[start..=end].chunks(16 * 1_024) {
+            if socket.write_all(chunk).await.is_err() {
+                return;
+            }
+            if let Some(delay) = chunk_delay {
+                tokio::time::sleep(delay).await;
+            }
+        }
     }
 }
 

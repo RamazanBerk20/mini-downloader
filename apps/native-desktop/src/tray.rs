@@ -78,6 +78,13 @@ impl ksni::Tray for LinuxTray {
     }
 }
 
+/// Rebuild the menu in the current language after a settings change.
+#[cfg(target_os = "linux")]
+pub(super) async fn relabel_linux_tray(handle: &ksni::Handle<LinuxTray>, controller: &Controller) {
+    let labels = TrayLabels::from_controller(controller);
+    handle.update(move |tray| tray.labels = labels).await;
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) fn canonical_linux_tray_icon() -> ksni::Icon {
     ksni::Icon {

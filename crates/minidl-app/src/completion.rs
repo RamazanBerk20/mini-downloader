@@ -50,21 +50,196 @@ pub fn downloaded_path(row: &Download) -> Option<PathBuf> {
     if filename_path.file_name()? != filename_path.as_os_str() {
         return None;
     }
-    let path = Path::new(&row.dir).join(filename_path);
+    // A finished file whose move into place failed is still in staging.
+    let home = row.stage_dir.as_deref().unwrap_or(&row.dir);
+    let path = Path::new(home).join(filename_path);
     path.exists().then_some(path)
 }
 
-fn safe_filename(filename: &str) -> Option<String> {
-    let name = filename.rsplit(['/', '\\']).next().unwrap_or("").trim();
-    (!name.is_empty() && name != "." && name != "..").then(|| name.to_owned())
+/// Where a staged item sits inside its staging folder, from aria2's reported
+/// path (a metalink file may be `sub/file`). Falls back to the bare name.
+fn staged_relative(stage: &str, status: &Value) -> Option<PathBuf> {
+    let path = status
+        .get("files")
+        .and_then(Value::as_array)
+        .and_then(|files| files.first())
+        .and_then(|file| file.get("path"))
+        .and_then(Value::as_str)?;
+    Path::new(path)
+        .strip_prefix(stage)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(Path::to_path_buf)
 }
 
-fn collision_name(filename: &str, suffix: u32) -> String {
-    match filename.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
-            format!("{stem} ({suffix}).{extension}")
+fn duplicate_prevention(db: &Db) -> bool {
+    db.get_setting("prevent_duplicate_downloads")
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some("false")
+}
+
+/// Outcome of [`complete`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum Completion {
+    /// A metadata job (magnet, remote torrent) finished; the row now follows
+    /// its content job with this GID.
+    Followed(String),
+    /// The row became complete now: final folder, name, and why the file
+    /// could not be moved into place, if it could not.
+    Finished {
+        directory: String,
+        filename: String,
+        problem: Option<String>,
+    },
+    /// Duplicate prevention is on and the name is taken: the row failed.
+    Refused(String),
+    /// Another handler (WebSocket event vs poller vs reconcile) got here first.
+    AlreadyDone,
+}
+
+/// The one path to `complete` for an aria2 row, used by the live handler and
+/// by reconcile: gate on the transition, move a staged file into place, sort
+/// it into its category, record its origin.
+pub fn complete(db: &Db, row: &Download, status: &Value, cause: &str) -> Completion {
+    if let Some(child) = first_followed_by(status) {
+        let _ = db.set_gid(row.id, &child);
+        if let Some(info_hash) = status
+            .get("infoHash")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+        {
+            let _ = db.set_info_hash(row.id, info_hash);
         }
-        _ => format!("{filename} ({suffix})"),
+        let _ = db.note(
+            row.id,
+            "aria2: metadata done, following content job",
+            Some(&child),
+        );
+        return Completion::Followed(child);
+    }
+    let reported = basename(status);
+    let filename = if reported.is_empty() {
+        row.filename.clone().unwrap_or_default()
+    } else {
+        reported
+    };
+    let relative = row
+        .stage_dir
+        .as_deref()
+        .and_then(|stage| staged_relative(stage, status))
+        .unwrap_or_else(|| PathBuf::from(&filename));
+    let dedupe = duplicate_prevention(db);
+    if row.stage_dir.is_some() && dedupe {
+        let taken = relative
+            .iter()
+            .map(|part| safe_filename(&part.to_string_lossy()))
+            .collect::<Option<PathBuf>>()
+            .map(|reduced| Path::new(&row.dir).join(reduced))
+            .filter(|target| target.exists());
+        if let Some(target) = taken {
+            let message = format!(
+                "{} already exists and duplicate prevention is on; the download was kept in its staging folder",
+                target.display()
+            );
+            return if db
+                .fail(
+                    row.id,
+                    None,
+                    Some(&message),
+                    "commit: name taken, duplicate prevention",
+                )
+                .unwrap_or(false)
+            {
+                Completion::Refused(message)
+            } else {
+                Completion::AlreadyDone
+            };
+        }
+    }
+    if !db
+        .transition(row.id, DownloadStatus::Complete, cause)
+        .unwrap_or(false)
+    {
+        return Completion::AlreadyDone;
+    }
+    let (directory, filename, problem) = match commit(db, row, &relative, !dedupe) {
+        Ok((directory, filename)) => {
+            let mut placed = row.clone();
+            placed.dir = directory;
+            let (directory, filename) = organize(db, &placed, &filename);
+            (directory, filename, None)
+        }
+        Err((directory, message)) => (directory, filename, Some(message)),
+    };
+    if !filename.is_empty() && row.filename.as_deref() != Some(filename.as_str()) {
+        let _ = db.set_filename(row.id, &filename);
+    }
+    let path = Path::new(&directory).join(&filename);
+    set_origin(&path, &row.url, row.referrer.as_deref());
+    Completion::Finished {
+        directory,
+        filename,
+        problem,
+    }
+}
+
+use minidl_core::files::{collision_name, safe_out_name as safe_filename};
+
+/// Move a staged download (`row.stage_dir`) into `row.dir` without replacing
+/// anything and return its final folder and name. Rows without a staging
+/// folder (yt-dlp, BitTorrent, rows from before staging) already sit in
+/// `row.dir`. On failure the file stays in staging, the row keeps its
+/// destination and its `stage_dir` (where [`downloaded_path`] then finds the
+/// file), and the error names the staging folder and the reason.
+fn commit(
+    db: &Db,
+    row: &Download,
+    relative: &Path,
+    allow_rename: bool,
+) -> Result<(String, String), (String, String)> {
+    let Some(stage) = row.stage_dir.as_deref() else {
+        let name = relative.to_string_lossy().into_owned();
+        return Ok((row.dir.clone(), name));
+    };
+    match minidl_core::files::commit_staged_path(
+        Path::new(stage),
+        relative,
+        Path::new(&row.dir),
+        allow_rename,
+    ) {
+        Ok((path, name)) => {
+            let directory = path.parent().map_or_else(
+                || row.dir.clone(),
+                |parent| parent.to_string_lossy().into_owned(),
+            );
+            let _ = db.set_file_location(row.id, &name, &directory, row.category_id);
+            let _ = db.set_stage_dir(row.id, None);
+            if relative
+                .file_name()
+                .is_some_and(|wanted| wanted != name.as_str())
+            {
+                let _ = db.note(
+                    row.id,
+                    "commit: name taken, saved under a new name",
+                    Some(&name),
+                );
+            }
+            Ok((directory, name))
+        }
+        Err(error) => {
+            let message = format!("could not move the finished file into place: {error}");
+            if let Some(name) = relative.file_name() {
+                let _ = db.set_filename(row.id, &name.to_string_lossy());
+            }
+            let _ = db.note(
+                row.id,
+                "commit failed, file left in staging",
+                Some(&message),
+            );
+            Err((stage.to_owned(), message))
+        }
     }
 }
 
@@ -268,6 +443,7 @@ mod tests {
             checksum: None,
             start_at: None,
             media_opts: None,
+            stage_dir: None,
         };
 
         assert_eq!(downloaded_path(&row).as_deref(), Some(file.as_path()));

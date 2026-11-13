@@ -42,8 +42,11 @@ impl DownloadStatus {
         }
     }
 
-    pub fn parse(s: &str) -> Self {
-        match s {
+    /// `None` for a value this build does not know (a corrupt or newer row).
+    /// Callers surface it instead of treating it as restartable `Queued`.
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "queued" => Self::Queued,
             "active" => Self::Active,
             "waiting" => Self::Waiting,
             "paused" => Self::Paused,
@@ -51,7 +54,31 @@ impl DownloadStatus {
             "error" => Self::Error,
             "removed" => Self::Removed,
             "scheduled" => Self::Scheduled,
-            _ => Self::Queued,
+            _ => return None,
+        })
+    }
+
+    /// The download lifecycle. Every status write goes through
+    /// [`crate::db::Db::transition`], which refuses an edge this table does
+    /// not allow, so a late or duplicate engine event cannot move a row
+    /// backwards (for example `complete` → `active`, or `complete` → `error`).
+    ///
+    /// ```text
+    /// queued ──► active ⇄ waiting ⇄ paused ──► complete | error | removed
+    ///   │          ▲  └────────► scheduled ◄────┘          │
+    ///   └──────────┴──────── user retry / resume ◄─────────┘
+    /// ```
+    pub fn can_transition_to(self, next: Self) -> bool {
+        use DownloadStatus::*;
+        match (self, next) {
+            (from, to) if from == to => false,
+            // Nothing ever returns to `queued`: it means "not yet handed to an engine".
+            (_, Queued) => false,
+            (Queued | Active | Waiting | Paused | Scheduled, _) => true,
+            // Terminal rows restart only through an explicit retry/resume, which
+            // makes them active (or scheduled/removed by the user).
+            (Complete | Error | Removed, Active | Scheduled | Removed) => true,
+            (Complete | Error | Removed, _) => false,
         }
     }
 
@@ -135,6 +162,10 @@ pub struct Download {
     /// JSON-encoded yt-dlp media options (subs/audio-extract/thumbnail),
     /// replayed on resume/retry.
     pub media_opts: Option<String>,
+    /// Private staging directory aria2 writes into (a hidden subfolder of
+    /// `dir`); the finished file is moved into `dir` without replacing
+    /// anything. `None` for yt-dlp rows and rows created before staging.
+    pub stage_dir: Option<String>,
 }
 
 impl Download {
@@ -164,6 +195,73 @@ pub struct NewDownload {
     pub mime: Option<String>,
     pub checksum: Option<String>,
     pub media_opts: Option<String>,
+}
+
+/// One recorded status change of a download: what it was, what it became, and
+/// why. Read back by `ctl why`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Transition {
+    pub at: i64,
+    pub from: Option<DownloadStatus>,
+    pub to: DownloadStatus,
+    pub cause: String,
+    pub detail: Option<String>,
+}
+
+fn ago(at: i64, now: i64) -> String {
+    let seconds = (now - at).max(0);
+    match seconds {
+        0..=89 => format!("{seconds}s ago"),
+        90..=5399 => format!("{}m ago", seconds / 60),
+        5400..=172_799 => format!("{}h ago", seconds / 3600),
+        _ => format!("{}d ago", seconds / 86_400),
+    }
+}
+
+/// Plain-text answer to "why is this download in its current state?" from
+/// the row and its journal ([`crate::db::Db::transitions`]).
+pub fn explain(row: &Download, journal: &[Transition], now: i64) -> String {
+    let mut text = format!("#{} is {}", row.id, row.status.as_str());
+    match journal
+        .iter()
+        .rev()
+        .find(|entry| entry.to == row.status && entry.from != Some(entry.to))
+    {
+        Some(entry) => {
+            text.push_str(&format!(" since {}: {}", ago(entry.at, now), entry.cause));
+            if let Some(detail) = &entry.detail {
+                text.push_str(&format!(" ({detail})"));
+            }
+        }
+        None => text.push_str(" (no recorded transition into this state)"),
+    }
+    text.push('\n');
+    if row.status == DownloadStatus::Error {
+        if let Some(message) = &row.error_message {
+            text.push_str(&format!("error: {message}"));
+            if let Some(code) = &row.error_code {
+                text.push_str(&format!(" (aria2 code {code})"));
+            }
+            text.push('\n');
+        }
+    }
+    if !journal.is_empty() {
+        text.push_str("history:\n");
+        for entry in journal {
+            let from = entry.from.map_or("-", |status| status.as_str());
+            text.push_str(&format!(
+                "  {:>8}  {from} -> {}  {}",
+                ago(entry.at, now),
+                entry.to.as_str(),
+                entry.cause
+            ));
+            if let Some(detail) = &entry.detail {
+                text.push_str(&format!(" ({detail})"));
+            }
+            text.push('\n');
+        }
+    }
+    text
 }
 
 /// A group of downloads added together (batch paste, playlist, bulk capture).

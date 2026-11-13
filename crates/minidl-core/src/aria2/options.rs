@@ -4,6 +4,8 @@
 //! `"true"`) — a JSON number or bool is rejected. All builders here emit strings.
 
 use minidl_ipc::CaptureJob;
+
+use crate::files::safe_out_name;
 use serde_json::{Map, Value};
 
 /// Per-download tuning that maps to IDM-style "connections/segments".
@@ -30,28 +32,18 @@ impl Default for EngineDefaults {
     }
 }
 
-/// Reduce an untrusted filename to a safe basename for aria2's `out`.
-///
-/// The filename originates from a `Content-Disposition` header the browser
-/// extension parsed, i.e. it is fully attacker-controlled. aria2 joins `out`
-/// onto `dir` **without** stripping `..`, so `filename="../../.config/autostart/x.desktop"`
-/// would escape the download directory (arbitrary file write → code execution).
-/// Take only the last path component and reject dot-segments; on rejection we
-/// return `None` and let aria2 derive the name from the URL.
-fn safe_out_name(name: &str) -> Option<String> {
-    let base = name.rsplit(['/', '\\']).next().unwrap_or("").trim();
-    if base.is_empty() || base == "." || base == ".." {
-        return None;
-    }
-    Some(base.to_string())
-}
-
 /// Build the aria2 options object for an `addUri` call from a captured job.
 ///
-/// `dir` is the resolved target directory (category-aware — set upfront so the
-/// file is written straight into place, which is resume-safe). Cookies/headers
-/// are replayed verbatim: dropping them turns a working browser download into a
-/// 403.
+/// `dir` is where aria2 writes: the job's private staging folder (see
+/// [`crate::files::stage_dir`]); the finished file is moved into place later.
+/// Cookies/headers are replayed verbatim: dropping them turns a working browser
+/// download into a 403. They are valid for the job's URL only, so a job that
+/// carries them may not follow redirects (resolve them first with
+/// [`crate::redirect::resolve`]).
+///
+/// No `continue`: with it aria2 appends to, or overwrites, any existing file of
+/// the same name that has no control file. Resume works through the `.aria2`
+/// control file alone.
 pub fn build_add_options(
     job: &CaptureJob,
     dir: &str,
@@ -83,6 +75,9 @@ pub fn build_add_options(
     if !headers.is_empty() {
         opts.insert("header".into(), Value::Array(headers));
     }
+    if crate::redirect::carries_credentials(job) {
+        opts.insert("max-redirect".into(), Value::String("0".into()));
+    }
 
     opts.insert("split".into(), Value::String(defaults.split.to_string()));
     opts.insert(
@@ -93,7 +88,6 @@ pub fn build_add_options(
         "min-split-size".into(),
         Value::String(defaults.min_split_size.clone()),
     );
-    opts.insert("continue".into(), Value::String("true".into()));
 
     // Survive transient network flaps (Wi-Fi/DNS blips) instead of hard-erroring
     // a multi-hour download: aria2's defaults (retry-wait=0, max-tries=5) exhaust
@@ -157,6 +151,21 @@ mod tests {
         j.filename = Some("..\\..\\evil.exe".into());
         let opts = build_add_options(&j, "/dl", &EngineDefaults::default());
         assert_eq!(opts["out"], Value::String("evil.exe".into()));
+
+        // Windows-hostile names are reduced the same way on every platform.
+        j.filename = Some("notes.txt:payload".into());
+        let opts = build_add_options(&j, "/dl", &EngineDefaults::default());
+        assert_eq!(opts["out"], Value::String("notes.txt_payload".into()));
+    }
+
+    #[test]
+    fn anonymous_jobs_may_follow_redirects() {
+        let mut j = job();
+        j.cookie = None;
+        j.extra_headers.clear();
+        let opts = build_add_options(&j, "/dl", &EngineDefaults::default());
+        assert!(!opts.contains_key("max-redirect"));
+        assert!(!opts.contains_key("header"));
     }
 
     #[test]
@@ -172,7 +181,10 @@ mod tests {
             opts["max-connection-per-server"],
             Value::String("16".into())
         );
-        assert_eq!(opts["continue"], Value::String("true".into()));
+        // `continue` would overwrite a same-named file that has no control file.
+        assert!(!opts.contains_key("continue"));
+        // Credentials are origin-bound: aria2 may not take them across a redirect.
+        assert_eq!(opts["max-redirect"], Value::String("0".into()));
         let headers = opts["header"].as_array().unwrap();
         assert!(headers.contains(&Value::String("Cookie: sid=abc".into())));
         assert!(headers.contains(&Value::String("Authorization: Bearer x".into())));

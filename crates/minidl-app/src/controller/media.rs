@@ -33,7 +33,11 @@ impl Controller {
             })?;
         let id = inserted.id();
         if matches!(inserted, DownloadInsertResult::Inserted(_)) {
-            self.db.set_status(id, DownloadStatus::Active)?;
+            self.db.transition(
+                id,
+                DownloadStatus::Active,
+                "user: add media, handed to yt-dlp",
+            )?;
             self.ytdlp
                 .start(id, url, format_id, Vec::new(), options)
                 .map_err(AppError::classify)?;

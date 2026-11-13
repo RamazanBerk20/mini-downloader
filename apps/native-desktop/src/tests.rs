@@ -64,6 +64,7 @@ mod tests {
                 &catalog,
                 &HashSet::new(),
                 &HashSet::new(),
+                false,
             )
             .len()
         };
@@ -177,6 +178,9 @@ mod tests {
             checksum: None,
             start_at: None,
             media_opts: None,
+            path: None,
+            is_dir: false,
+            entries: None,
         }];
         let update = LiveDownloadUpdate {
             id: 7,
@@ -201,9 +205,191 @@ mod tests {
             &locale::Catalog::new("en"),
             &HashSet::new(),
             &HashSet::new(),
+            false,
         );
         assert_eq!(rows[0].meta_text.as_str(), "25 B / 100 B · 25.0%");
         assert_eq!(rows[0].speed_text.as_str(), "50 B/s");
         assert_eq!(rows[0].eta_text.as_str(), "2s");
+
+        // A paused row keeps its last speed in the cache but never shows it.
+        downloads[0].status = minidl_core::model::DownloadStatus::Paused;
+        let rows = rows_from_downloads(
+            &downloads,
+            0,
+            "",
+            &locale::Catalog::new("en"),
+            &HashSet::new(),
+            &HashSet::new(),
+            false,
+        );
+        assert_eq!(rows[0].speed_text.as_str(), "");
+        assert_eq!(rows[0].eta_text.as_str(), "");
+        assert!(rows[0].can_resume && !rows[0].can_pause);
+    }
+
+    fn sample(kind: &str, status: &str) -> minidl_app::controller::DownloadView {
+        serde_json::from_value(serde_json::json!({
+            "id": 1, "gid": null, "url": "https://example.org/a.iso", "filename": null,
+            "dir": "/dl", "status": status, "kind": kind, "total_bytes": 100,
+            "completed_bytes": 10, "download_speed": 5, "upload_speed": 0, "connections": 0,
+            "num_seeders": 0, "referrer": null, "info_hash": null, "error_code": null,
+            "error_message": null, "category_id": null, "created_at": 0, "finished_at": null,
+            "page_url": null, "format_id": null, "speed_limit": null, "package_id": null,
+            "mime": null, "checksum": null, "start_at": null, "media_opts": null
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn every_status_has_one_row_state_with_exactly_its_actions() {
+        use ui::state::{row_actions, row_state, status_key, RowActions};
+
+        let state = |kind: &str, status: &str, restarting| row_state(&sample(kind, status), restarting);
+        assert_eq!(state("http", "active", false), RowState::Downloading);
+        assert_eq!(state("http", "active", true), RowState::EngineRestarting);
+        assert_eq!(state("video", "active", true), RowState::Downloading);
+        assert_eq!(state("http", "waiting", false), RowState::Waiting);
+        assert_eq!(state("http", "queued", false), RowState::Queued);
+        assert_eq!(state("http", "scheduled", false), RowState::Scheduled);
+        assert_eq!(state("http", "complete", false), RowState::Done);
+        assert_eq!(state("http", "error", false), RowState::Failed);
+        let mut interrupted = sample("video", "error");
+        interrupted.error_code = Some(minidl_app::controller::INTERRUPTED.into());
+        assert_eq!(row_state(&interrupted, false), RowState::Interrupted);
+
+        assert_eq!(
+            row_actions(RowState::Queued, "http"),
+            RowActions { pause: true, ..RowActions::default() }
+        );
+        assert!(row_actions(RowState::Interrupted, "video").resume);
+        assert!(row_actions(RowState::Failed, "http").retry);
+        assert!(!row_actions(RowState::Failed, "torrent").retry);
+        assert!(!row_actions(RowState::Failed, "metalink").retry);
+        assert_eq!(
+            row_actions(RowState::Done, "http"),
+            RowActions { open: true, ..RowActions::default() }
+        );
+        assert_eq!(row_actions(RowState::Removed, "http"), RowActions::default());
+        let english = locale::Catalog::new("en");
+        for state in [
+            RowState::Queued, RowState::Waiting, RowState::Downloading,
+            RowState::EngineRestarting, RowState::Paused, RowState::Scheduled,
+            RowState::Done, RowState::Failed, RowState::Interrupted, RowState::Removed,
+        ] {
+            assert_ne!(english.get(status_key(state)), status_key(state));
+        }
+    }
+
+    #[test]
+    fn a_snapshot_never_moves_a_running_bar_backwards() {
+        let mut live = sample("http", "active");
+        live.completed_bytes = 60;
+        live.download_speed = 9;
+        let mut stale = sample("http", "active");
+        stale.completed_bytes = 40;
+        let merged = ui::state::merge_snapshot(&[live.clone()], vec![stale.clone()]);
+        assert_eq!(merged[0].completed_bytes, 60);
+        assert_eq!(merged[0].download_speed, 9);
+        stale.status = minidl_core::model::DownloadStatus::Paused;
+        let merged = ui::state::merge_snapshot(&[live], vec![stale]);
+        assert_eq!(merged[0].completed_bytes, 40);
+    }
+
+    #[test]
+    fn names_cannot_reorder_themselves_on_screen() {
+        let mut row = sample("http", "complete");
+        row.filename = Some("invoice\u{202E}fdp.exe".into());
+        let rows = rows_from_downloads(
+            &[row],
+            0,
+            "",
+            &locale::Catalog::new("en"),
+            &HashSet::new(),
+            &HashSet::new(),
+            false,
+        );
+        assert_eq!(rows[0].name.as_str(), "invoice\u{FFFD}fdp.exe");
+        assert_eq!(rows[0].file_type.as_str(), "executable");
+        assert_eq!(rows[0].type_label.as_str(), "Program");
+    }
+
+    #[test]
+    fn sync_never_drops_a_change_and_resyncs_on_gaps() {
+        let mut sync = ui::state::SyncState::starting_at(10);
+        assert!(!sync.observe(11));
+        assert!(sync.request());
+        assert!(!sync.request()); // in flight: remembered, not dropped
+        assert!(sync.finished(Some(12))); // so fetch once more
+        assert!(!sync.finished(Some(13)));
+        assert!(sync.request());
+        assert!(!sync.finished(None));
+        assert!(sync.observe(20)); // events 14..19 were missed
+        assert!(!sync.observe(21));
+    }
+
+    #[test]
+    fn notices_queue_by_origin_with_errors_first() {
+        use ui::Origin;
+        let mut notices = ui::state::Notices::default();
+        notices.push(Origin::Page, false, "info");
+        notices.push(Origin::Page, true, "boom");
+        notices.push(Origin::Media, true, "probe failed");
+        notices.push(Origin::Page, true, "boom"); // duplicate moves up, no copy
+        let page = |n: &ui::state::Notices<Origin>| {
+            n.items()
+                .iter()
+                .filter(|x| x.origin == Origin::Page)
+                .map(|x| x.text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(page(&notices), ["boom", "info"]);
+        notices.clear(Origin::Media); // a media success leaves the page alone
+        assert_eq!(page(&notices), ["boom", "info"]);
+        assert_eq!(notices.items().len(), 2);
+        for n in 0..10 {
+            notices.push(Origin::Page, true, format!("e{n}"));
+        }
+        assert_eq!(page(&notices).len(), 4);
+        let id = notices.items()[0].id;
+        notices.dismiss(id);
+        assert_eq!(page(&notices).len(), 3);
+    }
+
+    #[test]
+    fn only_the_latest_probe_can_be_added() {
+        let mut probe = ui::state::Probe::default();
+        probe.start("https://a", 1);
+        probe.start("https://b", 2);
+        assert!(!probe.finish(1, true)); // stale result ignored
+        assert!(!probe.can_add("https://b"));
+        assert!(probe.finish(2, true));
+        assert!(probe.can_add("https://b"));
+        assert!(!probe.can_add("https://a"));
+        probe.start("https://c", 3);
+        assert!(probe.finish(3, false));
+        assert!(!probe.can_add("https://c"));
+    }
+
+    #[test]
+    fn settings_saves_are_serialised_and_the_latest_wins() {
+        use ui::state::{SaveNext, SettingsSaver};
+        let mut saver = SettingsSaver::new(0);
+        assert_eq!(saver.submit(1), Some(1));
+        assert_eq!(saver.submit(2), None); // queued behind the first
+        assert_eq!(saver.submit(3), None); // replaces it
+        assert!(!saver.adopt(9)); // no outside value while ours is in flight
+        assert_eq!(saver.finished(1, true), SaveNext::Send(3));
+        assert_eq!(saver.finished(3, false), SaveNext::Revert(1));
+        assert_eq!(saver.submit(1), None); // equal to what is saved
+        assert!(saver.adopt(5));
+        assert_eq!(saver.submit(5), None);
+    }
+
+    #[test]
+    fn notification_bodies_are_plain_text() {
+        assert_eq!(
+            controller_process::notification_text("<b>a</b> & \u{202E}x"),
+            "&lt;b&gt;a&lt;/b&gt; &amp; \u{FFFD}x"
+        );
     }
 }

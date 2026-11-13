@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use minidl_core::aria2::{Engine, STATUS_KEYS};
+use minidl_core::aria2::{Engine, EngineDefaults, STATUS_KEYS};
 use minidl_core::db::Db;
 use minidl_core::model::{Download, DownloadStatus};
 use serde_json::Value;
@@ -175,50 +175,119 @@ pub async fn restore_startup_session(engine: &Engine, db: &Db) {
     let _ = engine.rpc.save_session().await;
 }
 
-pub async fn reconcile(engine: &Engine, db: &Db) {
-    let all = session_items(engine).await;
-    let live: HashMap<_, _> = all
-        .iter()
+fn live_items(all: &[Value]) -> HashMap<String, &Value> {
+    all.iter()
         .filter_map(|item| {
             let gid = string(item, "gid");
             (!gid.is_empty()).then_some((gid, item))
         })
-        .collect();
+        .collect()
+}
+
+/// Bring running rows in line with what aria2 reports after a cold start: a
+/// row whose job aria2 does not have is paused (Resume re-adds it).
+pub async fn reconcile(engine: &Engine, db: &Db) {
+    let all = session_items(engine).await;
+    let live = live_items(&all);
     for row in db.running_rows().unwrap_or_default() {
+        // yt-dlp jobs have their own lifecycle (`Controller::open`, `YtDlp`):
+        // aria2 knowing nothing about them says nothing about their state.
+        if row.is_ytdlp() {
+            continue;
+        }
         let Some(gid) = row.gid.as_deref() else {
             if row.status.is_running() {
-                let _ = db.set_status(row.id, DownloadStatus::Paused);
+                let _ = db.transition(
+                    row.id,
+                    DownloadStatus::Paused,
+                    "reconcile: no engine job was ever bound",
+                );
             }
             continue;
         };
         match live.get(gid) {
-            Some(item) => {
-                let _ = db.checkpoint_progress(
-                    gid,
-                    number(item, "completedLength"),
-                    number(item, "totalLength"),
-                    0,
-                    0,
-                    0,
-                    number(item, "numSeeders"),
-                );
-                if let Some(status) = DownloadStatus::from_aria2_str(&string(item, "status")) {
-                    if status == DownloadStatus::Error {
-                        let _ = db.set_error(
-                            row.id,
-                            item.get("errorCode").and_then(Value::as_str),
-                            error_text(item).as_deref(),
-                        );
-                    } else {
-                        let _ = db.set_status(row.id, status);
-                    }
-                }
-            }
+            Some(item) => sync_row(db, &row, gid, item),
             None => {
-                let _ = db.set_status(row.id, DownloadStatus::Paused);
+                let _ = db.transition(
+                    row.id,
+                    DownloadStatus::Paused,
+                    "reconcile: not in the restored aria2 session",
+                );
             }
         }
     }
+}
+
+fn sync_row(db: &Db, row: &Download, gid: &str, item: &Value) {
+    let _ = db.checkpoint_progress(
+        gid,
+        number(item, "completedLength"),
+        number(item, "totalLength"),
+        0,
+        0,
+        0,
+        number(item, "numSeeders"),
+    );
+    match DownloadStatus::from_aria2_str(&string(item, "status")) {
+        Some(DownloadStatus::Error) => {
+            let _ = db.fail(
+                row.id,
+                item.get("errorCode").and_then(Value::as_str),
+                error_text(item).as_deref(),
+                "reconcile: aria2 reports an error",
+            );
+        }
+        // Finished while nobody was watching: the same completion as live,
+        // so a staged file is moved into place.
+        Some(DownloadStatus::Complete) => {
+            let _ = crate::completion::complete(db, row, item, "reconcile: aria2 reports complete");
+        }
+        Some(status) => {
+            let _ = db.transition(row.id, status, "reconcile: aria2 status");
+        }
+        None => {}
+    }
+}
+
+/// After aria2 crashed and was respawned from its last saved session: every
+/// row that was running but whose job the new instance does not have is
+/// re-added (same row, resuming from its control file), or failed with the
+/// reason when it cannot be (torrent and metalink payloads are not kept).
+/// Returns the ids whose state changed.
+/// `only` limits the pass to one row (a single job aria2 reported missing).
+pub async fn recover_lost_jobs(
+    engine: &Engine,
+    db: &Db,
+    defaults: &EngineDefaults,
+    only: Option<i64>,
+) -> Vec<i64> {
+    let all = session_items(engine).await;
+    let live = live_items(&all);
+    let mut changed = Vec::new();
+    for row in db.running_rows().unwrap_or_default() {
+        if row.is_ytdlp() || !row.status.is_running() || only.is_some_and(|id| id != row.id) {
+            continue;
+        }
+        if let Some(item) = row.gid.as_deref().and_then(|gid| live.get(gid)) {
+            sync_row(db, &row, row.gid.as_deref().unwrap_or_default(), item);
+            changed.push(row.id);
+            continue;
+        }
+        let cause = "recover: aria2 restarted without this job";
+        if crate::ingest::reissue(engine, db, defaults.clone(), &row, cause)
+            .await
+            .is_err()
+        {
+            let _ = db.fail(
+                row.id,
+                None,
+                Some("the download engine restarted and lost this download; retry it"),
+                cause,
+            );
+        }
+        changed.push(row.id);
+    }
+    changed
 }
 
 #[cfg(test)]

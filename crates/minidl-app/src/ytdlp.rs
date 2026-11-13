@@ -231,7 +231,12 @@ impl YtDlp {
         options: Option<MediaOptions>,
     ) -> Result<(), String> {
         let Some(binary) = self.binary.clone() else {
-            let _ = self.db.set_error(id, None, Some("yt-dlp not available"));
+            let _ = self.db.fail(
+                id,
+                None,
+                Some("yt-dlp not available"),
+                "yt-dlp: not installed",
+            );
             self.events.emit(
                 "downloads:error",
                 serde_json::json!({
@@ -261,30 +266,35 @@ impl YtDlp {
             // conditional cleanup on another runtime worker.
             task_ready.notified().await;
             if this.slots.is_full() {
-                let _ = this.db.set_status(id, DownloadStatus::Waiting);
+                let _ = this
+                    .db
+                    .transition(id, DownloadStatus::Waiting, "yt-dlp: all slots busy");
                 this.events.emit(
                     "downloads:state",
                     serde_json::json!({"id": id, "status": "waiting"}),
                 );
             }
             let _permit = this.slots.acquire().await;
+            // Start only if nobody paused/removed the row while it waited.
             let startable = this
                 .db
                 .get(id)
                 .ok()
                 .flatten()
-                .map(|row| {
-                    matches!(
-                        row.status,
-                        DownloadStatus::Queued | DownloadStatus::Active | DownloadStatus::Waiting
+                .is_some_and(|row| row.status == DownloadStatus::Active)
+                || this
+                    .db
+                    .transition_if(
+                        id,
+                        &[DownloadStatus::Queued, DownloadStatus::Waiting],
+                        DownloadStatus::Active,
+                        "yt-dlp: slot free, started",
                     )
-                })
-                .unwrap_or(false);
+                    .unwrap_or(false);
             if !startable {
                 remove_if_current(&running_map, id, token);
                 return;
             }
-            let _ = this.db.set_status(id, DownloadStatus::Active);
             this.events.emit(
                 "downloads:state",
                 serde_json::json!({"id": id, "status": "active"}),
@@ -349,6 +359,18 @@ impl YtDlp {
                 return;
             }
         };
+        // Partial and fragment files go to this row's private staging folder,
+        // so Remove (with or without deleting files) can find them by id.
+        let stage = match minidl_core::files::ensure_stage_dir(&self.download_dir, id) {
+            Ok(stage) => stage,
+            Err(error) => {
+                self.finish_error(id, token, format!("create staging folder: {error}"));
+                return;
+            }
+        };
+        let _ = self.db.set_stage_dir(id, Some(&stage.to_string_lossy()));
+        let mut temp_path = std::ffi::OsString::from("temp:");
+        temp_path.push(&stage);
         let opts = options.unwrap_or_default();
         let mut command = Command::new(binary);
         minidl_core::child_process::hide_console_window(command.as_std_mut());
@@ -362,6 +384,8 @@ impl YtDlp {
             .arg(name_file.path())
             .arg("--paths")
             .arg(&self.download_dir)
+            .arg("--paths")
+            .arg(&temp_path)
             .arg("-o")
             .arg("%(title)s.%(ext)s");
         if opts.audio_only {
@@ -533,7 +557,13 @@ impl YtDlp {
             if let Some(name) = &name {
                 let _ = self.db.set_filename(id, name);
             }
-            let _ = self.db.set_status(id, DownloadStatus::Complete);
+            minidl_core::files::remove_stage_dir(&stage);
+            if !stage.exists() {
+                let _ = self.db.set_stage_dir(id, None);
+            }
+            let _ = self
+                .db
+                .transition(id, DownloadStatus::Complete, "yt-dlp: finished");
             // The controller owns queue-wide completion actions. A dedicated
             // channel cannot lose this transition under broadcast backpressure.
             let _ = self.completions.send(YtDlpCompletion { id, name, path });
@@ -556,7 +586,7 @@ impl YtDlp {
         if !running.get(&id).is_some_and(|task| task.token == token) {
             return;
         }
-        let _ = self.db.set_error(id, None, Some(&message));
+        let _ = self.db.fail(id, None, Some(&message), "yt-dlp: failed");
         self.events.emit(
             "downloads:error",
             serde_json::json!({"id": id, "message": message}),

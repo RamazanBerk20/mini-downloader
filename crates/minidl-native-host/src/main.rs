@@ -21,8 +21,8 @@ use std::time::Duration;
 use interprocess::local_socket::{prelude::*, Stream};
 
 use minidl_ipc::{
-    app_path_file, bridge_socket_name, BridgeReply, BridgeRequest, BrowserFamily, CaptureJob,
-    CHROME_EXTENSION_ID, CHROME_STORE_EXTENSION_ID, EXTENSION_ID,
+    app_path_file, bridge_socket_name, Bridge, BridgeReply, BridgeRequest, BrowserFamily,
+    CaptureJob, CHROME_EXTENSION_ID, CHROME_STORE_EXTENSION_ID, EXTENSION_ID,
 };
 
 const MAX_MSG: usize = 16 * 1024 * 1024;
@@ -65,7 +65,18 @@ fn write_frame<W: Write>(w: &mut W, msg: &[u8], native: bool) -> std::io::Result
 /// this path so a browser opening in the background does not start the GUI.
 fn connect_if_running() -> Option<Stream> {
     let name = bridge_socket_name().ok()?;
-    Stream::connect(name).ok()
+    Stream::connect(name).ok().and_then(owned_by_us)
+}
+
+/// On Windows the pipe name is not a secret: only talk to a server that runs
+/// as the current user. (A Unix socket lives in the user's private runtime dir.)
+fn owned_by_us(stream: Stream) -> Option<Stream> {
+    #[cfg(windows)]
+    {
+        let pid = stream.peer_creds().ok()?.pid()?;
+        minidl_ipc::ensure_same_user(pid).ok()?;
+    }
+    Some(stream)
 }
 
 /// Connect to the running app; if it is not up, launch it and poll the socket.
@@ -73,7 +84,7 @@ fn connect_if_running() -> Option<Stream> {
 fn connect_or_launch() -> Option<Stream> {
     let name = bridge_socket_name().ok()?;
     if let Ok(s) = Stream::connect(name.clone()) {
-        return Some(s);
+        return owned_by_us(s);
     }
     if let Ok(path) = std::fs::read_to_string(app_path_file()) {
         let path = path.trim();
@@ -96,7 +107,7 @@ fn connect_or_launch() -> Option<Stream> {
     }
     for _ in 0..50 {
         if let Ok(s) = Stream::connect(name.clone()) {
-            return Some(s);
+            return owned_by_us(s);
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -114,12 +125,6 @@ fn hide_console_window(command: &mut std::process::Command) {
 
     #[cfg(not(windows))]
     let _ = command;
-}
-
-enum NativeMessage {
-    Presence(Option<BrowserFamily>),
-    Ping(Option<BrowserFamily>),
-    Capture(Box<CaptureJob>, Option<BrowserFamily>),
 }
 
 /// Native-messaging does not tell the host which browser launched it. The
@@ -167,48 +172,31 @@ where
     None
 }
 
-fn parse_native_message(job_bytes: &[u8]) -> Option<NativeMessage> {
+/// Read one browser message into its [`Bridge`] kind. The browser-provided
+/// invocation family wins over the one the connector reports. A presence
+/// heartbeat without any family is dropped.
+fn parse_native_message(job_bytes: &[u8], invoking: Option<BrowserFamily>) -> Option<Bridge> {
     let value = serde_json::from_slice::<serde_json::Value>(job_bytes).ok()?;
-    let reported_family = browser_family(&value);
-    if value
-        .get("presence")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        return Some(NativeMessage::Presence(reported_family));
+    let family = invoking.or_else(|| browser_family(&value));
+    let flag = |name| value.get(name).and_then(serde_json::Value::as_bool) == Some(true);
+    if flag("presence") {
+        return family.map(Bridge::Presence);
     }
-    if value
-        .get("ping")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        return Some(NativeMessage::Ping(reported_family));
+    if flag("ping") {
+        return Some(Bridge::Ping(family));
     }
     serde_json::from_value::<CaptureJob>(value)
         .ok()
-        .map(|job| NativeMessage::Capture(Box::new(job), reported_family))
+        .map(|job| Bridge::Capture(Box::new(job), family))
 }
 
 /// Forward one browser message to the app and return its reply bytes. Presence
 /// heartbeats only connect to an already-running app; normal captures and the
 /// manual options-page ping retain the historical launch-on-demand behavior.
 fn forward(job_bytes: &[u8], invoking_family: Option<BrowserFamily>) -> Option<Vec<u8>> {
-    let message = parse_native_message(job_bytes)?;
-    let (req, presence_only) = match message {
-        NativeMessage::Presence(reported_family) => {
-            let family = invoking_family.or(reported_family)?;
-            (BridgeRequest::presence(family), true)
-        }
-        NativeMessage::Ping(reported_family) => (
-            BridgeRequest::ping().with_browser_family(invoking_family.or(reported_family)),
-            false,
-        ),
-        NativeMessage::Capture(job, reported_family) => (
-            BridgeRequest::new(*job).with_browser_family(invoking_family.or(reported_family)),
-            false,
-        ),
-    };
-    let req_bytes = serde_json::to_vec(&req).ok()?;
+    let message = parse_native_message(job_bytes, invoking_family)?;
+    let presence_only = matches!(message, Bridge::Presence(_));
+    let req_bytes = serde_json::to_vec(&BridgeRequest::from(message)).ok()?;
 
     let mut sock = if presence_only {
         connect_if_running()?
@@ -251,27 +239,46 @@ mod tests {
 
     #[test]
     fn parses_presence_family_from_camel_case_wire_message() {
-        let msg = parse_native_message(br#"{"presence":true,"browserFamily":"firefox"}"#);
+        let msg = parse_native_message(br#"{"presence":true,"browserFamily":"firefox"}"#, None);
         assert!(matches!(
             msg,
-            Some(NativeMessage::Presence(Some(BrowserFamily::Firefox)))
+            Some(Bridge::Presence(BrowserFamily::Firefox))
         ));
     }
 
     #[test]
     fn accepts_chromium_family_aliases() {
-        let msg = parse_native_message(br#"{"presence":true,"browser_family":"chrome-based"}"#);
+        let msg = parse_native_message(
+            br#"{"presence":true,"browser_family":"chrome-based"}"#,
+            None,
+        );
         assert!(matches!(
             msg,
-            Some(NativeMessage::Presence(Some(BrowserFamily::Chromium)))
+            Some(Bridge::Presence(BrowserFamily::Chromium))
         ));
     }
 
     #[test]
     fn invalid_presence_requires_a_family_before_forwarding() {
+        let unknown = br#"{"presence":true,"browserFamily":"unknown"}"#;
+        assert!(parse_native_message(unknown, None).is_none());
         assert!(matches!(
-            parse_native_message(br#"{"presence":true,"browserFamily":"unknown"}"#),
-            Some(NativeMessage::Presence(None))
+            parse_native_message(unknown, Some(BrowserFamily::Firefox)),
+            Some(Bridge::Presence(BrowserFamily::Firefox))
+        ));
+    }
+
+    #[test]
+    fn captures_and_pings_from_the_published_connector_still_parse() {
+        assert!(matches!(
+            parse_native_message(br#"{"ping":true}"#, None),
+            Some(Bridge::Ping(None))
+        ));
+        let capture =
+            br#"{"url":"https://example.org/f.iso","kind":"http","browserFamily":"chromium"}"#;
+        assert!(matches!(
+            parse_native_message(capture, None),
+            Some(Bridge::Capture(job, Some(BrowserFamily::Chromium))) if job.url == "https://example.org/f.iso"
         ));
     }
 

@@ -9,6 +9,12 @@ description = "Low-memory native Mini Downloader desktop shell"
 name = "mini-downloader"
 path = "src/main.rs"
 
+[features]
+# Development only, never in release builds (main.rs refuses them): Slint's
+# MCP server on 127.0.0.1:$SLINT_MCP_PORT, so an agent can read, click and
+# screenshot the real UI. See AGENTS.md.
+ui-mcp = ["slint/mcp"]
+
 [dependencies]
 minidl-app = { path = "../../crates/minidl-app" }
 minidl-core = { path = "../../crates/minidl-core" }
@@ -23,15 +29,48 @@ url = "2"
 arboard = { version = "3", default-features = false }
 open = "5"
 rfd = { version = "0.15.4", default-features = false, features = ["xdg-portal", "async-std"] }
+# Drag-out text/uri-list encoding (already in the tree through `url`).
+percent-encoding = "2.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Keep the D-Bus stack on async-io. Mixing zbus' Tokio and async-io features in
 # this single dual-mode binary breaks AccessKit's dedicated executor thread.
 ksni = { version = "0.3.6", default-features = false, features = ["async-io"] }
+# Drag-out (src/dragout). No new crates: each is already in the tree through
+# winit, rfd or Slint, at the same version.
+# Wayland: our own queue on winit's display for wl_data_device drags and the
+# clipboard selection (`client_system` is the libwayland backend winit uses).
+wayland-client = "0.31.14"
+wayland-backend = { version = "0.3.15", features = ["client_system"] }
+# X11: the XDND source on its own connection; `cursor` loads the dnd-* theme cursors.
+x11rb = { version = "0.13.2", features = ["cursor"] }
+# X11: release winit's implicit pointer grab through its own Xlib display.
+x11-dl = "2.21"
+# The XDG FileTransfer portal for sandboxed drop targets (rfd already uses ashpd this way).
+ashpd = { version = "0.11.1", default-features = false, features = ["async-std"] }
+pollster = "0.4"
+# poll(2) for the Wayland dispatch thread's bounded wait (already in the tree).
+libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.24"
-windows = { version = "0.62", features = ["Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.62", features = [
+    "Win32_UI_WindowsAndMessaging",
+    # Drag-out: SHDoDragDrop with the shell's own data object (CF_HDROP, IDLists).
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+] }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# tests/dragout_e2e.rs: a layer-shell drop target at a known place (in the tree through sctk).
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+# tests/dragout_e2e.rs: reads the clipboard through ext-data-control (in the tree through winit).
+wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
+# tests/dragout_e2e.rs: KWin's fake-input drives the nested pointer (in the tree through winit).
+wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }
 
 [build-dependencies]
 png = "0.18"

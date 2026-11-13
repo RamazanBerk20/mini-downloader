@@ -1,10 +1,12 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use minidl_core::aria2::{build_add_options, Engine, EngineDefaults};
+use minidl_core::aria2::{build_add_options, new_gid, Engine, EngineDefaults};
 use minidl_core::db::{duplicate_sources_match, Db, DownloadInsertResult};
+use minidl_core::files::{create_stage_dir, safe_out_name};
 use minidl_core::ipc::{CaptureJob, DownloadKind};
 use minidl_core::model::{Download, DownloadStatus, NewDownload};
+use minidl_core::redirect::ensure_public_target;
 use serde_json::Value;
 
 use crate::ytdlp::YtDlp;
@@ -91,78 +93,6 @@ fn validate_url(url: &str, schemes: &[&str], allow_magnet: bool) -> Result<(), S
         return Err("unsupported or unsafe URL scheme".into());
     }
     Ok(())
-}
-
-fn is_non_public_ip(ip: std::net::IpAddr) -> bool {
-    match ip {
-        std::net::IpAddr::V4(ip) => {
-            let [a, b, _, _] = ip.octets();
-            a == 0
-                || a == 10
-                || a == 127
-                || (a == 100 && (64..=127).contains(&b))
-                || (a == 169 && b == 254)
-                || (a == 172 && (16..=31).contains(&b))
-                || (a == 192 && b == 0)
-                || (a == 192 && b == 168)
-                || (a == 198 && (b == 18 || b == 19))
-                || a >= 224
-                || ip.is_documentation()
-        }
-        std::net::IpAddr::V6(ip) => {
-            let segments = ip.segments();
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_multicast()
-                || segments[0] & 0xfe00 == 0xfc00 // unique-local
-                || segments[0] & 0xffc0 == 0xfe80 // link-local
-                || segments[0] & 0xffc0 == 0xfec0 // deprecated site-local
-                || (segments[0] == 0x2001 && segments[1] == 0x0db8)
-                || ip
-                    .to_ipv4()
-                    .map(std::net::IpAddr::V4)
-                    .is_some_and(is_non_public_ip)
-        }
-    }
-}
-
-async fn ensure_public_target(raw: &str) -> Result<(), String> {
-    use url::Host;
-
-    let parsed = url::Url::parse(raw).map_err(|_| "invalid target URL".to_string())?;
-    let host = parsed
-        .host()
-        .ok_or_else(|| "target URL has no host".to_string())?;
-    let blocked = match host {
-        Host::Ipv4(ip) => is_non_public_ip(ip.into()),
-        Host::Ipv6(ip) => is_non_public_ip(ip.into()),
-        Host::Domain(domain) => {
-            let domain = domain.trim_end_matches('.');
-            if domain.eq_ignore_ascii_case("localhost") || domain.ends_with(".localhost") {
-                true
-            } else {
-                let port = parsed.port_or_known_default().unwrap_or(443);
-                let resolved = tokio::net::lookup_host((domain, port))
-                    .await
-                    .map_err(|error| format!("could not resolve target host: {error}"))?
-                    .collect::<Vec<_>>();
-                if resolved.is_empty() {
-                    return Err("target host resolved to no addresses".into());
-                }
-                resolved
-                    .into_iter()
-                    .any(|address| is_non_public_ip(address.ip()))
-            }
-        }
-    };
-    if blocked {
-        Err(
-            "target host resolves to a private, local, or reserved address (blocked in settings)"
-                .into(),
-        )
-    } else {
-        Ok(())
-    }
 }
 
 pub(crate) async fn validate_media_target(db: &Db, url: &str) -> Result<(), String> {
@@ -309,11 +239,6 @@ fn duplicate_prevention_enabled(db: &Db) -> bool {
         != Some("false")
 }
 
-fn safe_capture_filename(filename: &str) -> Option<String> {
-    let filename = filename.rsplit(['/', '\\']).next().unwrap_or("").trim();
-    (!filename.is_empty() && filename != "." && filename != "..").then(|| filename.to_owned())
-}
-
 #[cfg(unix)]
 fn recorded_origin(path: &Path) -> Option<String> {
     xattr::get(path, "user.xdg.origin.url")
@@ -339,7 +264,7 @@ fn existing_file(db: &Db, download_dir: &Path, job: &CaptureJob) -> Option<Exist
     if job.kind != DownloadKind::Http || !duplicate_prevention_enabled(db) {
         return None;
     }
-    let filename = safe_capture_filename(job.filename.as_deref()?)?;
+    let filename = safe_out_name(job.filename.as_deref()?)?;
     let mut targets = Vec::<(std::path::PathBuf, Option<i64>)>::new();
     let auto_organize = db.get_setting("auto_organize").ok().flatten().as_deref() != Some("false");
     if auto_organize {
@@ -436,7 +361,11 @@ pub(crate) fn reuse_existing_file(
     let record = (|| -> anyhow::Result<()> {
         db.set_file_location(id, &existing.filename, &existing.dir, existing.category_id)?;
         db.checkpoint_progress_by_id(id, existing.length, existing.length, 0)?;
-        db.set_status(id, DownloadStatus::Complete)?;
+        db.transition(
+            id,
+            DownloadStatus::Complete,
+            "adopted an existing identical file",
+        )?;
         Ok(())
     })();
     if let Err(error) = record {
@@ -571,19 +500,35 @@ pub async fn ingest(
         return Ok(IngestOutcome::Existing(id));
     }
     if stream {
-        db.set_status(id, DownloadStatus::Active)
+        db.transition(id, DownloadStatus::Active, "ingest: handed to yt-dlp")
             .map_err(|e| e.to_string())?;
         ytdlp.start(id, target, None, job.header_lines(), None)?;
         return Ok(IngestOutcome::Added(id));
     }
     let engine = engine.expect("non-stream downloads were checked above");
+    let fail = |message: String| {
+        let _ = db.fail(id, None, Some(&message), "ingest: not handed to aria2");
+        message
+    };
 
-    let mut options = build_add_options(&job, &dir, &defaults);
-    if fetches && duplicate_prevention_enabled(db) {
-        // Aria2 otherwise silently creates `name (1).ext`. The explicit
-        // duplicate setting is authoritative: a collision must fail closed.
-        options.insert("auto-file-renaming".into(), Value::String("false".into()));
-    }
+    // HTTP(S)/FTP and metalink files are written into a private staging
+    // folder and moved into `dir` without replacing anything on completion.
+    // BitTorrent stays in place: aria2 seeds from those files after the
+    // download, and refuses (error 13) to touch an existing file it has no
+    // control file for.
+    let staged = matches!(job.kind, DownloadKind::Http | DownloadKind::Metalink);
+    let write_dir = if staged {
+        let stage = create_stage_dir(download_dir, id)
+            .map_err(|error| fail(format!("create staging folder: {error}")))?;
+        let stage = stage.to_string_lossy().into_owned();
+        db.set_stage_dir(id, Some(&stage))
+            .map_err(|e| fail(e.to_string()))?;
+        stage
+    } else {
+        dir.clone()
+    };
+    let job = engine_job(db, &job).await.map_err(fail)?;
+    let mut options = build_add_options(&job, &write_dir, &defaults);
     if let Some(limit) = db
         .get_setting("default_speed_limit")
         .ok()
@@ -599,51 +544,46 @@ pub async fn ingest(
     if let Some(checksum) = checksum {
         options.insert("checksum".into(), Value::String(checksum));
     }
-    if fetches
-        && !target.to_ascii_lowercase().starts_with("magnet:")
-        && db
-            .get_setting("block_private_ips")
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some("true")
-    {
+    if fetches && !target.to_ascii_lowercase().starts_with("magnet:") && block_private(db) {
         // DNS is checked before insertion. Prevent aria2 from following a
         // public initial URL to a private destination afterward.
         options.insert("max-redirect".into(), Value::String("0".into()));
     }
-    let options = Value::Object(options);
-    let gids = match job.kind {
-        DownloadKind::Http | DownloadKind::Magnet => engine
+
+    if job.kind == DownloadKind::Metalink {
+        // aria2 picks the GIDs of a metalink's files itself. Add them paused so
+        // none can finish before its row is bound, then start them.
+        options.insert("pause".into(), Value::String("true".into()));
+        let payload = job
+            .torrent_b64
+            .as_deref()
+            .ok_or_else(|| fail("metalink job without payload".into()))?;
+        let gids = engine
             .rpc
-            .add_uri(std::slice::from_ref(&job.url), options)
+            .add_metalink(payload, Value::Object(options))
             .await
-            .map(|gid| vec![gid]),
-        DownloadKind::Torrent => match job.torrent_b64.as_deref() {
-            Some(payload) => engine
-                .rpc
-                .add_torrent(payload, &[], options)
-                .await
-                .map(|gid| vec![gid]),
-            None => Err(anyhow::anyhow!("torrent job without payload")),
-        },
-        DownloadKind::Metalink => match job.torrent_b64.as_deref() {
-            Some(payload) => engine.rpc.add_metalink(payload, options).await,
-            None => Err(anyhow::anyhow!("metalink job without payload")),
-        },
-        DownloadKind::Hls | DownloadKind::Dash => unreachable!(),
-    };
-    match gids {
-        Ok(gids) => {
-            let Some((first, rest)) = gids.split_first() else {
-                let _ = db.set_error(id, None, Some("engine returned no download id"));
-                return Err("engine returned no download id".into());
-            };
-            db.bind_aria2_job(id, first).map_err(|e| e.to_string())?;
-            db.set_status(id, DownloadStatus::Active)
-                .map_err(|e| e.to_string())?;
-            for gid in rest {
-                if let Ok(child) = db.insert_download(&NewDownload {
+            .map_err(|error| fail(error.to_string()))?;
+        let Some((first, rest)) = gids.split_first() else {
+            return Err(fail("engine returned no download id".into()));
+        };
+        // A paused job no row owns would sit in aria2 forever: drop it.
+        let discard = |gid: String| async move {
+            let _ = engine.rpc.force_remove(&gid).await;
+            let _ = engine.rpc.remove_download_result(&gid).await;
+        };
+        let bound = db
+            .bind_aria2_job(id, first)
+            .and_then(|()| db.transition(id, DownloadStatus::Active, "ingest: metalink added"));
+        if let Err(error) = bound {
+            for gid in &gids {
+                discard(gid.clone()).await;
+            }
+            return Err(fail(error.to_string()));
+        }
+        let mut started = vec![first.clone()];
+        for gid in rest {
+            let child = db
+                .insert_download(&NewDownload {
                     url: target.clone(),
                     dir: dir.clone(),
                     kind: kind_name(job.kind).into(),
@@ -651,52 +591,130 @@ pub async fn ingest(
                     category_id,
                     package_id,
                     ..Default::default()
-                }) {
-                    let _ = db.bind_aria2_job(child, gid);
-                    let _ = db.set_status(child, DownloadStatus::Active);
-                }
+                })
+                .and_then(|child| {
+                    db.bind_aria2_job(child, gid)?;
+                    db.set_stage_dir(child, Some(&write_dir))?;
+                    db.transition(child, DownloadStatus::Active, "ingest: metalink file")
+                });
+            match child {
+                Ok(_) => started.push(gid.clone()),
+                Err(_) => discard(gid.clone()).await,
             }
+        }
+        for gid in &started {
+            let _ = engine.rpc.unpause(gid).await;
+        }
+        let _ = engine.rpc.save_session().await;
+        return Ok(IngestOutcome::Added(id));
+    }
+
+    // Record the GID and `active` before aria2 can report anything about the
+    // job: a completion or error that arrives first then finds its row.
+    let gid = new_gid().map_err(|e| fail(e.to_string()))?;
+    db.bind_aria2_job(id, &gid)
+        .map_err(|e| fail(e.to_string()))?;
+    db.transition_if(
+        id,
+        &[DownloadStatus::Queued],
+        DownloadStatus::Active,
+        "ingest: handed to aria2",
+    )
+    .map_err(|e| fail(e.to_string()))?;
+    options.insert("gid".into(), Value::String(gid));
+    let options = Value::Object(options);
+    let added = match job.kind {
+        DownloadKind::Http | DownloadKind::Magnet => {
+            engine
+                .rpc
+                .add_uri(std::slice::from_ref(&job.url), options)
+                .await
+        }
+        DownloadKind::Torrent => match job.torrent_b64.as_deref() {
+            Some(payload) => engine.rpc.add_torrent(payload, &[], options).await,
+            None => Err(anyhow::anyhow!("torrent job without payload")),
+        },
+        DownloadKind::Metalink | DownloadKind::Hls | DownloadKind::Dash => unreachable!(),
+    };
+    match added {
+        Ok(_) => {
+            // Persist the job now, not at the next 30 s session save, so an
+            // aria2 crash cannot lose it.
+            let _ = engine.rpc.save_session().await;
             Ok(IngestOutcome::Added(id))
         }
-        Err(error) => {
-            let _ = db.set_error(id, None, Some(&error.to_string()));
-            Err(error.to_string())
-        }
+        Err(error) => Err(fail(error.to_string())),
     }
 }
 
+fn block_private(db: &Db) -> bool {
+    db.get_setting("block_private_ips")
+        .ok()
+        .flatten()
+        .as_deref()
+        == Some("true")
+}
+
+/// The job aria2 runs: redirects resolved here so captured credentials only
+/// reach the origin they belong to (see [`minidl_core::redirect`]).
+async fn engine_job(db: &Db, job: &CaptureJob) -> Result<CaptureJob, String> {
+    let proxy = db.get_setting("proxy").ok().flatten();
+    minidl_core::redirect::resolve(job, proxy.as_deref(), block_private(db)).await
+}
+
+/// Hand an existing HTTP or magnet row to aria2 again (resume after its job
+/// was lost, retry). The row is bound to a fresh GID and made `active` before
+/// the call; if aria2 refuses, it fails with that reason.
 pub async fn reissue(
     engine: &Engine,
     db: &Db,
     defaults: EngineDefaults,
     row: &Download,
+    cause: &str,
 ) -> Result<(), String> {
     let job = job_from_row(row);
     if !matches!(job.kind, DownloadKind::Http | DownloadKind::Magnet) {
         return Err("cannot reissue this download type".into());
     }
     validate_capture_job(db, &job).await?;
-    let mut options = build_add_options(&job, &row.dir, &defaults);
+    // Rows from before staging keep finishing where their partial file is.
+    let write_dir = match &row.stage_dir {
+        Some(stage) => {
+            std::fs::create_dir_all(stage).map_err(|e| e.to_string())?;
+            stage.clone()
+        }
+        None => row.dir.clone(),
+    };
+    let job = engine_job(db, &job).await?;
+    let mut options = build_add_options(&job, &write_dir, &defaults);
     if matches!(job.kind, DownloadKind::Http) {
         if let Some(checksum) = &row.checksum {
             options.insert("checksum".into(), Value::String(checksum.clone()));
         }
-        if db
-            .get_setting("block_private_ips")
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some("true")
-        {
+        if block_private(db) {
             options.insert("max-redirect".into(), Value::String("0".into()));
         }
     }
-    let gid = engine
+    let gid = new_gid().map_err(|e| e.to_string())?;
+    db.bind_aria2_job(row.id, &gid).map_err(|e| e.to_string())?;
+    db.transition(row.id, DownloadStatus::Active, cause)
+        .map_err(|e| e.to_string())?;
+    options.insert("gid".into(), Value::String(gid));
+    match engine
         .rpc
         .add_uri(std::slice::from_ref(&job.url), Value::Object(options))
         .await
-        .map_err(|e| e.to_string())?;
-    db.bind_aria2_job(row.id, &gid).map_err(|e| e.to_string())
+    {
+        Ok(_) => {
+            let _ = engine.rpc.save_session().await;
+            Ok(())
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let _ = db.fail(row.id, None, Some(&message), "reissue refused by aria2");
+            Err(message)
+        }
+    }
 }
 
 #[cfg(test)]

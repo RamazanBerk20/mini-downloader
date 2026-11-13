@@ -51,6 +51,15 @@ warning. Always verify `SHA256SUMS` before running a download.
   clipboard watching, tray, autostart, and URL-scheme integration.
 - Keyboard and screen-reader accessibility plus ten interface languages.
 
+Finished downloads can be dragged out of the list into any other application
+(a file manager, a browser upload field, a chat app, an editor, the desktop):
+press a finished row and move the pointer. The drop is always a copy, never a
+move. A drag that starts on a selected row carries every selected finished
+file; a multi-file torrent drags its folder. It is a real system drag source on
+Wayland (`wl_data_device`, plus the XDG FileTransfer portal for sandboxed
+receivers), on X11/XWayland (XDND) and on Windows (the shell's own drag), with
+Ctrl+C "copy file" as the keyboard equivalent.
+
 ## Low-memory lifecycle
 
 One small controller owns durable state, browser IPC, and the tray. The visible
@@ -83,6 +92,15 @@ at Firefox installation.
 | Chrome, Chromium, Edge, Brave, and compatible browsers | [Chrome Web Store](https://chromewebstore.google.com/detail/mini-downloader-connector/hhaobmkdgijodfieadeeanjmnneckafj) |
 
 ![Mini Downloader Connector options](docs/store-assets/v3.0.0/extension-options.png)
+
+Captured cookies and `Authorization` headers are sent only to the origin
+(scheme, host and port) they were captured for. The app follows a download's
+redirects itself and drops them at the first hop to another origin, so
+redirects that a browser would still credential, such as `http://` to
+`https://` on the same host or `www.example.org` to `example.org`, now
+continue without them. A download that needs them there fails with the
+server's 401/403 instead of handing your session to another host. This is by
+design.
 
 The app registers its native-messaging host on first launch. AppImage users get
 a private stable host copy, so browser integration survives temporary mount
@@ -135,7 +153,10 @@ real-aria2 tests, extension tests, shellcheck) in one command.
 changing it.
 
 The ignored E2E tests require `aria2c`; they use a deterministic loopback HTTP
-fixture and never depend on an external download host. Canonical app locales
+fixture and never depend on an external download host. The drag-out E2E test
+(`cargo test -p minidl-native-desktop --test dragout_e2e -- --ignored
+--test-threads 1`) also needs `kwin_wayland`, `Xwayland` and `xdotool`: it runs
+everything in a nested, virtual KWin and never touches the running desktop. Canonical app locales
 and icons live under `assets/` and are shared by the native build and packaging.
 
 Create native Linux artifacts with `./scripts/package-linux.sh`. It always

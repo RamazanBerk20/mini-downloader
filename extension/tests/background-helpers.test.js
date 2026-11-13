@@ -5,7 +5,10 @@ const {
   addBoundedMedia,
   cookieHeader,
   cookieQuery,
+  createHandoffRegistry,
   defaultReferrer,
+  filenameFromCD,
+  isBlacklisted,
   enrichCaptureJob,
   isHostDisabled,
   normalizeDisabledHosts,
@@ -95,4 +98,56 @@ test("disabled hosts are normalized and matched exactly", () => {
   assert.deepEqual(hosts, ["example.com", "media.example.net"]);
   assert.equal(isHostDisabled("https://EXAMPLE.com/file", hosts), true);
   assert.equal(isHostDisabled("https://sub.example.com/file", hosts), false);
+});
+
+test("Content-Disposition filenames keep apostrophes and honour RFC 5987", () => {
+  const url = "https://files.example/path/fallback.bin";
+  assert.equal(filenameFromCD('attachment; filename="Bob\'s report.pdf"', url), "Bob's report.pdf");
+  assert.equal(filenameFromCD("attachment; filename=Bob's.pdf", url), "Bob's.pdf");
+  assert.equal(filenameFromCD('attachment; filename="say \\"hi\\".txt"', url), 'say "hi".txt');
+  assert.equal(
+    filenameFromCD("attachment; filename*=UTF-8'en'na%C3%AFve%20file.txt; filename=\"x.txt\"", url),
+    "naïve file.txt",
+  );
+  assert.equal(filenameFromCD("attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf", url), "résumé.pdf");
+  assert.equal(filenameFromCD("inline", url), "fallback.bin");
+  assert.equal(filenameFromCD("", "https://files.example/a%20b.zip"), "a b.zip");
+});
+
+test("Path A handoffs are per URL and cookie store, and settle into states", async () => {
+  let clock = 0;
+  const registry = createHandoffRegistry({ ttlMs: 5000, now: () => clock });
+  const url = "https://files.example/big.iso";
+  let accept;
+  registry.remember(url, "container-1", new Promise((resolve) => (accept = resolve)));
+  registry.remember(url, "container-2", Promise.resolve({ ok: false }));
+
+  assert.equal(registry.recent(url, "container-1").state, "pending");
+  assert.equal(registry.recent(url, undefined), null);
+  const decision = registry.decide(url, "container-1");
+  accept({ ok: true });
+  assert.equal(await decision, "accepted");
+  // The other container's capture was rejected: Path B takes over.
+  assert.equal(await registry.decide(url, "container-2"), "fallback");
+  assert.equal(registry.recent(url, "container-2").state, "fallback");
+  // A late reply cannot rewrite a decided record.
+  assert.equal(registry.recent(url, "container-1").state, "accepted");
+
+  registry.remember(url, undefined, Promise.reject(new Error("host down")));
+  assert.equal(await registry.decide(url, undefined), "fallback");
+
+  clock = 6000;
+  assert.equal(registry.recent(url, "container-1"), null);
+  assert.equal(await registry.decide(url, "container-1"), "none");
+});
+
+test("the file-type blacklist sees both the clicked URL and where it redirected", () => {
+  const list = ["exe"];
+  const clicked = "https://site.example/get/setup.exe";
+  const final = "https://cdn.example/blob/8f3a9c";
+  assert.equal(isBlacklisted([clicked, final], "", list), true);
+  assert.equal(isBlacklisted([final, clicked], "", list), true);
+  assert.equal(isBlacklisted([final], "setup.EXE", list), true);
+  assert.equal(isBlacklisted([final], "notes.txt", list), false);
+  assert.equal(isBlacklisted([clicked], "", []), false);
 });

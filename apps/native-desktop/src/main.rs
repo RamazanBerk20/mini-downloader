@@ -1,5 +1,8 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+#[cfg(all(feature = "ui-mcp", not(debug_assertions)))]
+compile_error!("`ui-mcp` opens a UI automation port and is for debug builds only");
+
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
@@ -14,6 +17,7 @@ use minidl_ipc::{ControlCommand, MediaOptions, PlaylistSelection, SettingsUpdate
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 mod controller_process;
+mod dragout;
 mod launch;
 mod locale;
 mod tray;

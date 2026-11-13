@@ -1,17 +1,36 @@
+// The one visual state of a download row, computed in Rust (ui/state.rs).
+export enum RowState { queued, waiting, downloading, engine-restarting, paused, scheduled, done, failed, interrupted, removed }
+
+// Overlays are mutually exclusive by construction; Escape sets `none`.
+export enum Overlay { none, links, media, settings, shortcuts, details }
+
+// A message for the user; Rust passes each place its own list.
+export struct NoticeRow {
+    id: int,
+    error: bool,
+    text: string,
+}
+
 export struct DownloadRow {
     id: int,
     name: string,
     url: string,
     kind: string,
-    status: string,
+    state: RowState,
     status-display: string,
     progress: float,
     progress-text: string,
     speed-text: string,
     eta-text: string,
     meta-text: string,
-    running: bool,
-    resumable: bool,
+    can-pause: bool,
+    can-resume: bool,
+    can-retry: bool,
+    can-open: bool,
+    // ui/file_types.rs category, its spoken name, and a folder's item count.
+    file-type: string,
+    type-label: string,
+    file-count: string,
     selected: bool,
     package-id: int,
     package-name: string,

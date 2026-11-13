@@ -407,7 +407,8 @@ pub async fn install(asset_url: Option<String>, _page_url: String) -> Result<boo
     }
 
     let _ = install_requested;
-    open::that(&release.html_url).map_err(|error| format!("open release page: {error}"))?;
+    open::that_detached(&release.html_url)
+        .map_err(|error| format!("open release page: {error}"))?;
     Ok(false)
 }
 

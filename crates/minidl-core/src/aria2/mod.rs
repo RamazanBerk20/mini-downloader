@@ -11,16 +11,34 @@ pub(crate) mod sandbox;
 
 pub use event::{Aria2Event, Aria2Status};
 pub use options::{build_add_options, EngineDefaults};
-pub use process::{Aria2Process, LaunchOptions};
-pub use rpc::{RpcClient, DETAIL_KEYS, POLL_KEYS, STATUS_KEYS};
+pub use process::{Aria2Process, LaunchOptions, SessionMode};
+pub use rpc::{new_gid, RpcClient, DETAIL_KEYS, POLL_KEYS, STATUS_KEYS};
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
-use tokio::sync::broadcast;
+use serde::Serialize;
+use tokio::sync::{broadcast, watch};
 use tokio::task::JoinHandle;
+
+/// Lifecycle of the aria2 process behind an [`Engine`]. The RPC client only
+/// talks to aria2 while the state is `Ready`.
+///
+/// ```text
+/// launch ─► Ready ─(child exits)─► Restarting{n} ─► Ready
+///                                        └─(3 spawns fail)─► Failed ─(next tick)─► Restarting{n+1}
+/// any ─(shutdown)─► Stopping
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum EngineState {
+    Ready { port: u16 },
+    Restarting { attempt: u32 },
+    Failed { reason: String },
+    Stopping,
+}
 
 /// A running aria2c plus an RPC client and a notification stream. A supervisor
 /// task restarts aria2c if it dies unexpectedly.
@@ -28,12 +46,12 @@ pub struct Engine {
     pub rpc: RpcClient,
     events: broadcast::Sender<Aria2Event>,
     /// Ownership handle that keeps aria2c alive for the Engine's lifetime (the
-    /// watchdog mutates its own clone). Never read directly.
-    #[allow(dead_code)]
+    /// watchdog swaps in a respawned child).
     process: Arc<Mutex<Aria2Process>>,
     notify_task: Arc<Mutex<JoinHandle<()>>>,
     shutting_down: Arc<AtomicBool>,
     launch_options: Arc<RwLock<LaunchOptions>>,
+    state: watch::Sender<EngineState>,
     watchdog: JoinHandle<()>,
 }
 
@@ -50,6 +68,9 @@ impl Engine {
         let notify_task = Arc::new(Mutex::new(notify_task));
         let shutting_down = Arc::new(AtomicBool::new(false));
         let launch_options = Arc::new(RwLock::new(opts));
+        let (state, _) = watch::channel(EngineState::Ready {
+            port: process.lock().unwrap_or_else(|e| e.into_inner()).port,
+        });
 
         // If aria2c is OOM-killed or crashes, respawn it and retarget the RPC
         // client + notification listener at the new port. Cold startup pauses
@@ -64,9 +85,14 @@ impl Engine {
             let events = events.clone();
             let shutting_down = shutting_down.clone();
             let launch_options = launch_options.clone();
+            let state = state.clone();
             tokio::spawn(async move {
+                let mut attempt = 0u32;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    // shortcut: exit is noticed by polling, so calls in the
+                    // first second after a crash still go to the old port;
+                    // upgrade to a child-exit wait if that window matters.
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     if shutting_down.load(Ordering::Relaxed) {
                         break;
                     }
@@ -77,19 +103,32 @@ impl Engine {
                     if !exited || shutting_down.load(Ordering::Relaxed) {
                         continue;
                     }
+                    rpc.invalidate();
+                    attempt += 1;
+                    state.send_replace(EngineState::Restarting { attempt });
                     let options = launch_options
                         .read()
                         .unwrap_or_else(|error| error.into_inner())
                         .clone();
-                    if let Ok(newp) = Self::respawn(&options, &rpc).await {
-                        let port = newp.port;
-                        {
-                            let mut nt = notify_task.lock().unwrap_or_else(|e| e.into_inner());
-                            nt.abort();
-                            *nt = notify::spawn_listener(port, events.clone());
+                    match Self::respawn(&options).await {
+                        Ok(newp) if !shutting_down.load(Ordering::Relaxed) => {
+                            let port = newp.port;
+                            rpc.retarget(port, newp.secret.clone());
+                            {
+                                let mut nt = notify_task.lock().unwrap_or_else(|e| e.into_inner());
+                                nt.abort();
+                                *nt = notify::spawn_listener(port, events.clone());
+                            }
+                            *process.lock().unwrap_or_else(|e| e.into_inner()) = newp; // old child reaped
+                            attempt = 0;
+                            state.send_replace(EngineState::Ready { port });
                         }
-                        let mut p = process.lock().unwrap_or_else(|e| e.into_inner());
-                        *p = newp; // old Aria2Process drops → its (dead) child reaped
+                        Ok(_) => break,
+                        Err(error) => {
+                            state.send_replace(EngineState::Failed {
+                                reason: format!("{error:#}"),
+                            });
+                        }
                     }
                 }
             })
@@ -102,6 +141,7 @@ impl Engine {
             notify_task,
             shutting_down,
             launch_options,
+            state,
             watchdog,
         })
     }
@@ -138,18 +178,30 @@ impl Engine {
         anyhow::bail!("aria2 RPC did not become ready")
     }
 
-    /// Respawn aria2c and point the existing (cloned-everywhere) RPC client at it.
-    async fn respawn(opts: &LaunchOptions, rpc: &RpcClient) -> Result<Aria2Process> {
+    /// Respawn aria2c and wait for it on a private client; the caller points
+    /// the shared (cloned-everywhere) client at it once it is ready.
+    async fn respawn(opts: &LaunchOptions) -> Result<Aria2Process> {
         let mut last_err = None;
         for _ in 0..3 {
             let mut proc = Aria2Process::respawn(opts)?;
-            rpc.retarget(proc.port, proc.secret.clone());
-            match Self::wait_ready(&mut proc, rpc).await {
+            let rpc = RpcClient::new(proc.port, proc.secret.clone())?;
+            match Self::wait_ready(&mut proc, &rpc).await {
                 Ok(()) => return Ok(proc),
                 Err(e) => last_err = Some(e),
             }
         }
         Err(last_err.unwrap_or_else(|| anyhow::anyhow!("aria2 RPC did not recover after restart")))
+    }
+
+    /// OS process id of the current aria2c child.
+    pub fn pid(&self) -> u32 {
+        self.process.lock().unwrap_or_else(|e| e.into_inner()).pid()
+    }
+
+    /// Watch the engine process lifecycle. The controller reconciles its rows
+    /// against aria2 on every `Restarting → Ready`.
+    pub fn state(&self) -> watch::Receiver<EngineState> {
+        self.state.subscribe()
     }
 
     /// Subscribe to aria2 lifecycle notifications.
@@ -170,6 +222,7 @@ impl Engine {
     /// Graceful shutdown: stop the watchdog, flush the session, ask aria2 to stop.
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Relaxed);
+        self.state.send_replace(EngineState::Stopping);
         let _ = self.rpc.save_session().await;
         let _ = self.rpc.shutdown().await;
     }

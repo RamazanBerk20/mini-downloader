@@ -10,6 +10,8 @@ Usage:
   mini-downloader ctl <command> [json-args]
                                    run one controller command, print its JSON result
   mini-downloader ctl subscribe    stream controller events, one JSON object per line
+  mini-downloader ctl why '{\"id\":3}' [--json]
+                                   why a download is in its state (text, or JSON)
   mini-downloader --version | --help
 
 ctl examples:
@@ -42,8 +44,12 @@ fn run_ctl(runtime: &tokio::runtime::Runtime, arguments: &[String]) -> i32 {
         eprintln!("event stream ended: {}", ended.err().unwrap_or_default());
         return 1;
     }
+    let json_output = arguments
+        .iter()
+        .skip(1)
+        .any(|argument| argument == "--json");
     let mut request = serde_json::json!({ "command": name });
-    if let Some(raw) = arguments.get(1) {
+    if let Some(raw) = arguments.get(1).filter(|argument| *argument != "--json") {
         match serde_json::from_str::<serde_json::Value>(raw) {
             Ok(arguments) => request["args"] = arguments,
             Err(error) => {
@@ -69,7 +75,10 @@ fn run_ctl(runtime: &tokio::runtime::Runtime, arguments: &[String]) -> i32 {
     });
     match outcome {
         Ok(result) => {
-            println!("{result}");
+            match result.get("summary").and_then(|summary| summary.as_str()) {
+                Some(summary) if name == "why" && !json_output => print!("{summary}"),
+                _ => println!("{result}"),
+            }
             0
         }
         Err(error) => {
@@ -134,10 +143,13 @@ pub(super) fn run() {
         // Slint's Linux accessibility bridge uses zbus, which discovers the
         // active Tokio reactor while constructing the window.
         let _runtime_guard = runtime.enter();
+        // With `ui-mcp`, SLINT_BACKEND=headless runs the UI without a display.
         #[cfg(target_os = "linux")]
-        if let Err(error) = select_linux_ui_backend() {
-            eprintln!("native UI backend: {error}");
-            return;
+        if cfg!(not(feature = "ui-mcp")) || std::env::var_os("SLINT_BACKEND").is_none() {
+            if let Err(error) = select_linux_ui_backend() {
+                eprintln!("native UI backend: {error}");
+                return;
+            }
         }
         if let Err(error) = run_ui(&runtime) {
             eprintln!("native UI: {error}");
@@ -159,8 +171,9 @@ fn select_linux_ui_backend() -> Result<(), String> {
     use slint::winit_030::winit::platform::wayland::WindowAttributesExtWayland as WaylandAttributes;
     use slint::winit_030::winit::platform::x11::WindowAttributesExtX11 as X11Attributes;
 
-    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some()
-        && std::env::var("WINIT_UNIX_BACKEND").as_deref() != Ok("x11");
+    // Must match winit's own choice: Wayland whenever WAYLAND_DISPLAY is set
+    // (the controller removes it for MINIDL_UI_X11=1).
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .with_winit_window_attributes_hook(move |attributes| {

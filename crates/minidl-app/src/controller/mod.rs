@@ -86,11 +86,29 @@ pub struct DownloadView {
     pub checksum: Option<String>,
     pub start_at: Option<i64>,
     pub media_opts: Option<String>,
+    /// The finished file or folder, when it exists on disk.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// `path` is a folder (a multi-file torrent); `entries` counts its items.
+    #[serde(default)]
+    pub is_dir: bool,
+    #[serde(default)]
+    pub entries: Option<i64>,
 }
 
 impl From<Download> for DownloadView {
     fn from(row: Download) -> Self {
+        let path = crate::completion::downloaded_path(&row);
+        let is_dir = path.as_deref().is_some_and(Path::is_dir);
+        let entries = path
+            .as_deref()
+            .filter(|_| is_dir)
+            .and_then(|path| std::fs::read_dir(path).ok())
+            .map(|entries| entries.count().min(i64::MAX as usize) as i64);
         Self {
+            path: path.map(|path| path.to_string_lossy().into_owned()),
+            is_dir,
+            entries,
             id: row.id,
             gid: row.gid,
             url: row.url,
@@ -133,6 +151,15 @@ pub struct AppSnapshot {
     pub schedules: Vec<Schedule>,
     pub settings: HashMap<String, String>,
     pub engine_running: bool,
+    /// aria2's supervisor state (`ready`, `restarting`, …) while it runs.
+    #[serde(default)]
+    pub engine_state: Option<Value>,
+    #[serde(default = "tray_default")]
+    pub tray_available: bool,
+}
+
+fn tray_default() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +248,7 @@ pub struct Controller {
     connector_presence: Arc<Mutex<crate::connector::ConnectorPresence>>,
     power_fired: AtomicBool,
     quit: AtomicBool,
+    tray_available: AtomicBool,
 }
 
 impl Controller {
@@ -291,8 +319,10 @@ impl Controller {
             ),
             power_fired: AtomicBool::new(false),
             quit: AtomicBool::new(false),
+            tray_available: AtomicBool::new(true),
         });
         controller.spawn_ytdlp_completion_handler(ytdlp_completions);
+        controller.recover_ytdlp_rows();
         // Only pay the startup/reconciliation cost when durable aria2 state
         // exists. A truly empty controller reaches tray idle without aria2.
         if controller
@@ -319,6 +349,11 @@ impl Controller {
     }
     pub fn clipboard_enabled(&self) -> bool {
         self.clipboard_on.load(Ordering::Relaxed)
+    }
+    /// Set by the desktop shell: whether a tray icon exists to bring the
+    /// window back after it closes to the background.
+    pub fn set_tray_available(&self, available: bool) {
+        self.tray_available.store(available, Ordering::Relaxed);
     }
 
     pub fn record_connector_presence(&self, family: minidl_ipc::BrowserFamily) {
@@ -490,15 +525,97 @@ fn deletion_target(dir: &Path, candidate: &Path) -> Option<PathBuf> {
     parent.starts_with(root).then(|| parent.join(name))
 }
 
-/// Delete one downloaded file and its aria2 control file, refusing anything
-/// that resolves outside the download's own directory.
-fn delete_download_file(dir: &Path, file: &Path) {
-    if let Some(target) = deletion_target(dir, file) {
-        let _ = std::fs::remove_file(&target);
-        let mut sidecar = target.into_os_string();
-        sidecar.push(".aria2");
-        let _ = std::fs::remove_file(PathBuf::from(sidecar));
+/// Whether Retry can re-add this kind of download. The bytes of a .torrent or
+/// .metalink file are not kept after it was added.
+pub fn retryable(kind: &str) -> bool {
+    !matches!(kind, "torrent" | "metalink")
+}
+
+/// `error_code` of a video row whose yt-dlp process did not survive the app.
+pub const INTERRUPTED: &str = "interrupted";
+
+/// Delete one downloaded file (or a torrent's folder) and its aria2 control
+/// file, refusing anything that resolves outside the download's own
+/// directory. Symlinks are removed, never followed.
+fn delete_download_file(dir: &Path, file: &Path) -> Result<(), String> {
+    let Some(target) = deletion_target(dir, file) else {
+        return Ok(());
+    };
+    let result = match std::fs::symlink_metadata(&target) {
+        Ok(metadata) if metadata.is_dir() => std::fs::remove_dir_all(&target),
+        Ok(_) => std::fs::remove_file(&target),
+        Err(error) => Err(error),
+    };
+    let mut sidecar = target.clone().into_os_string();
+    sidecar.push(".aria2");
+    let _ = std::fs::remove_file(PathBuf::from(sidecar));
+    match result {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err(format!("{}: {error}", target.display()))
+        }
+        _ => Ok(()),
     }
+}
+
+/// A staging folder this row owns, checked to be a real directory inside
+/// `dir` (never a symlink out of it).
+fn verified_stage(dir: &Path, stage: &Path) -> Option<PathBuf> {
+    let metadata = std::fs::symlink_metadata(stage).ok()?;
+    let root = dir.canonicalize().ok()?;
+    let canonical = stage.canonicalize().ok()?;
+    (metadata.is_dir() && canonical != root && canonical.starts_with(&root)).then_some(canonical)
+}
+
+fn delete_stage(dir: &Path, stage: &Path) -> Result<(), String> {
+    let Some(stage) = verified_stage(dir, stage) else {
+        return Ok(());
+    };
+    // remove_dir_all does not follow symlinks inside the folder.
+    std::fs::remove_dir_all(&stage).map_err(|error| format!("{}: {error}", stage.display()))?;
+    if let Some(parent) = stage
+        .parent()
+        .filter(|parent| parent.file_name() == Some(minidl_core::files::STAGING_DIR.as_ref()))
+    {
+        let _ = std::fs::remove_dir(parent);
+    }
+    Ok(())
+}
+
+/// Move each partial file out of a removed row's staging folder into `dir` as
+/// `<name>.part` (never replacing anything) and drop aria2's control files.
+fn keep_partials(dir: &Path, stage: &Path) -> Result<(), String> {
+    let Some(stage) = verified_stage(dir, stage) else {
+        return Ok(());
+    };
+    let entries = std::fs::read_dir(&stage).map_err(|error| error.to_string())?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let regular = entry.file_type().is_ok_and(|kind| kind.is_file());
+        if !regular {
+            continue;
+        }
+        if name.ends_with(".aria2") || entry.metadata().is_ok_and(|meta| meta.len() == 0) {
+            let _ = std::fs::remove_file(entry.path());
+            continue;
+        }
+        let wanted = minidl_core::files::safe_out_name(&format!("{name}.part"))
+            .unwrap_or_else(|| "download.part".into());
+        let moved = (0..1_000u32).any(|suffix| {
+            let candidate = if suffix == 0 {
+                wanted.clone()
+            } else {
+                minidl_core::files::collision_name(&wanted, suffix)
+            };
+            minidl_core::files::rename_noreplace(&entry.path(), &dir.join(candidate)).is_ok()
+        });
+        if !moved {
+            return Err(format!(
+                "the partial download was kept in {}",
+                stage.display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn stored_detail_file(row: &Download) -> Option<DetailFile> {
