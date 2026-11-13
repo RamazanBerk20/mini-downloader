@@ -31,5 +31,11 @@ fn main() {
     std::fs::write(out_dir.join("app-icon.rgba"), &rgba).expect("write canonical RGBA app icon");
     std::fs::write(out_dir.join("app-icon.argb"), &argb).expect("write canonical ARGB app icon");
 
-    slint_build::compile("ui/main-window.slint").expect("compile native UI");
+    // The Slint compiler recurses deeply on this UI and overflows the 1 MiB main-thread stack on Windows.
+    std::thread::Builder::new()
+        .stack_size(64 << 20)
+        .spawn(|| slint_build::compile("ui/main-window.slint").expect("compile native UI"))
+        .expect("spawn the UI compiler thread")
+        .join()
+        .expect("UI compiler thread");
 }
