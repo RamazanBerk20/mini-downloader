@@ -432,6 +432,10 @@ mod tests {
         assert!(gesture.moved(1, 0.0, 8.0));
     }
 
+    #[cfg_attr(
+        not(unix),
+        ignore = "Unix path literals; the URI list is only offered on Linux"
+    )]
     #[test]
     fn a_drag_carries_the_selection_only_when_it_starts_on_a_selected_row() {
         let rows = [
@@ -469,6 +473,10 @@ mod tests {
         assert!(paths(&[], 9).is_empty());
     }
 
+    #[cfg_attr(
+        not(unix),
+        ignore = "Unix path literals; the URI list is only offered on Linux"
+    )]
     #[test]
     fn uri_lists_encode_every_awkward_byte() {
         let paths = [
