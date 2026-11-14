@@ -11,7 +11,7 @@ A lightweight, local-first download manager for Linux and Windows. The desktop
 UI is native Rust + Slint and uses the software renderer, so an idle window does
 not keep a browser engine, GPU driver stack, or JavaScript runtime resident.
 
-![Mini Downloader completed-download view](docs/store-assets/v3.0.0/desktop-completed-download.png)
+![Mini Downloader main window, with file-type icons on each download](docs/images/main-window.png)
 
 ## Install
 
@@ -26,15 +26,16 @@ media downloads.
 The AppImage intentionally uses these host tools rather than keeping duplicate
 copies resident or silently self-updating them.
 
-Until AUR publishing resumes, Arch-based distributions should use the AppImage
-or portable `.tar.gz` from GitHub Releases. Maintainer-ready recipes for the
-prebuilt, tagged-source, and current-`main` variants remain under
-[`packaging/aur`](packaging/aur) for local packaging and future publication.
+Arch-based distributions can install from the AUR: `mini-downloader` (builds the
+tagged source), `mini-downloader-bin` (the prebuilt release archive) or
+`mini-downloader-git` (current `main`), for example
+`yay -S mini-downloader-bin`. The AppImage and portable `.tar.gz` also work. The
+recipes live under [`packaging/aur`](packaging/aur).
 
 Windows releases include a per-user NSIS installer and a portable `.zip`.
 `aria2c` and `yt-dlp` are bundled; install `ffmpeg` and add it to `PATH` for
 video/audio muxing. Signed releases establish the Mini Downloader publisher
-identity. Unsigned releases—including v3.0.0—carry an explicit warning in the
+identity. Unsigned releases, including v3.3.0, carry an explicit warning in the
 release notes and `WINDOWS-UNSIGNED.txt`; Windows may show an Unknown publisher
 warning. Always verify `SHA256SUMS` before running a download.
 

@@ -67,9 +67,10 @@ sources as required. If you configure a proxy, download requests are routed
 through that proxy; its operator may be able to observe the destination and,
 for unencrypted protocols, request data.
 
-When local-address blocking is enabled, the app rejects an initial target that
-currently resolves to a private, loopback, link-local, or reserved address, and
-aria2 redirects are disabled for that transfer. This is defense in depth, not a
+When local-address blocking is enabled, the app rejects a target, and every
+redirect hop it follows itself, that currently resolves to a private, loopback,
+link-local, or reserved address. aria2 does not follow redirects for transfers
+that carry browser-captured credentials. This is defense in depth, not a
 network sandbox: DNS can change between validation and connection, and yt-dlp
 may follow redirects internally. Do not use the downloader as a security
 boundary on an untrusted network.

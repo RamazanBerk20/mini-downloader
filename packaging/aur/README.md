@@ -1,6 +1,6 @@
 # Publishing to the AUR
 
-The repository maintains three native packages:
+The repository maintains three native packages (all three are published on the AUR):
 
 - `mini-downloader-bin` installs the prebuilt native release archive.
 - `mini-downloader` builds a tagged source release with Cargo.
