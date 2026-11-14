@@ -144,9 +144,9 @@ pub(super) fn run() {
         // active Tokio reactor while constructing the window.
         let _runtime_guard = runtime.enter();
         // With `ui-mcp`, SLINT_BACKEND=headless runs the UI without a display.
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", windows))]
         if cfg!(not(feature = "ui-mcp")) || std::env::var_os("SLINT_BACKEND").is_none() {
-            if let Err(error) = select_linux_ui_backend() {
+            if let Err(error) = select_ui_backend() {
                 eprintln!("native UI backend: {error}");
                 return;
             }
@@ -166,8 +166,20 @@ pub(super) fn run() {
     }
 }
 
+/// Windows: the frameless window keeps the system's shadow (and with it the
+/// resize border and snap layouts' feel).
+#[cfg(windows)]
+fn select_ui_backend() -> Result<(), String> {
+    use slint::winit_030::winit::platform::windows::WindowAttributesExtWindows as _;
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .with_winit_window_attributes_hook(|attributes| attributes.with_undecorated_shadow(true))
+        .select()
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(target_os = "linux")]
-fn select_linux_ui_backend() -> Result<(), String> {
+fn select_ui_backend() -> Result<(), String> {
     use slint::winit_030::winit::platform::wayland::WindowAttributesExtWayland as WaylandAttributes;
     use slint::winit_030::winit::platform::x11::WindowAttributesExtX11 as X11Attributes;
 

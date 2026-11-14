@@ -277,5 +277,8 @@
   "alreadyInList": "Déjà dans la liste",
   "filesCopied": "{n} fichier(s) copié(s)",
   "showInFolder": "Afficher dans le dossier",
-  "scCopyFiles": "Copier les fichiers terminés"
+  "scCopyFiles": "Copier les fichiers terminés",
+  "windowMinimize": "Réduire",
+  "windowMaximize": "Agrandir",
+  "windowRestore": "Restaurer"
 }

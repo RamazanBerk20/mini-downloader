@@ -277,5 +277,8 @@
   "alreadyInList": "Уже в списке",
   "filesCopied": "Скопировано файлов: {n}",
   "showInFolder": "Показать в папке",
-  "scCopyFiles": "Копировать готовые файлы"
+  "scCopyFiles": "Копировать готовые файлы",
+  "windowMinimize": "Свернуть",
+  "windowMaximize": "Развернуть",
+  "windowRestore": "Восстановить"
 }

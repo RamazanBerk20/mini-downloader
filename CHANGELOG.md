@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The window draws its own title bar instead of the system's: the sidebar
+  wordmark and the page's top row are the bar (drag to move, double-click to
+  maximise), with minimise, maximise/restore and close at its outer end
+  (mirrored in Arabic). Edges and corners still resize. Close behaves exactly
+  as the system close button did (close to tray when enabled).
+- While something downloads, the total rate shows under the wordmark, with the
+  global speed cap beside it when one is set. Nothing is shown when idle.
+- The minimum window width is now 860 px so the bar always fits.
+- Not tested on real hardware: on Windows the frameless window keeps the
+  system shadow (`with_undecorated_shadow`); it was not run there.
+
 ## [3.3.0] - 2026-11-13
 
 ### Upgrade notes (read first)

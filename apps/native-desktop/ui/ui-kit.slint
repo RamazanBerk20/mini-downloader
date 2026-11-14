@@ -42,6 +42,10 @@ export component AppIcon inherits Path {
     commands: name == "add" ? "M12 5 L12 19 M5 12 L19 12" :
         name == "heart" ? "M12 20 C10.8 19.2 3 14.5 3 9.2 C3 6.5 5 4.5 7.7 4.5 C9.4 4.5 11 5.4 12 6.8 C13 5.4 14.6 4.5 16.3 4.5 C19 4.5 21 6.5 21 9.2 C21 14.5 13.2 19.2 12 20 Z" :
         name == "close" ? "M6 6 L18 18 M18 6 L6 18" :
+        // Window buttons (the custom title bar in main-window.slint).
+        name == "minimize" ? "M6 13 L18 13" :
+        name == "maximize" ? "M6 6 L18 6 L18 18 L6 18 Z" :
+        name == "restore" ? "M5 9 L15 9 L15 19 L5 19 Z M9 9 L9 5 L19 5 L19 15 L15 15" :
         name == "file" ? "M6 3 L14 3 L18 7 L18 21 L6 21 Z M14 3 L14 7 L18 7" :
         name == "video" ? "M5 6 L14 6 A2 2 0 0 1 16 8 L16 16 A2 2 0 0 1 14 18 L5 18 A2 2 0 0 1 3 16 L3 8 A2 2 0 0 1 5 6 Z M16 10 L21 7 L21 17 L16 14 Z" :
         name == "link" ? "M9.5 14.5 L14.5 9.5 M11 7 L12 6 A4 4 0 0 1 18 12 L17 13 M13 17 L12 18 A4 4 0 0 1 6 12 L7 11" :
@@ -934,4 +938,48 @@ export component NoticeBanner inherits Rectangle {
             }
         }
     }
+}
+
+// Empty title-bar space: press and move drags the window (handed to the
+// compositor through winit), a double-click toggles maximise. Controls
+// placed above it keep their own presses.
+export component WindowDragArea inherits TouchArea {
+    callback drag();
+    callback toggle-maximized();
+    // One drag per press: after drag_window the compositor owns the pointer.
+    property <bool> armed;
+    pointer-event(event) => {
+        if event.button == PointerEventButton.left {
+            self.armed = event.kind == PointerEventKind.down;
+        }
+    }
+    moved => {
+        if self.armed && (abs(self.mouse-x - self.pressed-x) > 3px || abs(self.mouse-y - self.pressed-y) > 3px) {
+            self.armed = false;
+            root.drag();
+        }
+    }
+    double-clicked => { root.toggle-maximized(); }
+}
+
+// Minimise, maximise/restore, close; mirrored with the layout.
+export component WindowButtons inherits HorizontalLayout {
+    in property <bool> maximized;
+    in property <bool> rtl;
+    in property <string> label-minimize;
+    in property <string> label-maximize;
+    in property <string> label-restore;
+    in property <string> label-close;
+    callback minimize();
+    callback toggle-maximized();
+    callback close();
+    spacing: 2px;
+    // Set a little apart from the app's own tools.
+    padding-left: root.rtl ? 0px : 8px;
+    padding-right: root.rtl ? 8px : 0px;
+    if root.rtl: IconButton { icon: "close"; label: root.label-close; danger: true; clicked => { root.close(); } }
+    if root.rtl: IconButton { icon: root.maximized ? "restore" : "maximize"; label: root.maximized ? root.label-restore : root.label-maximize; clicked => { root.toggle-maximized(); } }
+    IconButton { icon: "minimize"; label: root.label-minimize; clicked => { root.minimize(); } }
+    if !root.rtl: IconButton { icon: root.maximized ? "restore" : "maximize"; label: root.maximized ? root.label-restore : root.label-maximize; clicked => { root.toggle-maximized(); } }
+    if !root.rtl: IconButton { icon: "close"; label: root.label-close; danger: true; clicked => { root.close(); } }
 }

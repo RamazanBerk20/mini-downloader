@@ -277,5 +277,8 @@
   "alreadyInList": "이미 목록에 있음",
   "filesCopied": "파일 {n}개를 복사했습니다",
   "showInFolder": "폴더에서 보기",
-  "scCopyFiles": "완료된 파일 복사"
+  "scCopyFiles": "완료된 파일 복사",
+  "windowMinimize": "최소화",
+  "windowMaximize": "최대화",
+  "windowRestore": "이전 크기로"
 }

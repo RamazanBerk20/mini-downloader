@@ -1,4 +1,5 @@
-//! Drag-out end to end, without touching the desktop it runs on: a nested
+//! Drag-out and the app-drawn title bar end to end, without touching the
+//! desktop it runs on: a nested
 //! KWin (`--virtual` output plus its own Xwayland and D-Bus), an isolated
 //! app instance with one finished download whose name is awkward, a drop
 //! target helper (an XDND window, or a Wayland layer-shell surface), and
@@ -10,7 +11,8 @@
 //! ```
 //!
 //! Skips (passes with a notice) when kwin_wayland, Xwayland, xdotool,
-//! dbus-run-session or aria2c is missing.
+//! dbus-run-session, gdbus or aria2c is missing. Window geometry comes from a
+//! KWin script, which sees X11 and Wayland windows alike.
 #![cfg(target_os = "linux")]
 
 use std::io::{Read, Write};
@@ -49,6 +51,13 @@ fn escape_and_dropping_on_the_app_itself_do_nothing() {
     run(Mode::Wayland, End::OwnWindow);
 }
 
+#[test]
+#[ignore = "starts a nested KWin; needs kwin_wayland, Xwayland, xdotool and aria2c"]
+fn the_title_bar_moves_maximises_resizes_and_closes_the_window() {
+    title_bar(Mode::X11);
+    title_bar(Mode::Wayland);
+}
+
 /// Re-entered by the tests above as a separate process: the drop target.
 #[test]
 #[ignore = "helper process for the drag-out tests"]
@@ -78,22 +87,122 @@ enum End {
     OwnWindow,
 }
 
-fn run(mode: Mode, end: End) {
+fn tools_missing() -> bool {
     let missing = [
         "kwin_wayland",
         "Xwayland",
         "xdotool",
         "dbus-run-session",
+        "gdbus",
         "aria2c",
     ]
     .into_iter()
     .filter(|tool| !on_path(tool))
     .collect::<Vec<_>>();
     if !missing.is_empty() {
-        eprintln!(
-            "skipped: drag-out end-to-end test needs {}",
-            missing.join(", ")
-        );
+        eprintln!("skipped: end-to-end test needs {}", missing.join(", "));
+    }
+    !missing.is_empty()
+}
+
+/// Drag the bar, double-click it, pull an edge, then its close button.
+fn title_bar(mode: Mode) {
+    if tools_missing() {
+        return;
+    }
+    let mut nest = Nest::start();
+    nest.finished_download(mode);
+    nest.ctl(mode, "show", None).expect("show the window");
+    let (x, y) = nest.app_window(mode);
+    let mut input = Input::connect(&nest.root.join("r/wl"));
+    let drag = |input: &mut Input, from: (i32, i32), by: (i32, i32)| {
+        input.move_to(from.0, from.1);
+        std::thread::sleep(Duration::from_millis(300));
+        input.button(true);
+        for step in 1..=10 {
+            std::thread::sleep(Duration::from_millis(40));
+            input.move_to(from.0 + by.0 * step / 10, from.1 + by.1 * step / 10);
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        input.button(false);
+        std::thread::sleep(Duration::from_millis(600));
+    };
+
+    // Empty bar space right of the wordmark: the window follows the pointer
+    // (less the few pixels before a press becomes a drag).
+    drag(&mut input, (x + 215, y + 30), (100, 60));
+    let moved = nest.geometry();
+    assert!(
+        (85..=100).contains(&(moved.0 - x)) && (45..=60).contains(&(moved.1 - y)),
+        "dragging the bar moves the window: {:?} -> {moved:?}",
+        (x, y)
+    );
+    assert_eq!((moved.2, moved.3), (1000, 680), "a move is not a resize");
+
+    let double_click = |input: &mut Input, at: (i32, i32)| {
+        input.move_to(at.0, at.1);
+        std::thread::sleep(Duration::from_millis(300));
+        for _ in 0..2 {
+            input.button(true);
+            input.button(false);
+            std::thread::sleep(Duration::from_millis(60));
+        }
+        std::thread::sleep(Duration::from_millis(800));
+    };
+    double_click(&mut input, (moved.0 + 215, moved.1 + 30));
+    let maximised = nest.geometry();
+    assert_eq!(
+        maximised,
+        (0, 0, SCREEN.0, SCREEN.1),
+        "double-click maximises"
+    );
+    double_click(&mut input, (215, 30));
+    assert_eq!(nest.geometry(), moved, "double-click again restores");
+
+    // The right edge, half way down: only the width changes.
+    drag(
+        &mut input,
+        (moved.0 + moved.2 - 2, moved.1 + moved.3 / 2),
+        (120, 0),
+    );
+    let wider = nest.geometry();
+    assert_eq!((wider.0, wider.1, wider.3), (moved.0, moved.1, moved.3));
+    assert!(
+        (1105..=1120).contains(&wider.2),
+        "the right edge resizes: {wider:?}"
+    );
+
+    // Close, the last button of the bar (12 px padding, 32 px buttons):
+    // the UI child ends. (Without a tray in the nest the controller follows,
+    // exactly as with the system close button.)
+    let ui_child = || {
+        // A child is listed under the thread that spawned it.
+        let app = nest.app.as_ref().unwrap().id();
+        std::fs::read_dir(format!("/proc/{app}/task"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|task| std::fs::read_to_string(task.path().join("children")).ok())
+            .flat_map(|pids| {
+                pids.split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .any(|pid| {
+                std::fs::read(format!("/proc/{pid}/cmdline"))
+                    .is_ok_and(|cmd| cmd.windows(11).any(|part| part == b"--ui-client"))
+            })
+    };
+    assert!(ui_child(), "the UI runs before the close");
+    input.move_to(wider.0 + wider.2 - 28, wider.1 + 32);
+    std::thread::sleep(Duration::from_millis(300));
+    input.button(true);
+    input.button(false);
+    wait_for(|| !ui_child(), "the close button to end the UI");
+}
+
+fn run(mode: Mode, end: End) {
+    if tools_missing() {
         return;
     }
     let mut nest = Nest::start();
@@ -283,8 +392,10 @@ impl Nest {
             .env("PATH", std::env::var_os("PATH").unwrap())
             .envs(Self::isolated(&root))
             .env("KWIN_WAYLAND_NO_PERMISSION_CHECKS", "1")
+            // KWin scripts' console output (Nest::geometry) on stderr, not the journal.
+            .env("QT_FORCE_STDERR_LOGGING", "1")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(std::fs::File::create(root.join("kwin.log")).unwrap())
             .process_group(0)
             .spawn()
             .unwrap();
@@ -420,46 +531,92 @@ impl Nest {
         path.unwrap()
     }
 
-    /// The app window's top-left on the screen. KWin centres a new window;
-    /// under Xwayland we can ask, natively we assume the same placement.
-    fn app_window(&self, mode: Mode) -> (i32, i32) {
-        if mode == Mode::Wayland {
-            // No X window to ask: give the UI time to map, then use KWin's
-            // centred placement of the 1000x680 window below its title bar.
-            std::thread::sleep(Duration::from_secs(3));
-            return ((SCREEN.0 - 1000) / 2, (SCREEN.1 - 680) / 2 + 18);
-        }
-        let position = || {
-            let output = self
-                .command(Mode::X11, "xdotool")
-                .args([
-                    "search",
-                    "--name",
-                    "Mini Downloader",
-                    "getwindowgeometry",
-                    "--shell",
-                ])
-                .output()
-                .unwrap();
-            let text = String::from_utf8_lossy(&output.stdout).into_owned();
-            let value = |key: &str| {
-                text.lines()
-                    .find_map(|line| line.strip_prefix(key)?.parse::<i32>().ok())
-            };
-            value("X=").zip(value("Y="))
-        };
+    /// The app window's top-left on the screen, once KWin has placed it.
+    fn app_window(&self, _mode: Mode) -> (i32, i32) {
         // Mapped at 0,0 first, then placed by KWin: wait until it stays put.
         let mut found = None;
         wait_for(
             || {
-                let before = position();
+                let before = self.try_geometry();
                 std::thread::sleep(Duration::from_millis(500));
-                found = position();
-                found.is_some() && found == before && found != Some((0, 0))
+                found = self.try_geometry();
+                found.is_some() && found == before && found.is_some_and(|at| (at.0, at.1) != (0, 0))
             },
             "the app window to be placed",
         );
-        found.unwrap()
+        found.map(|at| (at.0, at.1)).unwrap()
+    }
+
+    /// The app window's frame (x, y, width, height); it draws its own bar,
+    /// so the frame is the window.
+    fn geometry(&self) -> (i32, i32, i32, i32) {
+        self.try_geometry().expect("KWin knows the app window")
+    }
+
+    /// Asks KWin through a one-off script; X11 and Wayland windows alike.
+    fn try_geometry(&self) -> Option<(i32, i32, i32, i32)> {
+        static SCRIPTS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let tag = format!(
+            "geometry{}",
+            SCRIPTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let script = self.root.join(format!("{tag}.js"));
+        std::fs::write(
+            &script,
+            format!(
+                "for (const w of workspace.windowList()) if (w.caption == \"Mini Downloader\") \
+                 console.warn(\"{tag} \" + w.frameGeometry.x + \" \" + w.frameGeometry.y + \" \" \
+                 + w.frameGeometry.width + \" \" + w.frameGeometry.height);"
+            ),
+        )
+        .unwrap();
+        let gdbus = |object: &str, method: &str, args: &[&str]| {
+            let output = self
+                .command(Mode::Wayland, "gdbus")
+                .args([
+                    "call",
+                    "--session",
+                    "-d",
+                    "org.kde.KWin",
+                    "-o",
+                    object,
+                    "-m",
+                    method,
+                ])
+                .args(args)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        let id = gdbus(
+            "/Scripting",
+            "org.kde.kwin.Scripting.loadScript",
+            &[&script.display().to_string(), &tag],
+        )
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect::<String>();
+        gdbus(
+            &format!("/Scripting/Script{id}"),
+            "org.kde.kwin.Script.run",
+            &[],
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            let log = std::fs::read_to_string(self.root.join("kwin.log")).unwrap_or_default();
+            if let Some(line) = log
+                .lines()
+                .find_map(|line| line.split_once(&format!("{tag} ")).map(|(_, rest)| rest))
+            {
+                let mut values = line
+                    .split_whitespace()
+                    .map(|value| value.parse::<f64>().ok());
+                let mut next = || values.next().flatten().map(|value| value.round() as i32);
+                return Some((next()?, next()?, next()?, next()?));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        None
     }
 }
 

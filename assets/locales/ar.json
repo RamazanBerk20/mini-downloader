@@ -277,5 +277,8 @@
   "alreadyInList": "موجود في القائمة بالفعل",
   "filesCopied": "تم نسخ {n} ملف",
   "showInFolder": "إظهار في المجلد",
-  "scCopyFiles": "نسخ الملفات المكتملة"
+  "scCopyFiles": "نسخ الملفات المكتملة",
+  "windowMinimize": "تصغير",
+  "windowMaximize": "تكبير",
+  "windowRestore": "استعادة"
 }

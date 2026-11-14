@@ -227,6 +227,25 @@ mod tests {
         assert!(rows[0].can_resume && !rows[0].can_pause);
     }
 
+    #[test]
+    fn the_title_bar_rate_counts_only_running_transfers() {
+        let mut rows = vec![
+            sample("http", "active"),
+            sample("http", "active"),
+            sample("http", "paused"),
+            sample("http", "complete"),
+        ];
+        rows[0].download_speed = 2_000_000;
+        rows[1].download_speed = 345_678;
+        rows[2].download_speed = 9_000_000;
+        assert_eq!(total_download_speed(&rows), 2_345_678);
+        assert_eq!(format_speed(total_download_speed(&rows)), "2.35 MB/s");
+        rows[1].download_speed = i64::MAX;
+        assert_eq!(total_download_speed(&rows), i64::MAX);
+        // Idle: nothing to show, the bar stays still.
+        assert_eq!(format_speed(total_download_speed(&rows[2..])), "");
+    }
+
     fn sample(kind: &str, status: &str) -> minidl_app::controller::DownloadView {
         serde_json::from_value(serde_json::json!({
             "id": 1, "gid": null, "url": "https://example.org/a.iso", "filename": null,

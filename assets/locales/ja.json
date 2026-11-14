@@ -277,5 +277,8 @@
   "alreadyInList": "すでにリストにあります",
   "filesCopied": "{n} 個のファイルをコピーしました",
   "showInFolder": "フォルダに表示",
-  "scCopyFiles": "完了したファイルをコピー"
+  "scCopyFiles": "完了したファイルをコピー",
+  "windowMinimize": "最小化",
+  "windowMaximize": "最大化",
+  "windowRestore": "元に戻す"
 }

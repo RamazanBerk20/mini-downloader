@@ -439,6 +439,7 @@ pub(super) fn run_ui(runtime: &tokio::runtime::Runtime) -> Result<(), String> {
     ctx.render_notices(&ui);
     install_callbacks(&ui, &ctx);
     install_window_events(&ui, &ctx);
+    install_title_bar(&ui);
     let quit_controller = Arc::new(AtomicBool::new(false));
     {
         let weak = ui.as_weak();
@@ -515,6 +516,37 @@ fn apply_benchmark_start_page(ui: &MainWindow) {
         Ok("shortcuts") => ui.set_overlay(Overlay::Shortcuts),
         _ => {}
     }
+}
+
+/// The title bar's drag, minimise and close; maximise is the Window's property.
+fn install_title_bar(ui: &MainWindow) {
+    use slint::winit_030::WinitWindowAccessor;
+
+    let weak = ui.as_weak();
+    ui.on_window_drag(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.window().with_winit_window(|window| {
+                let _ = window.drag_window();
+            });
+        }
+    });
+    // Through winit, not the Window's `minimized`: Wayland never reports
+    // un-minimising, so that property would stay set (and freeze `maximized`).
+    let weak = ui.as_weak();
+    ui.on_window_minimize(move || {
+        if let Some(ui) = weak.upgrade() {
+            ui.window()
+                .with_winit_window(|window| window.set_minimized(true));
+        }
+    });
+    let weak = ui.as_weak();
+    ui.on_window_close(move || {
+        // Exactly the system close button: on_close_requested decides.
+        if let Some(ui) = weak.upgrade() {
+            ui.window()
+                .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+        }
+    });
 }
 
 fn install_window_events(ui: &MainWindow, ctx: &Arc<Ctx>) {

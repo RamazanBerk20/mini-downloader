@@ -341,6 +341,9 @@ pub(super) fn apply_i18n(ui: &MainWindow, catalog: &locale::Catalog) {
     set!(set_label_cancel_schedule, "scheduleCancel");
     set!(set_label_unlimited, "speedUnlimited");
     set!(set_label_global_speed, "globalSpeed");
+    set!(set_label_minimize, "windowMinimize");
+    set!(set_label_maximize, "windowMaximize");
+    set!(set_label_restore, "windowRestore");
     ui.set_rtl(catalog.is_rtl());
     let media_count = ui.get_media_choices().row_count();
     ui.set_media_entries_text(
@@ -649,6 +652,18 @@ pub(super) fn apply_download_counts(
         download.status == DownloadStatus::Complete
     }));
     ui.set_count_failed(count(|download| download.status == DownloadStatus::Error));
+    ui.set_total_rate_text(format_speed(total_download_speed(downloads)).into());
+}
+
+/// The title bar's live rate: only rows that are transferring now (a paused
+/// row keeps its last speed in the DB).
+pub(crate) fn total_download_speed(downloads: &[minidl_app::controller::DownloadView]) -> i64 {
+    downloads
+        .iter()
+        .filter(|download| download.status == minidl_core::model::DownloadStatus::Active)
+        .fold(0_i64, |sum, download| {
+            sum.saturating_add(download.download_speed.max(0))
+        })
 }
 
 pub(super) fn apply_selection_state(

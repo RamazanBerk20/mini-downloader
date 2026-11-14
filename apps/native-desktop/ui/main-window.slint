@@ -1,5 +1,5 @@
 import { ComboBox, Palette, ScrollView, SpinBox } from "std-widgets.slint";
-import { AppIcon, IconButton, IconSlot, NavItem, NoticeBanner, OnboardCard, SectionLabel, SettingsTab, Theme, UiButton, UiCheckBox, UiDecimalField, UiField, UiNumberField, UiSlider, UiSwitch, UiTextArea } from "ui-kit.slint";
+import { AppIcon, IconButton, IconSlot, NavItem, NoticeBanner, OnboardCard, SectionLabel, SettingsTab, Theme, UiButton, UiCheckBox, UiDecimalField, UiField, UiNumberField, UiSlider, UiSwitch, UiTextArea, WindowButtons, WindowDragArea } from "ui-kit.slint";
 import { CategoryRow, DetailFileRow, DownloadRow, LinkChoice, MediaChoice, NoticeRow, Overlay, ScheduleRow } from "models.slint";
 import { DownloadCard, DragGhost, PackageHeader } from "downloads.slint";
 import { BrowserStatus, BrowserStoreCard, DayChip, SettingsHint, SettingsToggleRow, SponsorButton } from "settings.slint";
@@ -12,8 +12,13 @@ export component MainWindow inherits Window {
     icon: @image-url("../../../assets/icons/32x32.png");
     preferred-width: 1000px;
     preferred-height: 680px;
-    min-width: 720px;
+    // Fits the title bar row (page title, search, tools, window buttons).
+    min-width: 860px;
     min-height: 480px;
+    // The app draws its own title bar; the toolkit keeps the edges resizable.
+    no-frame: true;
+    // `maximized` is the Window's own, kept in sync with the window manager.
+    resize-border-width: root.maximized || root.full-screen ? 0px : 6px;
     default-font-family: "Noto Sans";
     default-font-size: 14px;
     background: Theme.canvas;
@@ -88,6 +93,8 @@ export component MainWindow inherits Window {
     in-out property <string> theme-choice: "system";
     in property <bool> system-dark: true;
     in property <bool> rtl: false;
+    // Sum of the running downloads' rates; empty when nothing moves.
+    in property <string> total-rate-text: "";
     // "system" follows the platform scheme while Palette still reports it
     // (it does until the app first overrides it), else the Rust-side probe.
     in property <bool> dark: root.theme-choice == "dark" || (root.theme-choice == "system"
@@ -287,6 +294,13 @@ export component MainWindow inherits Window {
     in property <string> label-cancel-schedule: "Cancel schedule";
     in property <string> label-unlimited: "Unlimited";
     in property <string> label-global-speed: "Global speed limit";
+    in property <string> label-minimize: "Minimize";
+    in property <string> label-maximize: "Maximize";
+    in property <string> label-restore: "Restore";
+
+    callback window-drag();
+    callback window-minimize();
+    callback window-close();
 
     callback add-url(string, string);
     callback pick-file();
@@ -383,6 +397,13 @@ export component MainWindow inherits Window {
         root.filter-changed(value);
     }
 
+    pure function global-speed-text() -> string {
+        root.global-speed-index == 0 ? root.label-unlimited :
+        root.global-speed-index == 1 ? "500 KB/s" :
+        root.global-speed-index == 2 ? "1 MB/s" :
+        root.global-speed-index == 3 ? "5 MB/s" : "10 MB/s"
+    }
+
     pure function day-selected(bit: int) -> bool {
         Math.mod(Math.floor(root.schedule-days / bit), 2) == 1
     }
@@ -414,6 +435,14 @@ export component MainWindow inherits Window {
             background: Theme.canvas;
             border-width: 0px;
             Rectangle { x: root.rtl ? 0px : parent.width - 1px; width: 1px; height: parent.height; background: Theme.border; }
+            // The wordmark is the start of the title bar.
+            WindowDragArea {
+                y: 0px;
+                width: parent.width;
+                height: 64px;
+                drag => { root.window-drag(); }
+                toggle-maximized => { root.maximized = !root.maximized; }
+            }
             VerticalLayout {
                 padding-top: 18px;
                 padding-bottom: 12px;
@@ -482,10 +511,7 @@ export component MainWindow inherits Window {
                                 padding-right: 8px;
                                 spacing: 8px;
                                 Text {
-                                    text: root.global-speed-index == 0 ? root.label-unlimited :
-                                        root.global-speed-index == 1 ? "500 KB/s" :
-                                        root.global-speed-index == 2 ? "1 MB/s" :
-                                        root.global-speed-index == 3 ? "5 MB/s" : "10 MB/s";
+                                    text: root.global-speed-text();
                                     color: Theme.text;
                                     font-size: 12px;
                                     horizontal-stretch: 1;
@@ -516,6 +542,32 @@ export component MainWindow inherits Window {
                     NavItem { text: root.nav-settings; icon: "gear"; clicked => { root.settings-section = 0; root.overlay = Overlay.settings; } }
                 }
             }
+
+            // The bar's one live element, under the wordmark in the gap above
+            // the filters, so it appears and goes without moving anything. The
+            // gauge and the cap tie it to the speed-limit picker below.
+            if root.total-rate-text != "": HorizontalLayout {
+                x: 12px;
+                y: 46px;
+                height: 15px;
+                spacing: 5px;
+                alignment: start;
+                IconSlot { name: "gauge"; size: 12px; icon-color: Theme.muted; }
+                Text {
+                    text: root.total-rate-text;
+                    color: Theme.text;
+                    font-family: "Noto Sans Mono";
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+                if root.global-speed-index != 0: Text {
+                    text: "/ " + root.global-speed-text();
+                    color: Theme.muted;
+                    font-family: "Noto Sans Mono";
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
         }
 
         main-pane := Rectangle {
@@ -526,36 +578,65 @@ export component MainWindow inherits Window {
             VerticalLayout {
                 spacing: 0px;
 
-                HorizontalLayout {
+                // The title bar: the page's own top row, dragged by its empty
+                // space, with the window buttons at its outer end.
+                Rectangle {
                     height: 64px;
-                    padding-left: 22px;
-                    padding-right: 22px;
-                    padding-top: 13px;
-                    padding-bottom: 13px;
-                    spacing: 10px;
-                    Text {
-                        text: root.page-title;
-                        color: Theme.strong;
-                        font-size: 27px;
-                        font-weight: 700;
-                        letter-spacing: -0.5px;
-                        horizontal-stretch: 1;
-                        overflow: elide;
-                        vertical-alignment: center;
+                    WindowDragArea {
+                        drag => { root.window-drag(); }
+                        toggle-maximized => { root.maximized = !root.maximized; }
                     }
-                    search-field := UiField {
-                        text <=> root.search-text;
-                        placeholder: root.label-search;
-                        icon: "search";
-                        width: root.width < 900px ? 140px : 190px;
-                        edited => { root.filter-changed(root.status-filter); }
+                    HorizontalLayout {
+                        padding-left: root.rtl ? 12px : 22px;
+                        padding-right: root.rtl ? 22px : 12px;
+                        padding-top: 13px;
+                        padding-bottom: 13px;
+                        spacing: 10px;
+                        if root.rtl: WindowButtons {
+                            rtl: true;
+                            maximized: root.maximized;
+                            label-minimize: root.label-minimize;
+                            label-maximize: root.label-maximize;
+                            label-restore: root.label-restore;
+                            label-close: root.label-close;
+                            minimize => { root.window-minimize(); }
+                            toggle-maximized => { root.maximized = !root.maximized; }
+                            close => { root.window-close(); }
+                        }
+                        Text {
+                            text: root.page-title;
+                            color: Theme.strong;
+                            font-size: 27px;
+                            font-weight: 700;
+                            letter-spacing: -0.5px;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                            vertical-alignment: center;
+                        }
+                        search-field := UiField {
+                            text <=> root.search-text;
+                            placeholder: root.label-search;
+                            icon: "search";
+                            width: root.width < 900px ? 140px : root.width < 1100px ? 170px : 190px;
+                            edited => { root.filter-changed(root.status-filter); }
+                        }
+                        if root.count-completed > 0: IconButton { icon: "check"; label: root.label-clear-completed; clicked => { root.remove-completed(); } }
+                        if root.count-failed > 0: IconButton { icon: "warning"; label: root.label-clear-failed; danger: true; clicked => { root.remove-failed(); } }
+                        IconButton { icon: "file"; label: root.label-add-file; clicked => { root.pick-file(); } }
+                        IconButton { icon: "video"; label: root.nav-media; clicked => { root.overlay = Overlay.media; } }
+                        IconButton { icon: "link"; label: root.nav-links; clicked => { root.overlay = Overlay.links; } }
+                        IconButton { icon: "help"; label: root.label-shortcuts; clicked => { root.overlay = Overlay.shortcuts; } }
+                        if !root.rtl: WindowButtons {
+                            maximized: root.maximized;
+                            label-minimize: root.label-minimize;
+                            label-maximize: root.label-maximize;
+                            label-restore: root.label-restore;
+                            label-close: root.label-close;
+                            minimize => { root.window-minimize(); }
+                            toggle-maximized => { root.maximized = !root.maximized; }
+                            close => { root.window-close(); }
+                        }
                     }
-                    if root.count-completed > 0: IconButton { icon: "check"; label: root.label-clear-completed; clicked => { root.remove-completed(); } }
-                    if root.count-failed > 0: IconButton { icon: "warning"; label: root.label-clear-failed; danger: true; clicked => { root.remove-failed(); } }
-                    IconButton { icon: "file"; label: root.label-add-file; clicked => { root.pick-file(); } }
-                    IconButton { icon: "video"; label: root.nav-media; clicked => { root.overlay = Overlay.media; } }
-                    IconButton { icon: "link"; label: root.nav-links; clicked => { root.overlay = Overlay.links; } }
-                    IconButton { icon: "help"; label: root.label-shortcuts; clicked => { root.overlay = Overlay.shortcuts; } }
                 }
 
                 HorizontalLayout {
@@ -1320,6 +1401,14 @@ export component MainWindow inherits Window {
         schedule-download(id, delay) => { root.schedule-download(id, delay); }
         unschedule-download(id) => { root.unschedule-download(id); }
         remove-delete(id) => { root.remove-delete(id); }
+    }
+
+    // Without a system frame the window needs its own edge; none when maximised.
+    if !root.maximized && !root.full-screen: Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-width: 1px;
+        border-color: Theme.border-strong;
     }
 
     // Hidden; shown for the one snapshot a Wayland drag image is cut from.

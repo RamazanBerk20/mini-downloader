@@ -277,5 +277,8 @@
   "alreadyInList": "已在列表中",
   "filesCopied": "已复制 {n} 个文件",
   "showInFolder": "在文件夹中显示",
-  "scCopyFiles": "复制已完成的文件"
+  "scCopyFiles": "复制已完成的文件",
+  "windowMinimize": "最小化",
+  "windowMaximize": "最大化",
+  "windowRestore": "还原"
 }

@@ -277,5 +277,8 @@
   "alreadyInList": "Zaten listede",
   "filesCopied": "{n} dosya kopyalandı",
   "showInFolder": "Klasörde göster",
-  "scCopyFiles": "Biten dosyaları kopyala"
+  "scCopyFiles": "Biten dosyaları kopyala",
+  "windowMinimize": "Simge durumuna küçült",
+  "windowMaximize": "Ekranı kapla",
+  "windowRestore": "Önceki boyuta getir"
 }
