@@ -19,9 +19,9 @@
     <name>RamazanBerk20</name>
   </developer>
   <releases>
-    <release version="3.3.0" date="2026-11-13">
+    <release version="3.4.0" date="2026-11-14">
       <description>
-        <p>Safer, tidier downloads: files are staged and never overwritten, browser cookies stay on their origin across redirects, plus file-type icons, drag-out to other apps, and single-click select with double-click open. The database is upgraded and cannot be opened by 3.2.0 afterwards.</p>
+        <p>The window now draws its own title bar with minimise, maximise and close buttons, and shows the total download rate while something downloads. The minimum window width is 860 px.</p>
       </description>
     </release>
   </releases>

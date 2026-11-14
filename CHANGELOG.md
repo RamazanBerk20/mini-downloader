@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## [3.4.0] - 2026-11-14
+
+### Upgrade notes
+
+- The minimum window width went from 720 px to 860 px so the new title bar fits.
+- Not tested on real hardware: the frameless window was never compiled or run
+  on Windows (the Windows build only gets its system shadow through
+  `with_undecorated_shadow`); it was tested on Linux (KWin, X11 and Wayland).
 
 ### Changed
 
@@ -11,9 +18,6 @@
   as the system close button did (close to tray when enabled).
 - While something downloads, the total rate shows under the wordmark, with the
   global speed cap beside it when one is set. Nothing is shown when idle.
-- The minimum window width is now 860 px so the bar always fits.
-- Not tested on real hardware: on Windows the frameless window keeps the
-  system shadow (`with_undecorated_shadow`); it was not run there.
 
 ## [3.3.0] - 2026-11-13
 

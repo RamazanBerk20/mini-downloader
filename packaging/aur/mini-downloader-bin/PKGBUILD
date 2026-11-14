@@ -1,7 +1,7 @@
 # Maintainer: RamazanBerk20 <ramazanberksirin@protonmail.com>
 pkgname=mini-downloader-bin
-pkgver=3.3.0
-pkgrel=2
+pkgver=3.4.0
+pkgrel=1
 pkgdesc="Lightweight native download manager (aria2 + yt-dlp, browser capture) — binary release"
 arch=('x86_64')
 options=('!strip' '!debug')
